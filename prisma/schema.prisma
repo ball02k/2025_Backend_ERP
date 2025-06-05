@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = "postgresql://Baller:yourpassword@localhost:5432/construction_erp"
+}
+
+model Client {
+  id            Int      @id @default(autoincrement())
+  name          String
+  company_reg   String?
+  vat_number    String?
+  address_line1 String?
+  address_line2 String?
+  city          String?
+  postcode      String?
+  country       String?
+  turnover      Float?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  projects Project[] @relation("ClientToProjects") // ✅ matching name
+}
+
+model Project {
+  id           Int     @id @default(autoincrement())
+  project_code String?  @unique
+  project_name String
+  description  String?
+
+  client_id Int?
+  client    Client? @relation("ClientToProjects", fields: [client_id], references: [id]) // ✅ same name
+
+  start_date        DateTime?
+  end_date          DateTime?
+  status            String    @default("Planned")
+  location          String?
+  address_line1     String?
+  address_line2     String?
+  city              String?
+  postcode          String?
+  country           String?
+  budget            Float?
+  actual_spend             Float?     // Used for Budget vs Actual graph
+  estimated_completion     DateTime?  // Date-based filtering and timeline tracking
+  actual_completion        DateTime?  // Compare actual vs planned completion
+  priority_label           String?    // e.g. "High Priority", "Blocked", "Client Delay"
+  milestone_summary        String?    // Simple string summary (can make separate table later)
+  project_tags             String[]   // Optional labels (stored as array)
+  currency          String?   @default("GBP")
+  project_manager   String?
+  quantity_surveyor String?
+  contract_type     String?
+  procurement_route String?
+  sector            String?
+  work_stage        String?
+  risk_level        String?
+  carbon_target     Float?
+  carbon_measured   Float?
+  progress_pct      Int?
+  is_flagged        Boolean?  @default(false)
+  team_notes              String?     // Notes from PM/QS/site leads
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
