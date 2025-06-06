@@ -294,7 +294,7 @@ app.listen(3001, () => console.log("Server running on http://localhost:3001"));
 
 // ➕ Add new client
 app.post("/clients", async (req, res) => {
-  const { name, company_number, vat_number } = req.body;
+  const { name, registration_number, vat_number } = req.body;
 
   if (!name || name.trim() === "") {
     return res.status(400).json({ error: "Client name is required" });
@@ -304,7 +304,7 @@ app.post("/clients", async (req, res) => {
     const client = await prisma.client.create({
       data: {
         name,
-        company_reg: company_number || null,
+        registration_number: registration_number || null,
         vat_number: vat_number || null,
       },
     });
