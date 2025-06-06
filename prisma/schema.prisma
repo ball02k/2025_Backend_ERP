@@ -65,4 +65,17 @@ model Project {
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+  tasks      Task[]
+}
+
+model Task {
+  id          Int      @id @default(autoincrement())
+  project     Project  @relation(fields: [project_id], references: [id])
+  project_id  Int
+  name        String
+  description String?
+  status      String?   @default("Pending")
+  due_date    DateTime?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
 }
