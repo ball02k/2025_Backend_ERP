@@ -4,24 +4,21 @@ This Express server uses Prisma with a PostgreSQL database for a simple project 
 
 ## Endpoints
 
-### Projects
+### Core Examples
 - `GET /projects` – list all projects
 - `POST /projects` – create a new project
-- `POST /upload-csv` – bulk upload projects from a CSV file
-
-### Clients
 - `GET /clients` – list all clients
-- `GET /clients/:id` – fetch a client by id
-- `POST /clients` – create a new client
+- `GET /tasks` – list all tasks
 
-### Tasks
-- `GET /tasks` – list all tasks (includes the related project)
-- `GET /tasks/:id` – get a single task
-- `POST /tasks` – create a task (requires \`project_id\`)
-- `PUT /tasks/:id` – update a task
-- `DELETE /tasks/:id` – delete a task
+For every model (companies, users, milestones, contacts, subtasks, comments, suppliers, procurements, compliance-records, cost-entries, cvr-reports, reports, files, project-team-members, audit-logs, ai-alerts) similar CRUD routes exist:
 
-The `/upload-csv` endpoint accepts an optional `tasks` column where task names are separated by semicolons. Any tasks provided are created and linked to the newly created project.
+- `GET /<collection>`
+- `GET /<collection>/:id`
+- `POST /<collection>`
+- `PUT /<collection>/:id`
+- `DELETE /<collection>/:id`
+
+CSV uploads are supported via `POST /upload-csv/:model` where `model` is one of the Prisma model keys (e.g. `project`, `supplier`). The original `/upload-csv` endpoint for projects remains available and accepts an optional `tasks` column where task names are separated by semicolons.
 
 ## Development
 

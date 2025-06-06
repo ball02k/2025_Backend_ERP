@@ -16,6 +16,82 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Mapping of Prisma model keys to API route names
+const routeMap = {
+  company: 'companies',
+  user: 'users',
+  milestone: 'milestones',
+  contact: 'contacts',
+  subtask: 'subtasks',
+  comment: 'comments',
+  supplier: 'suppliers',
+  procurement: 'procurements',
+  complianceRecord: 'compliance-records',
+  costEntry: 'cost-entries',
+  cvrReport: 'cvr-reports',
+  report: 'reports',
+  file: 'files',
+  projectTeamMember: 'project-team-members',
+  auditLog: 'audit-logs',
+  aIAlert: 'ai-alerts'
+};
+
+// Generic CRUD route registration
+for (const [modelKey, path] of Object.entries(routeMap)) {
+  const model = prisma[modelKey];
+  if (!model) continue;
+
+  app.get(`/${path}`, async (req, res) => {
+    try {
+      const items = await model.findMany();
+      res.json(items);
+    } catch (err) {
+      res.status(500).json({ error: `Failed to fetch ${path}` });
+    }
+  });
+
+  app.get(`/${path}/:id`, async (req, res) => {
+    try {
+      const item = await model.findUnique({ where: { id: parseInt(req.params.id, 10) } });
+      if (!item) return res.status(404).json({ error: `${modelKey} not found` });
+      res.json(item);
+    } catch (err) {
+      res.status(500).json({ error: `Failed to fetch ${modelKey}` });
+    }
+  });
+
+  app.post(`/${path}`, async (req, res) => {
+    try {
+      const created = await model.create({ data: req.body });
+      res.json(created);
+    } catch (err) {
+      res.status(500).json({ error: `Failed to create ${modelKey}` });
+    }
+  });
+
+  app.put(`/${path}/:id`, async (req, res) => {
+    try {
+      const updated = await model.update({
+        where: { id: parseInt(req.params.id, 10) },
+        data: req.body
+      });
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ error: `Failed to update ${modelKey}` });
+    }
+  });
+
+  app.delete(`/${path}/:id`, async (req, res) => {
+    try {
+      await model.delete({ where: { id: parseInt(req.params.id, 10) } });
+      res.json({ message: `${modelKey} deleted` });
+    } catch (err) {
+      res.status(500).json({ error: `Failed to delete ${modelKey}` });
+    }
+  });
+}
+
+
 // 🔍 Get all projects
 app.get("/projects", async (req, res) => {
   try {
@@ -167,6 +243,32 @@ res.json({
     });
 });
 
+// Generic CSV upload for any model
+app.post('/upload-csv/:model', upload.single('file'), async (req, res) => {
+  const { model } = req.params;
+  const prismaModel = prisma[model];
+  if (!prismaModel) {
+    return res.status(400).json({ error: 'Invalid model' });
+  }
+
+  const rows = [];
+  fs.createReadStream(req.file.path)
+    .pipe(csv())
+    .on('data', (row) => rows.push(row))
+    .on('end', async () => {
+      let count = 0;
+      for (const row of rows) {
+        try {
+          await prismaModel.create({ data: row });
+          count++;
+        } catch (err) {
+          // skip invalid rows
+        }
+      }
+      res.json({ message: 'CSV upload complete', count });
+    });
+});
+
 // 🔍 Get all tasks
 app.get("/tasks", async (req, res) => {
   try {
@@ -294,7 +396,7 @@ app.listen(3001, () => console.log("Server running on http://localhost:3001"));
 
 // ➕ Add new client
 app.post("/clients", async (req, res) => {
-  const { name, company_number, vat_number } = req.body;
+  const { name, registration_number, vat_number } = req.body;
 
   if (!name || name.trim() === "") {
     return res.status(400).json({ error: "Client name is required" });
@@ -304,7 +406,7 @@ app.post("/clients", async (req, res) => {
     const client = await prisma.client.create({
       data: {
         name,
-        company_reg: company_number || null,
+        registration_number: registration_number || null,
         vat_number: vat_number || null,
       },
     });
