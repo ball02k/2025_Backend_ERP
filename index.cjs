@@ -136,6 +136,19 @@ for (const row of results) {
       },
     });
 
+    // If the CSV includes a tasks column, create tasks linked to this project
+    if (row.tasks) {
+      const taskNames = row.tasks.split(';').map(t => t.trim()).filter(Boolean);
+      for (const taskName of taskNames) {
+        await prisma.task.create({
+          data: {
+            project: { connect: { id: created.id } },
+            name: taskName,
+          },
+        });
+      }
+    }
+
     createdProjects.push(created);
   } catch (err) {
     skippedRows.push({
@@ -153,6 +166,98 @@ res.json({
 });
     });
 });
+
+// 🔍 Get all tasks
+app.get("/tasks", async (req, res) => {
+  try {
+    const tasks = await prisma.task.findMany({ include: { project: true } });
+    res.json(tasks);
+  } catch (err) {
+    console.error("Failed to fetch tasks:", err);
+    res.status(500).json({ error: "Failed to fetch tasks" });
+  }
+});
+
+// 🔍 Get a single task by ID
+app.get("/tasks/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const task = await prisma.task.findUnique({
+      where: { id: parseInt(id, 10) },
+      include: { project: true },
+    });
+
+    if (!task) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+
+    res.json(task);
+  } catch (err) {
+    console.error("Failed to fetch task by ID:", err);
+    res.status(500).json({ error: "Failed to fetch task" });
+  }
+});
+
+// ➕ Create a new task
+app.post("/tasks", async (req, res) => {
+  const { project_id, name, description, status, due_date } = req.body;
+
+  if (!project_id) {
+    return res.status(400).json({ error: "project_id is required" });
+  }
+
+  try {
+    const task = await prisma.task.create({
+      data: {
+        project: { connect: { id: parseInt(project_id, 10) } },
+        name,
+        description: description || null,
+        status: status || undefined,
+        due_date: due_date ? new Date(due_date) : null,
+      },
+    });
+    res.json(task);
+  } catch (err) {
+    console.error("Failed to create task:", err);
+    res.status(500).json({ error: "Failed to create task" });
+  }
+});
+
+// ✏️ Update a task
+app.put("/tasks/:id", async (req, res) => {
+  const { id } = req.params;
+  const { project_id, name, description, status, due_date } = req.body;
+
+  try {
+    const task = await prisma.task.update({
+      where: { id: parseInt(id, 10) },
+      data: {
+        project: project_id ? { connect: { id: parseInt(project_id, 10) } } : undefined,
+        name,
+        description: description || null,
+        status: status || undefined,
+        due_date: due_date ? new Date(due_date) : null,
+      },
+    });
+    res.json(task);
+  } catch (err) {
+    console.error("Failed to update task:", err);
+    res.status(500).json({ error: "Failed to update task" });
+  }
+});
+
+// ❌ Delete a task
+app.delete("/tasks/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    await prisma.task.delete({ where: { id: parseInt(id, 10) } });
+    res.json({ message: "Task deleted" });
+  } catch (err) {
+    console.error("Failed to delete task:", err);
+    res.status(500).json({ error: "Failed to delete task" });
+  }
+});
+
 // 🚀 Start the server
 // 🔍 Get all clients
 // 🔍 Get all clients
