@@ -51,8 +51,12 @@ for (const [modelKey, path] of Object.entries(routeMap)) {
   });
 
   app.get(`/${path}/:id`, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
     try {
-      const item = await model.findUnique({ where: { id: parseInt(req.params.id, 10) } });
+      const item = await model.findUnique({ where: { id } });
       if (!item) return res.status(404).json({ error: `${modelKey} not found` });
       res.json(item);
     } catch (err) {
@@ -70,9 +74,13 @@ for (const [modelKey, path] of Object.entries(routeMap)) {
   });
 
   app.put(`/${path}/:id`, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
     try {
       const updated = await model.update({
-        where: { id: parseInt(req.params.id, 10) },
+        where: { id },
         data: req.body
       });
       res.json(updated);
@@ -82,8 +90,12 @@ for (const [modelKey, path] of Object.entries(routeMap)) {
   });
 
   app.delete(`/${path}/:id`, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
     try {
-      await model.delete({ where: { id: parseInt(req.params.id, 10) } });
+      await model.delete({ where: { id } });
       res.json({ message: `${modelKey} deleted` });
     } catch (err) {
       res.status(500).json({ error: `Failed to delete ${modelKey}` });
@@ -140,6 +152,9 @@ app.post("/projects", async (req, res) => {
 
 
 app.post('/upload-csv', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'File is required' });
+  }
   const results = [];
   fs.createReadStream(req.file.path)
     .pipe(csv())
@@ -240,11 +255,15 @@ res.json({
   count: createdProjects.length,
   skipped: skippedRows
 });
+fs.unlink(req.file.path, () => {});
     });
 });
 
 // Generic CSV upload for any model
 app.post('/upload-csv/:model', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'File is required' });
+  }
   const { model } = req.params;
   const prismaModel = prisma[model];
   if (!prismaModel) {
@@ -266,6 +285,7 @@ app.post('/upload-csv/:model', upload.single('file'), async (req, res) => {
         }
       }
       res.json({ message: 'CSV upload complete', count });
+      fs.unlink(req.file.path, () => {});
     });
 });
 
@@ -282,10 +302,13 @@ app.get("/tasks", async (req, res) => {
 
 // 🔍 Get a single task by ID
 app.get("/tasks/:id", async (req, res) => {
-  const { id } = req.params;
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
   try {
     const task = await prisma.task.findUnique({
-      where: { id: parseInt(id, 10) },
+      where: { id },
       include: { project: true },
     });
 
@@ -327,12 +350,15 @@ app.post("/tasks", async (req, res) => {
 
 // ✏️ Update a task
 app.put("/tasks/:id", async (req, res) => {
-  const { id } = req.params;
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
   const { project_id, name, description, status, due_date } = req.body;
 
   try {
     const task = await prisma.task.update({
-      where: { id: parseInt(id, 10) },
+      where: { id },
       data: {
         project: project_id ? { connect: { id: parseInt(project_id, 10) } } : undefined,
         name,
@@ -350,9 +376,12 @@ app.put("/tasks/:id", async (req, res) => {
 
 // ❌ Delete a task
 app.delete("/tasks/:id", async (req, res) => {
-  const { id } = req.params;
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
   try {
-    await prisma.task.delete({ where: { id: parseInt(id, 10) } });
+    await prisma.task.delete({ where: { id } });
     res.json({ message: "Task deleted" });
   } catch (err) {
     console.error("Failed to delete task:", err);
@@ -374,11 +403,14 @@ app.get("/clients", async (req, res) => {
 });
 // 🔍 Get a single client by ID
 app.get("/clients/:id", async (req, res) => {
-  const { id } = req.params;
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
 
   try {
     const client = await prisma.client.findUnique({
-      where: { id: parseInt(id, 10) },
+      where: { id },
     });
 
     if (!client) {
