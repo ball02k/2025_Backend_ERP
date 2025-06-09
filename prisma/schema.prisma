@@ -8,7 +8,7 @@ datasource db {
 }
 
 model Client {
-  id            Int      @id @default(autoincrement())
+  id                  Int      @id @default(autoincrement())
   name                String
   registration_number String?  @map("company_reg")
   vat_number          String?
@@ -22,93 +22,93 @@ model Client {
   website             String?
   industry            String?
   logo_url            String?
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
 
   projects Project[] @relation("ClientToProjects") // ✅ matching name
 }
 
 model Project {
   id           Int     @id @default(autoincrement())
-  project_code String?  @unique
+  project_code String? @unique
   project_name String
   description  String?
 
   client_id Int?
   client    Client? @relation("ClientToProjects", fields: [client_id], references: [id]) // ✅ same name
 
-  start_date              DateTime?
-  end_date                DateTime?
-  estimated_completion_date DateTime?  @map("estimated_completion")
-  actual_completion_date    DateTime?  @map("actual_completion")
+  start_date                DateTime?
+  end_date                  DateTime?
+  estimated_completion_date DateTime? @map("estimated_completion")
+  actual_completion_date    DateTime? @map("actual_completion")
   status                    String    @default("Planned")
   type                      String?
-  location          String?
-  address_line1     String?
-  address_line2     String?
-  city              String?
-  postcode          String?
-  country           String?
-  address           Json?
-  budget            Float?
-  actual_spend             Float?     // Used for Budget vs Actual graph
-  priority_label           String?    // e.g. "High Priority", "Blocked", "Client Delay"
-  milestone_summary        String?    // Simple string summary (can make separate table later)
-  project_tags             String[]   // Optional labels (stored as array)
-  currency          String?   @default("GBP")
-  project_manager   String?
-  project_manager_id Int?
-  quantity_surveyor String?
-  contract_type     String?
-  procurement_route String?
-  sector            String?
-  work_stage        String?
-  risk_level        String?
-  carbon_target     Float?
-  carbon_measured   Float?
-  progress_pct      Int?
-  is_flagged        Boolean?  @default(false)
-  team_notes              String?     // Notes from PM/QS/site leads
+  location                  String?
+  address_line1             String?
+  address_line2             String?
+  city                      String?
+  postcode                  String?
+  country                   String?
+  address                   Json?
+  budget                    Float?
+  actual_spend              Float? // Used for Budget vs Actual graph
+  priority_label            String? // e.g. "High Priority", "Blocked", "Client Delay"
+  milestone_summary         String? // Simple string summary (can make separate table later)
+  project_tags              String[] // Optional labels (stored as array)
+  currency                  String?   @default("GBP")
+  project_manager           String?
+  project_manager_id        Int?
+  quantity_surveyor         String?
+  contract_type             String?
+  procurement_route         String?
+  sector                    String?
+  work_stage                String?
+  risk_level                String?
+  carbon_target             Float?
+  carbon_measured           Float?
+  progress_pct              Int?
+  is_flagged                Boolean?  @default(false)
+  team_notes                String? // Notes from PM/QS/site leads
 
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-  tasks      Task[]
-  milestones Milestone[]
+  created_at   DateTime            @default(now())
+  updated_at   DateTime            @updatedAt
+  tasks        Task[]
+  milestones   Milestone[]
   procurements Procurement[]
-  costEntries CostEntry[]
-  cvrReports CVRReport[]
-  reports Report[]
-  files     File[]
+  costEntries  CostEntry[]
+  cvrReports   CVRReport[]
+  reports      Report[]
+  files        File[]
   team_members ProjectTeamMember[]
-  aiAlerts  AIAlert[]
+  aiAlerts     AIAlert[]
 }
 
 model Task {
-  id          Int      @id @default(autoincrement())
-  project     Project  @relation(fields: [project_id], references: [id])
-  project_id  Int
-  name        String
-  description String?
-  status      String?   @default("Pending")
-  priority    String?
-  assignee_id Int?
+  id            Int       @id @default(autoincrement())
+  project       Project   @relation(fields: [project_id], references: [id])
+  project_id    Int
+  name          String
+  description   String?
+  status        String?   @default("Pending")
+  priority      String?
+  assignee_id   Int?
   created_by_id Int?
-  assignee    User?     @relation("TaskAssignee", fields: [assignee_id], references: [id])
-  creator     User?     @relation("TaskCreator", fields: [created_by_id], references: [id])
-  due_date    DateTime?
-  created_at  DateTime  @default(now())
-  updated_at  DateTime  @updatedAt
-  subtasks    Subtask[]
-  comments    Comment[]
-  files       File[]
+  assignee      User?     @relation("TaskAssignee", fields: [assignee_id], references: [id])
+  creator       User?     @relation("TaskCreator", fields: [created_by_id], references: [id])
+  due_date      DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  subtasks      Subtask[]
+  comments      Comment[]
+  files         File[]
 }
 
 model Subtask {
-  id       Int   @id @default(autoincrement())
-  title    String
+  id        Int     @id @default(autoincrement())
+  title     String
   completed Boolean @default(false)
-  task_id  Int
-  task     Task   @relation(fields: [task_id], references: [id])
+  task_id   Int
+  task      Task    @relation(fields: [task_id], references: [id])
 }
 
 model Comment {
@@ -122,38 +122,38 @@ model Comment {
 }
 
 model Milestone {
-  id           Int      @id @default(autoincrement())
+  id           Int       @id @default(autoincrement())
   title        String
   due_date     DateTime?
   completed_at DateTime?
   status       String
   project_id   Int
-  project      Project @relation(fields: [project_id], references: [id])
+  project      Project   @relation(fields: [project_id], references: [id])
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  name         String
-  email        String   @unique
-  phone_number String?
-  role         String
-  permissions  Json?
-  company_id   Int?
-  is_active    Boolean  @default(true)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-  company      Company? @relation(fields: [company_id], references: [id])
-  assignedTasks       Task[] @relation("TaskAssignee")
-  createdTasks        Task[] @relation("TaskCreator")
-  comments            Comment[]
-  approvedProcurements Procurement[] @relation("ProcurementApprover")
-  verifiedRecords     ComplianceRecord[] @relation("ComplianceVerifier")
-  approvedCosts       CostEntry[] @relation("CostApprover")
-  authoredCVRs        CVRReport[] @relation("CVRAuthor")
-  authoredReports     Report[] @relation("ReportAuthor")
-  uploadedFiles       File[] @relation("FileUploader")
-  projectMemberships  ProjectTeamMember[]
-  auditLogs           AuditLog[]
+  id                   Int                 @id @default(autoincrement())
+  name                 String
+  email                String              @unique
+  phone_number         String?
+  role                 String
+  permissions          Json?
+  company_id           Int?
+  is_active            Boolean             @default(true)
+  created_at           DateTime            @default(now())
+  updated_at           DateTime            @updatedAt
+  company              Company?            @relation(fields: [company_id], references: [id])
+  assignedTasks        Task[]              @relation("TaskAssignee")
+  createdTasks         Task[]              @relation("TaskCreator")
+  comments             Comment[]
+  approvedProcurements Procurement[]       @relation("ProcurementApprover")
+  verifiedRecords      ComplianceRecord[]  @relation("ComplianceVerifier")
+  approvedCosts        CostEntry[]         @relation("CostApprover")
+  authoredCVRs         CVRReport[]         @relation("CVRAuthor")
+  authoredReports      Report[]            @relation("ReportAuthor")
+  uploadedFiles        File[]              @relation("FileUploader")
+  projectMemberships   ProjectTeamMember[]
+  auditLogs            AuditLog[]
 }
 
 model Company {
@@ -175,7 +175,7 @@ model Company {
 }
 
 model Supplier {
-  id                  Int      @id @default(autoincrement())
+  id                  Int                @id @default(autoincrement())
   name                String
   email               String?
   phone               String?
@@ -184,14 +184,14 @@ model Supplier {
   vat_number          String?
   approval_status     String?
   risk_rating         String?
-  created_at          DateTime @default(now())
-  updated_at          DateTime @updatedAt
+  created_at          DateTime           @default(now())
+  updated_at          DateTime           @updatedAt
   procurements        Procurement[]
   complianceRecords   ComplianceRecord[]
 }
 
 model Procurement {
-  id               Int      @id @default(autoincrement())
+  id               Int       @id @default(autoincrement())
   project_id       Int?
   supplier_id      Int?
   item_description String?
@@ -200,26 +200,26 @@ model Procurement {
   delivery_date    DateTime?
   status           String?
   approved_by      Int?
-  created_at       DateTime @default(now())
+  created_at       DateTime  @default(now())
   project          Project?  @relation(fields: [project_id], references: [id])
   supplier         Supplier? @relation(fields: [supplier_id], references: [id])
   approver         User?     @relation("ProcurementApprover", fields: [approved_by], references: [id])
 }
 
 model ComplianceRecord {
-  id           Int      @id @default(autoincrement())
+  id           Int       @id @default(autoincrement())
   supplier_id  Int
   type         String
   expiry_date  DateTime?
   document_url String?
   verified_by  Int?
-  created_at   DateTime @default(now())
-  supplier     Supplier @relation(fields: [supplier_id], references: [id])
-  verifier     User?    @relation("ComplianceVerifier", fields: [verified_by], references: [id])
+  created_at   DateTime  @default(now())
+  supplier     Supplier  @relation(fields: [supplier_id], references: [id])
+  verifier     User?     @relation("ComplianceVerifier", fields: [verified_by], references: [id])
 }
 
 model CostEntry {
-  id            Int      @id @default(autoincrement())
+  id            Int       @id @default(autoincrement())
   project_id    Int
   category      String
   amount        Float
@@ -227,13 +227,13 @@ model CostEntry {
   date_incurred DateTime?
   approved_by   Int?
   invoice_ref   String?
-  created_at    DateTime @default(now())
-  project       Project  @relation(fields: [project_id], references: [id])
-  approver      User?    @relation("CostApprover", fields: [approved_by], references: [id])
+  created_at    DateTime  @default(now())
+  project       Project   @relation(fields: [project_id], references: [id])
+  approver      User?     @relation("CostApprover", fields: [approved_by], references: [id])
 }
 
 model CVRReport {
-  id            Int      @id @default(autoincrement())
+  id            Int       @id @default(autoincrement())
   project_id    Int
   period_start  DateTime?
   period_end    DateTime?
@@ -243,9 +243,9 @@ model CVRReport {
   adjustments   Json?
   comments      String?
   created_by    Int?
-  created_at    DateTime @default(now())
-  project       Project  @relation(fields: [project_id], references: [id])
-  author        User?    @relation("CVRAuthor", fields: [created_by], references: [id])
+  created_at    DateTime  @default(now())
+  project       Project   @relation(fields: [project_id], references: [id])
+  author        User?     @relation("CVRAuthor", fields: [created_by], references: [id])
 }
 
 model Report {
