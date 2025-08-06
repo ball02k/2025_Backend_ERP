@@ -1,0 +1,25 @@
+model Project {
+  id             Int           @id @default(autoincrement())
+  name           String
+  code           String        @unique
+  client         Client        @relation(fields: [clientId], references: [id])
+  clientId       Int
+  address        String?
+  status         String
+  workStage      String?
+  contractType   String?
+  sector         String?
+  projectManager String?
+  description    String?
+
+  budget         Float?
+  spend          Float?
+  carbonTarget   CarbonTarget?
+  milestones     Milestone[]
+  tasks          Task[]
+  risks          RiskLog[]
+  costEntries    CostEntry[]
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
