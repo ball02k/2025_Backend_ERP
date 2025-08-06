@@ -4,8 +4,25 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // Connection string to the Postgres database.  Update this to match
+  // your environment; the defaults mirror the example repository.
   url      = "postgresql://Baller:yourpassword@localhost:5432/construction_erp"
 }
+
+/**
+ * Prisma schema for the Construction ERP system.
+ *
+ * In addition to the original entities (Project, Task, CVRReport, etc.)
+ * this schema introduces several new models to support inventory
+ * management, carbon tracking, risk registers, project timelines,
+ * health & safety records, tenders and subcontractors.  These
+ * additions are informed by industry recommendations: inventory
+ * records should capture SKU, description, quantity on hand and
+ * unit cost【821248978679993†L304-L312】【821248978679993†L352-L370】, while risk registers
+ * should track each risk’s description, likelihood, impact and
+ * mitigation strategy【358358117997991†L110-L115】【358358117997991†L190-L200】.  The new
+ * models follow these guidelines.
+ */
 
 model Client {
   id                  Int      @id @default(autoincrement())
@@ -24,8 +41,7 @@ model Client {
   logo_url            String?
   created_at          DateTime @default(now())
   updated_at          DateTime @updatedAt
-
-  projects Project[] @relation("ClientToProjects") // ✅ matching name
+  projects            Project[] @relation("ClientToProjects")
 }
 
 model Project {
@@ -35,7 +51,7 @@ model Project {
   description  String?
 
   client_id Int?
-  client    Client? @relation("ClientToProjects", fields: [client_id], references: [id]) // ✅ same name
+  client    Client? @relation("ClientToProjects", fields: [client_id], references: [id])
 
   start_date                DateTime?
   end_date                  DateTime?
@@ -51,10 +67,10 @@ model Project {
   country                   String?
   address                   Json?
   budget                    Float?
-  actual_spend              Float? // Used for Budget vs Actual graph
-  priority_label            String? // e.g. "High Priority", "Blocked", "Client Delay"
-  milestone_summary         String? // Simple string summary (can make separate table later)
-  project_tags              String[] // Optional labels (stored as array)
+  actual_spend              Float?
+  priority_label            String?
+  milestone_summary         String?
+  project_tags              String[]
   currency                  String?   @default("GBP")
   project_manager           String?
   project_manager_id        Int?
@@ -68,7 +84,7 @@ model Project {
   carbon_measured           Float?
   progress_pct              Int?
   is_flagged                Boolean?  @default(false)
-  team_notes                String? // Notes from PM/QS/site leads
+  team_notes                String?
 
   created_at   DateTime            @default(now())
   updated_at   DateTime            @updatedAt
@@ -81,6 +97,13 @@ model Project {
   files        File[]
   team_members ProjectTeamMember[]
   aiAlerts     AIAlert[]
+  // New relations for extended modules
+  inventory     Inventory[]
+  carbonRecords CarbonRecord[]
+  risks         Risk[]
+  timeline      TimelineEvent[]
+  hseRecords    HealthSafetyRecord[]
+  tenders       Tender[]
 }
 
 model Task {
@@ -304,4 +327,140 @@ model AIAlert {
   triggered_at       DateTime @default(now())
   resolved           Boolean  @default(false)
   related_project    Project? @relation(fields: [related_project_id], references: [id])
+}
+
+// -------------------------------------------------------------
+// New models for extended modules
+// -------------------------------------------------------------
+
+/// Inventory items held within a project.  Each record tracks the
+/// SKU or item code, descriptive name, quantity on hand, unit (e.g.
+/// "pcs"), unit price and optional reorder point.  The location
+/// field may record where the items are stored.  This structure is
+/// guided by inventory list best practices【821248978679993†L304-L312】【821248978679993†L352-L370】.
+model Inventory {
+  id            Int       @id @default(autoincrement())
+  project_id    Int
+  sku           String?
+  name          String
+  description   String?
+  quantity      Int
+  unit          String?
+  unit_price    Float?
+  reorder_point Int?
+  location      String?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  project       Project   @relation(fields: [project_id], references: [id])
+}
+
+/// Carbon emissions or offsets associated with a project.  The
+/// `source` field indicates where the measurement comes from (e.g.
+/// "concrete", "diesel usage"), and `value` records the magnitude
+/// measured in the specified `unit` (e.g. kgCO₂).  `recorded_at`
+/// captures the date of the measurement.  Aggregating these
+/// records allows the project to track carbon against targets.
+model CarbonRecord {
+  id          Int       @id @default(autoincrement())
+  project_id  Int
+  source      String
+  value       Float
+  unit        String?
+  recorded_at DateTime?
+  created_at  DateTime  @default(now())
+  project     Project   @relation(fields: [project_id], references: [id])
+}
+
+/// A risk entry in the project's risk register.  Best practice
+/// dictates capturing the risk description, likelihood (probability),
+/// impact, the owner responsible for managing the risk and the
+/// mitigation or response strategy【358358117997991†L110-L115】【358358117997991†L190-L200】.  `status`
+/// reflects whether the risk is open or closed.
+model Risk {
+  id            Int       @id @default(autoincrement())
+  project_id    Int
+  description   String
+  probability   Float?
+  impact        Float?
+  owner         String?
+  mitigation    String?
+  status        String?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  project       Project   @relation(fields: [project_id], references: [id])
+}
+
+/// Events on the project timeline.  Each event has a title,
+/// optional description, start and end dates and a status (e.g.
+/// "Not started", "In progress", "Completed").  These records
+/// support Gantt‑style views and progress monitoring.
+model TimelineEvent {
+  id          Int       @id @default(autoincrement())
+  project_id  Int
+  title       String
+  description String?
+  start_date  DateTime?
+  end_date    DateTime?
+  status      String?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  project     Project   @relation(fields: [project_id], references: [id])
+}
+
+/// Health & safety records, such as incidents or inspections.
+/// Captures the type of record (e.g. "incident", "inspection"), a
+/// description, severity level, when it occurred and any
+/// actions taken.  `status` may be used to track whether the
+/// incident has been resolved or is still under investigation.
+model HealthSafetyRecord {
+  id            Int       @id @default(autoincrement())
+  project_id    Int
+  type          String
+  description   String?
+  severity      String?
+  occurred_at   DateTime?
+  actions_taken String?
+  status        String?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  project       Project   @relation(fields: [project_id], references: [id])
+}
+
+/// A tender represents a package of work that is offered to
+/// subcontractors.  The project may issue multiple tenders.  Fields
+/// include the package name, description, status (e.g. "Open",
+/// "Closed", "Awarded"), open and close dates, the date of award
+/// and the estimated or awarded amount.  Each tender can have
+/// multiple subcontractors (bids).
+model Tender {
+  id          Int       @id @default(autoincrement())
+  project_id  Int
+  package     String
+  description String?
+  status      String?
+  open_date   DateTime?
+  close_date  DateTime?
+  award_date  DateTime?
+  amount      Float?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  project     Project   @relation(fields: [project_id], references: [id])
+  bidders     Subcontractor[]
+}
+
+/// A subcontractor bid on a tender.  Contains the subcontractor’s
+/// details and the amount of their bid.  The `awarded` flag
+/// indicates whether this subcontractor won the tender.
+model Subcontractor {
+  id           Int       @id @default(autoincrement())
+  tender_id    Int
+  name         String
+  status       String?
+  email        String?
+  phone        String?
+  bid_amount   Float?
+  awarded      Boolean?  @default(false)
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  tender       Tender    @relation(fields: [tender_id], references: [id])
 }
