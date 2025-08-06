@@ -1,0 +1,38 @@
+model Task {
+  id            Int      @id @default(autoincrement())
+  project       Project  @relation(fields: [project_id], references: [id])
+  project_id    Int
+  name          String
+  description   String?
+  status        String   @default("Pending")
+  priority      String?
+  assignee_id   Int?
+  created_by_id Int?
+  assignee      User?    @relation("TaskAssignee", fields: [assignee_id], references: [id])
+  creator       User?    @relation("TaskCreator", fields: [created_by_id], references: [id])
+  due_date      DateTime?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  subtasks      Subtask[]
+  comments      Comment[]
+  files         Json?
+}
+
+model Subtask {
+  id      Int     @id @default(autoincrement())
+  task    Task    @relation(fields: [task_id], references: [id])
+  task_id Int
+  name    String
+  is_done Boolean @default(false)
+}
+
+model Comment {
+  id            Int      @id @default(autoincrement())
+  content       String
+  task          Task?    @relation(fields: [task_id], references: [id])
+  task_id       Int?
+  created_by    User?    @relation(fields: [created_by_id], references: [id])
+  created_by_id Int?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+}
