@@ -1,0 +1,466 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Connection string to the Postgres database.  Update this to match
+  // your environment; the defaults mirror the example repository.
+  url      = "postgresql://Baller:yourpassword@localhost:5432/construction_erp"
+}
+
+/**
+ * Prisma schema for the Construction ERP system.
+ *
+ * In addition to the original entities (Project, Task, CVRReport, etc.)
+ * this schema introduces several new models to support inventory
+ * management, carbon tracking, risk registers, project timelines,
+ * health & safety records, tenders and subcontractors.  These
+ * additions are informed by industry recommendations: inventory
+ * records should capture SKU, description, quantity on hand and
+ * unit cost【821248978679993†L304-L312】【821248978679993†L352-L370】, while risk registers
+ * should track each risk’s description, likelihood, impact and
+ * mitigation strategy【358358117997991†L110-L115】【358358117997991†L190-L200】.  The new
+ * models follow these guidelines.
+ */
+
+model Client {
+  id                  Int      @id @default(autoincrement())
+  name                String
+  registration_number String?  @map("company_reg")
+  vat_number          String?
+  address_line1       String?
+  address_line2       String?
+  city                String?
+  postcode            String?
+  country             String?
+  address             Json?
+  turnover            Float?
+  website             String?
+  industry            String?
+  logo_url            String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+  projects            Project[] @relation("ClientToProjects")
+}
+
+model Project {
+  id           Int     @id @default(autoincrement())
+  project_code String? @unique
+  project_name String
+  description  String?
+
+  client_id Int?
+  client    Client? @relation("ClientToProjects", fields: [client_id], references: [id])
+
+  start_date                DateTime?
+  end_date                  DateTime?
+  estimated_completion_date DateTime? @map("estimated_completion")
+  actual_completion_date    DateTime? @map("actual_completion")
+  status                    String    @default("Planned")
+  type                      String?
+  location                  String?
+  address_line1             String?
+  address_line2             String?
+  city                      String?
+  postcode                  String?
+  country                   String?
+  address                   Json?
+  budget                    Float?
+  actual_spend              Float?
+  priority_label            String?
+  milestone_summary         String?
+  project_tags              String[]
+  currency                  String?   @default("GBP")
+  project_manager           String?
+  project_manager_id        Int?
+  quantity_surveyor         String?
+  contract_type             String?
+  procurement_route         String?
+  sector                    String?
+  work_stage                String?
+  risk_level                String?
+  carbon_target             Float?
+  carbon_measured           Float?
+  progress_pct              Int?
+  is_flagged                Boolean?  @default(false)
+  team_notes                String?
+
+  created_at   DateTime            @default(now())
+  updated_at   DateTime            @updatedAt
+  tasks        Task[]
+  milestones   Milestone[]
+  procurements Procurement[]
+  costEntries  CostEntry[]
+  cvrReports   CVRReport[]
+  reports      Report[]
+  files        File[]
+  team_members ProjectTeamMember[]
+  aiAlerts     AIAlert[]
+  // New relations for extended modules
+  inventory     Inventory[]
+  carbonRecords CarbonRecord[]
+  risks         Risk[]
+  timeline      TimelineEvent[]
+  hseRecords    HealthSafetyRecord[]
+  tenders       Tender[]
+}
+
+model Task {
+  id            Int       @id @default(autoincrement())
+  project       Project   @relation(fields: [project_id], references: [id])
+  project_id    Int
+  name          String
+  description   String?
+  status        String?   @default("Pending")
+  priority      String?
+  assignee_id   Int?
+  created_by_id Int?
+  assignee      User?     @relation("TaskAssignee", fields: [assignee_id], references: [id])
+  creator       User?     @relation("TaskCreator", fields: [created_by_id], references: [id])
+  due_date      DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  subtasks      Subtask[]
+  comments      Comment[]
+  files         File[]
+}
+
+model Subtask {
+  id        Int     @id @default(autoincrement())
+  title     String
+  completed Boolean @default(false)
+  task_id   Int
+  task      Task    @relation(fields: [task_id], references: [id])
+}
+
+model Comment {
+  id         Int      @id @default(autoincrement())
+  text       String
+  task_id    Int?
+  task       Task?    @relation(fields: [task_id], references: [id])
+  user_id    Int?
+  user       User?    @relation(fields: [user_id], references: [id])
+  created_at DateTime @default(now())
+}
+
+model Milestone {
+  id           Int       @id @default(autoincrement())
+  title        String
+  due_date     DateTime?
+  completed_at DateTime?
+  status       String
+  project_id   Int
+  project      Project   @relation(fields: [project_id], references: [id])
+}
+
+model User {
+  id                   Int                 @id @default(autoincrement())
+  name                 String
+  email                String              @unique
+  phone_number         String?
+  role                 String
+  permissions          Json?
+  company_id           Int?
+  is_active            Boolean             @default(true)
+  created_at           DateTime            @default(now())
+  updated_at           DateTime            @updatedAt
+  company              Company?            @relation(fields: [company_id], references: [id])
+  assignedTasks        Task[]              @relation("TaskAssignee")
+  createdTasks         Task[]              @relation("TaskCreator")
+  comments             Comment[]
+  approvedProcurements Procurement[]       @relation("ProcurementApprover")
+  verifiedRecords      ComplianceRecord[]  @relation("ComplianceVerifier")
+  approvedCosts        CostEntry[]         @relation("CostApprover")
+  authoredCVRs         CVRReport[]         @relation("CVRAuthor")
+  authoredReports      Report[]            @relation("ReportAuthor")
+  uploadedFiles        File[]              @relation("FileUploader")
+  projectMemberships   ProjectTeamMember[]
+  auditLogs            AuditLog[]
+}
+
+model Company {
+  id                  Int      @id @default(autoincrement())
+  name                String
+  registration_number String?
+  vat_number          String?
+  industry            String?
+  address_line1       String?
+  address_line2       String?
+  city                String?
+  postcode            String?
+  country             String?
+  website             String?
+  logo_url            String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+  users               User[]
+}
+
+model Supplier {
+  id                  Int                @id @default(autoincrement())
+  name                String
+  email               String?
+  phone               String?
+  category            String?
+  registration_number String?
+  vat_number          String?
+  approval_status     String?
+  risk_rating         String?
+  created_at          DateTime           @default(now())
+  updated_at          DateTime           @updatedAt
+  procurements        Procurement[]
+  complianceRecords   ComplianceRecord[]
+}
+
+model Procurement {
+  id               Int       @id @default(autoincrement())
+  project_id       Int?
+  supplier_id      Int?
+  item_description String?
+  quantity         Int?
+  unit_price       Float?
+  delivery_date    DateTime?
+  status           String?
+  approved_by      Int?
+  created_at       DateTime  @default(now())
+  project          Project?  @relation(fields: [project_id], references: [id])
+  supplier         Supplier? @relation(fields: [supplier_id], references: [id])
+  approver         User?     @relation("ProcurementApprover", fields: [approved_by], references: [id])
+}
+
+model ComplianceRecord {
+  id           Int       @id @default(autoincrement())
+  supplier_id  Int
+  type         String
+  expiry_date  DateTime?
+  document_url String?
+  verified_by  Int?
+  created_at   DateTime  @default(now())
+  supplier     Supplier  @relation(fields: [supplier_id], references: [id])
+  verifier     User?     @relation("ComplianceVerifier", fields: [verified_by], references: [id])
+}
+
+model CostEntry {
+  id            Int       @id @default(autoincrement())
+  project_id    Int
+  category      String
+  amount        Float
+  description   String?
+  date_incurred DateTime?
+  approved_by   Int?
+  invoice_ref   String?
+  created_at    DateTime  @default(now())
+  project       Project   @relation(fields: [project_id], references: [id])
+  approver      User?     @relation("CostApprover", fields: [approved_by], references: [id])
+}
+
+model CVRReport {
+  id            Int       @id @default(autoincrement())
+  project_id    Int
+  period_start  DateTime?
+  period_end    DateTime?
+  actual_cost   Float?
+  forecast_cost Float?
+  earned_value  Float?
+  adjustments   Json?
+  comments      String?
+  created_by    Int?
+  created_at    DateTime  @default(now())
+  project       Project   @relation(fields: [project_id], references: [id])
+  author        User?     @relation("CVRAuthor", fields: [created_by], references: [id])
+}
+
+model Report {
+  id         Int      @id @default(autoincrement())
+  project_id Int?
+  type       String
+  title      String
+  content    String?
+  author_id  Int?
+  created_at DateTime @default(now())
+  project    Project? @relation(fields: [project_id], references: [id])
+  author     User?    @relation("ReportAuthor", fields: [author_id], references: [id])
+}
+
+model File {
+  id          Int      @id @default(autoincrement())
+  filename    String
+  url         String
+  file_type   String?
+  uploaded_by Int?
+  project_id  Int?
+  task_id     Int?
+  created_at  DateTime @default(now())
+  uploader    User?    @relation("FileUploader", fields: [uploaded_by], references: [id])
+  project     Project? @relation(fields: [project_id], references: [id])
+  task        Task?    @relation(fields: [task_id], references: [id])
+}
+
+model ProjectTeamMember {
+  id         Int      @id @default(autoincrement())
+  project_id Int
+  user_id    Int
+  role       String?
+  joined_at  DateTime @default(now())
+  project    Project  @relation(fields: [project_id], references: [id])
+  user       User     @relation(fields: [user_id], references: [id])
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  action     String
+  table_name String
+  record_id  Int
+  user_id    Int?
+  changes    Json?
+  timestamp  DateTime @default(now())
+  user       User?    @relation(fields: [user_id], references: [id])
+}
+
+model AIAlert {
+  id                 Int      @id @default(autoincrement())
+  type               String
+  description        String?
+  related_project_id Int?
+  severity           String
+  triggered_at       DateTime @default(now())
+  resolved           Boolean  @default(false)
+  related_project    Project? @relation(fields: [related_project_id], references: [id])
+}
+
+// -------------------------------------------------------------
+// New models for extended modules
+// -------------------------------------------------------------
+
+/// Inventory items held within a project.  Each record tracks the
+/// SKU or item code, descriptive name, quantity on hand, unit (e.g.
+/// "pcs"), unit price and optional reorder point.  The location
+/// field may record where the items are stored.  This structure is
+/// guided by inventory list best practices【821248978679993†L304-L312】【821248978679993†L352-L370】.
+model Inventory {
+  id            Int       @id @default(autoincrement())
+  project_id    Int
+  sku           String?
+  name          String
+  description   String?
+  quantity      Int
+  unit          String?
+  unit_price    Float?
+  reorder_point Int?
+  location      String?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  project       Project   @relation(fields: [project_id], references: [id])
+}
+
+/// Carbon emissions or offsets associated with a project.  The
+/// `source` field indicates where the measurement comes from (e.g.
+/// "concrete", "diesel usage"), and `value` records the magnitude
+/// measured in the specified `unit` (e.g. kgCO₂).  `recorded_at`
+/// captures the date of the measurement.  Aggregating these
+/// records allows the project to track carbon against targets.
+model CarbonRecord {
+  id          Int       @id @default(autoincrement())
+  project_id  Int
+  source      String
+  value       Float
+  unit        String?
+  recorded_at DateTime?
+  created_at  DateTime  @default(now())
+  project     Project   @relation(fields: [project_id], references: [id])
+}
+
+/// A risk entry in the project's risk register.  Best practice
+/// dictates capturing the risk description, likelihood (probability),
+/// impact, the owner responsible for managing the risk and the
+/// mitigation or response strategy【358358117997991†L110-L115】【358358117997991†L190-L200】.  `status`
+/// reflects whether the risk is open or closed.
+model Risk {
+  id            Int       @id @default(autoincrement())
+  project_id    Int
+  description   String
+  probability   Float?
+  impact        Float?
+  owner         String?
+  mitigation    String?
+  status        String?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  project       Project   @relation(fields: [project_id], references: [id])
+}
+
+/// Events on the project timeline.  Each event has a title,
+/// optional description, start and end dates and a status (e.g.
+/// "Not started", "In progress", "Completed").  These records
+/// support Gantt‑style views and progress monitoring.
+model TimelineEvent {
+  id          Int       @id @default(autoincrement())
+  project_id  Int
+  title       String
+  description String?
+  start_date  DateTime?
+  end_date    DateTime?
+  status      String?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  project     Project   @relation(fields: [project_id], references: [id])
+}
+
+/// Health & safety records, such as incidents or inspections.
+/// Captures the type of record (e.g. "incident", "inspection"), a
+/// description, severity level, when it occurred and any
+/// actions taken.  `status` may be used to track whether the
+/// incident has been resolved or is still under investigation.
+model HealthSafetyRecord {
+  id            Int       @id @default(autoincrement())
+  project_id    Int
+  type          String
+  description   String?
+  severity      String?
+  occurred_at   DateTime?
+  actions_taken String?
+  status        String?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  project       Project   @relation(fields: [project_id], references: [id])
+}
+
+/// A tender represents a package of work that is offered to
+/// subcontractors.  The project may issue multiple tenders.  Fields
+/// include the package name, description, status (e.g. "Open",
+/// "Closed", "Awarded"), open and close dates, the date of award
+/// and the estimated or awarded amount.  Each tender can have
+/// multiple subcontractors (bids).
+model Tender {
+  id          Int       @id @default(autoincrement())
+  project_id  Int
+  package     String
+  description String?
+  status      String?
+  open_date   DateTime?
+  close_date  DateTime?
+  award_date  DateTime?
+  amount      Float?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  project     Project   @relation(fields: [project_id], references: [id])
+  bidders     Subcontractor[]
+}
+
+/// A subcontractor bid on a tender.  Contains the subcontractor’s
+/// details and the amount of their bid.  The `awarded` flag
+/// indicates whether this subcontractor won the tender.
+model Subcontractor {
+  id           Int       @id @default(autoincrement())
+  tender_id    Int
+  name         String
+  status       String?
+  email        String?
+  phone        String?
+  bid_amount   Float?
+  awarded      Boolean?  @default(false)
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  tender       Tender    @relation(fields: [tender_id], references: [id])
+}
