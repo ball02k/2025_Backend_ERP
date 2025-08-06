@@ -1,0 +1,19 @@
+model Client {
+  id Int @id @default(autoincrement())
+  name String
+  registration_number String? @map("company_reg")
+  vat_number String?
+  address_line1 String?
+  address_line2 String?
+  city String?
+  postcode String?
+  country String?
+  address Json?
+  turnover Float?
+  website String?
+  industry String?
+  logo_url String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  projects Project[] @relation("ClientToProjects")
+}
