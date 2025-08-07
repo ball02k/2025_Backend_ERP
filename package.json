@@ -1,15 +1,14 @@
 {
   "name": "construction-erp-backend",
   "version": "1.0.0",
+  "type": "module",
   "main": "index.js",
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
   "scripts": {
-"type": "module",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
     "@prisma/client": "^6.8.2",
     "cors": "^2.8.5",
