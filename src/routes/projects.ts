@@ -1,8 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/db";
 import { createProjectSchema } from "../lib/validation";
-
-
 import { ProjectStatus } from "@prisma/client";
 
 
@@ -78,5 +76,5 @@ r.post("/", async (req, res) => {
   res.status(201).json(project);
 });
 
-export const router = r;
+export const router = r; 
 export default r;
