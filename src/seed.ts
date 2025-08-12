@@ -1,6 +1,5 @@
 import "dotenv/config";
 import { prisma } from "./lib/db";
-import { ProjectStatus, ContractType } from "@prisma/client";
 
 async function run() {
   console.log("Seeding...");
@@ -19,8 +18,8 @@ async function run() {
       code: "A001",
       name: "A14 Junction Upgrade",
       client: { connect: { id: acme.id } },
-      status: ProjectStatus.ACTIVE,
-      contractType: ContractType.NEC4
+      status: "ACTIVE",
+      contractType: "NEC4"
     },
   });
 
