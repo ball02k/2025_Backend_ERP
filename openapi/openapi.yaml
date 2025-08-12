@@ -1,0 +1,235 @@
+openapi: 3.0.3
+info:
+  title: Construction ERP API (MVP)
+  version: "1.0.0"
+  description: |
+    Minimal API for Projects, Clients (with Contacts), Tasks, Variations, Documents, and AuditLog (read-only).
+servers:
+  - url: http://localhost:3001
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                example: { ok: true }
+
+  /api/clients:
+    get:
+      summary: List clients
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: pageSize
+          schema: { type: integer, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: Clients
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Client" }
+    post:
+      summary: Create client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateClient" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Client" }
+
+  /api/clients/{id}:
+    get:
+      summary: Get client by id (with contacts and projects summary)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Client
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClientDetail" }
+        "404":
+          description: Not found
+
+  /api/projects:
+    get:
+      summary: List projects
+      responses:
+        "200":
+          description: Projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Project" }
+    post:
+      summary: Create project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateProject" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+
+  /api/projects/{id}:
+    get:
+      summary: Get project by id (with client, tasks, variations)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectDetail" }
+        "404":
+          description: Not found
+
+  /api/tasks:
+    get:
+      summary: List tasks
+      parameters:
+        - in: query
+          name: projectId
+          schema: { type: string }
+        - in: query
+          name: overdue
+          schema: { type: string, enum: ["true", "false"] }
+      responses:
+        "200":
+          description: Tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Task" }
+    post:
+      summary: Create task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTask" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+
+components:
+  schemas:
+    Client:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+    CreateClient:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    ClientDetail:
+      allOf:
+        - $ref: "#/components/schemas/Client"
+        - type: object
+          properties:
+            contacts:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  email: { type: string }
+                  phone: { type: string }
+            projects:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string }
+                  code: { type: string }
+                  name: { type: string }
+                  status: { type: string }
+    Project:
+      type: object
+      properties:
+        id: { type: string }
+        code: { type: string }
+        name: { type: string }
+        status: { type: string }
+        client:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+    CreateProject:
+      type: object
+      required: [clientId, code, name]
+      properties:
+        clientId: { type: string }
+        code: { type: string }
+        name: { type: string }
+        status: { type: string }
+    ProjectDetail:
+      allOf:
+        - $ref: "#/components/schemas/Project"
+        - type: object
+          properties:
+            tasks:
+              type: array
+              items: { $ref: "#/components/schemas/Task" }
+            variations:
+              type: array
+              items:
+                type: object
+                properties: {}
+    Task:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        projectId: { type: string }
+        dueDate: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    CreateTask:
+      type: object
+      required: [title, projectId]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        projectId: { type: string }
+        dueDate: { type: string, format: date-time }
