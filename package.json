@@ -12,18 +12,18 @@
     "seed": "ts-node src/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "^6.13.0",
-    "cors": "^2.8.5",
-    "express": "^4.19.2",
-    "zod": "^3.23.8"
+    "@prisma/client": "latest",
+    "cors": "latest",
+    "express": "latest",
+    "zod": "latest"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.19",
-    "@types/express": "^4.17.21",
-    "@types/node": "^20.19.10",
-    "nodemon": "^3.1.0",
-    "prisma": "^6.13.0",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.4.3"
+    "@types/cors": "latest",
+    "@types/express": "latest",
+    "@types/node": "latest",
+    "nodemon": "latest",
+    "prisma": "latest",
+    "ts-node": "latest",
+    "typescript": "latest"
   }
 }

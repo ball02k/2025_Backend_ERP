@@ -58,7 +58,6 @@ model Client {
   updatedAt DateTime   @updatedAt
   projects  Project[]
   contacts  Contact[]
-  Document  Document[]
 }
 
 model Contact {
