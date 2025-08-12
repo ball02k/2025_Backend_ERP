@@ -5,6 +5,7 @@ import { ProjectStatus } from "@prisma/client";
 
 const r = Router();
 
+<<<<<<< HEAD
 r.get("/", async (_req, res) => {
   const projects = await prisma.project.findMany({
     include: { client: { select: { id: true, name: true } } },
@@ -27,10 +28,13 @@ r.get("/:id", async (req, res) => {
   res.json(project);
 });
 
+=======
+>>>>>>> a548941 (WIP: local changes to create routes)
 r.post("/", async (req, res) => {
   const parsed = createProjectSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.format());
 
+<<<<<<< HEAD
   const d = parsed.data;
   const project = await prisma.project.create({
     data: {
@@ -40,6 +44,18 @@ r.post("/", async (req, res) => {
       contractType: d.contractType,
       budgetGBP: d.budgetGBP,
       client: { connect: { id: d.clientId } },
+=======
+  const d = parsed.data; // fully typed by zod after success-guard
+
+  const project = await prisma.project.create({
+    data: {
+      code: d.code,                     // required
+      name: d.name,                     // required
+      status: d.status ?? ProjectStatus.DRAFT,
+      contractType: d.contractType,     // enum or undefined
+      budgetGBP: d.budgetGBP,           // number | undefined is fine
+      client: { connect: { id: d.clientId } }, // checked relation
+>>>>>>> a548941 (WIP: local changes to create routes)
     },
   });
 
