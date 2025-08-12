@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/db";
 import { createTaskSchema } from "../lib/validation";
+
 const r = Router();
 
 r.get("/", async (req, res) => {
@@ -15,10 +16,21 @@ r.get("/", async (req, res) => {
 r.post("/", async (req, res) => {
   const parsed = createTaskSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.format());
-  const task = await prisma.task.create({ data: parsed.data });
-  await prisma.auditLog.create({ data: { entity: "Task", entityId: task.id, action: "CREATE", diff: task as any } });
+  const d = parsed.data;
+  const task = await prisma.task.create({
+    data: {
+      project: { connect: { id: d.projectId } },
+      title: d.title,
+      description: d.description,
+      priority: d.priority,
+      status: d.status,
+      dueDate: d.dueDate,
+    },
+  });
+  await prisma.auditLog.create({
+    data: { entity: "Task", entityId: task.id, action: "CREATE", diff: task as any },
+  });
   res.status(201).json(task);
 });
 
-export const router = r;
 export default r;

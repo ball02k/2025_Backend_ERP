@@ -1,38 +1,55 @@
-import "dotenv/config";
 import { prisma } from "./lib/db";
+
+async function ensureClient(name: string, extra?: { regNo?: string; vatNo?: string }) {
+  const existing = await prisma.client.findFirst({ where: { name } });
+  if (existing) return existing;
+  return prisma.client.create({ data: { name, regNo: extra?.regNo, vatNo: extra?.vatNo } });
+}
 
 async function run() {
   console.log("Seeding...");
 
-  let acme = await prisma.client.findFirst({ where: { name: "Acme Civils" } });
-  if (!acme) {
-    acme = await prisma.client.create({
-      data: { name: "Acme Civils", regNo: "01234567", vatNo: "GB123456789" },
-    });
-  }
+  const acme   = await ensureClient("Acme Civils", { regNo: "01234567", vatNo: "GB123456789" });
+  const roadco = await ensureClient("RoadCo Ltd",  { regNo: "08976543", vatNo: "GB987654321" });
 
-  const proj = await prisma.project.upsert({
+  const a001 = await prisma.project.upsert({
     where: { code: "A001" },
     update: {},
     create: {
       code: "A001",
       name: "A14 Junction Upgrade",
-      client: { connect: { id: acme.id } },
+      clientId: acme.id,
       status: "ACTIVE",
-      contractType: "NEC4"
+      contractType: "NEC4",
+      budgetGBP: 2500000 as any,
+    },
+  });
+
+  const r101 = await prisma.project.upsert({
+    where: { code: "R101" },
+    update: {},
+    create: {
+      code: "R101",
+      name: "Ring Road Resurfacing",
+      clientId: roadco.id,
+      status: "ON_HOLD",
+      contractType: "JCT",
+      budgetGBP: 900000 as any,
     },
   });
 
   await prisma.task.createMany({
     data: [
-      { projectId: proj.id, title: "Site setup", status: "Done" },
-      { projectId: proj.id, title: "Traffic management plan", status: "In Progress" },
-      { projectId: proj.id, title: "Utilities survey", status: "Todo" }
+      { projectId: a001.id, title: "Site setup", status: "Done" },
+      { projectId: a001.id, title: "Traffic management plan", status: "In Progress" },
+      { projectId: a001.id, title: "Utilities survey", status: "Todo", dueDate: new Date(Date.now() + 7 * 864e5) },
+      { projectId: r101.id, title: "Milling schedule", status: "Todo" },
+      { projectId: r101.id, title: "Asphalt supplier PO", status: "Blocked" },
     ],
-    skipDuplicates: true
+    skipDuplicates: true,
   });
 
-  console.log("Done.");
+  console.log("Seed complete.");
 }
 
 run().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

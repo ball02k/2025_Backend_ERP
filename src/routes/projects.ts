@@ -1,11 +1,8 @@
 import { Router } from "express";
 import { prisma } from "../lib/db";
 import { createProjectSchema } from "../lib/validation";
-import { ProjectStatus } from "@prisma/client";
-
 
 const r = Router();
-
 
 r.get("/", async (_req, res) => {
   const projects = await prisma.project.findMany({
@@ -16,12 +13,11 @@ r.get("/", async (_req, res) => {
 });
 
 r.get("/:id", async (req, res) => {
-  const { id } = req.params;
   const project = await prisma.project.findUnique({
-    where: { id },
+    where: { id: req.params.id },
     include: {
       client: true,
-      tasks: { orderBy: { createdAt: "desc" }, take: 20 },
+      tasks: { orderBy: { createdAt: "desc" }, take: 50 },
       variations: true,
     },
   });
@@ -29,52 +25,24 @@ r.get("/:id", async (req, res) => {
   res.json(project);
 });
 
-
 r.post("/", async (req, res) => {
   const parsed = createProjectSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.format());
-
-
   const d = parsed.data;
   const project = await prisma.project.create({
     data: {
       code: d.code,
       name: d.name,
-      status: d.status ?? "DRAFT",
-      contractType: d.contractType,
-      budgetGBP: d.budgetGBP,
+      status: (d.status as any) ?? "DRAFT",
+      contractType: d.contractType as any,
+      budgetGBP: d.budgetGBP as any,
       client: { connect: { id: d.clientId } },
-
-  const d = parsed.data;
-  const project = await prisma.project.create({
-    data: {
-      code: d.code,
-      name: d.name,
-      status: d.status ?? ProjectStatus.DRAFT,
-      contractType: d.contractType,
-      budgetGBP: d.budgetGBP,
-      client: { connect: { id: d.clientId } },
-
-  const d = parsed.data; // fully typed by zod after success-guard
-
-  const project = await prisma.project.create({
-    data: {
-      code: d.code,                     // required
-      name: d.name,                     // required
-      status: d.status ?? ProjectStatus.DRAFT,
-      contractType: d.contractType,     // enum or undefined
-      budgetGBP: d.budgetGBP,           // number | undefined is fine
-      client: { connect: { id: d.clientId } }, // checked relation
-
     },
   });
-
   await prisma.auditLog.create({
     data: { entity: "Project", entityId: project.id, action: "CREATE", diff: project as any },
   });
-
   res.status(201).json(project);
 });
 
-export const router = r; 
 export default r;
