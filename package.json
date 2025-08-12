@@ -14,14 +14,17 @@
   "dependencies": {
     "@prisma/client": "latest",
     "cors": "latest",
+    "dotenv": "latest",
     "express": "latest",
-    "zod": "latest",
-    "dotenv": "latest"
+    "swagger-ui-express": "^5.0.1",
+    "yaml": "^2.8.1",
+    "zod": "latest"
   },
   "devDependencies": {
     "@types/cors": "latest",
     "@types/express": "latest",
     "@types/node": "latest",
+    "@types/swagger-ui-express": "^4.1.8",
     "nodemon": "latest",
     "prisma": "latest",
     "ts-node": "latest",
