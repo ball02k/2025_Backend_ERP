@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { prisma } from "./lib/db";
 import { ProjectStatus, ContractType } from "@prisma/client";
 

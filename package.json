@@ -15,7 +15,8 @@
     "@prisma/client": "latest",
     "cors": "latest",
     "express": "latest",
-    "zod": "latest"
+    "zod": "latest",
+    "dotenv": "latest"
   },
   "devDependencies": {
     "@types/cors": "latest",
