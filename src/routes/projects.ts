@@ -2,7 +2,12 @@ import { Router } from "express";
 import { prisma } from "../lib/db";
 import { createProjectSchema } from "../lib/validation";
 
+
+import { ProjectStatus } from "@prisma/client";
+
+
 const r = Router();
+
 
 r.get("/", async (_req, res) => {
   const projects = await prisma.project.findMany({
@@ -26,9 +31,11 @@ r.get("/:id", async (req, res) => {
   res.json(project);
 });
 
+
 r.post("/", async (req, res) => {
   const parsed = createProjectSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.format());
+
 
   const d = parsed.data;
   const project = await prisma.project.create({
@@ -39,6 +46,28 @@ r.post("/", async (req, res) => {
       contractType: d.contractType,
       budgetGBP: d.budgetGBP,
       client: { connect: { id: d.clientId } },
+
+  const d = parsed.data;
+  const project = await prisma.project.create({
+    data: {
+      code: d.code,
+      name: d.name,
+      status: d.status ?? ProjectStatus.DRAFT,
+      contractType: d.contractType,
+      budgetGBP: d.budgetGBP,
+      client: { connect: { id: d.clientId } },
+
+  const d = parsed.data; // fully typed by zod after success-guard
+
+  const project = await prisma.project.create({
+    data: {
+      code: d.code,                     // required
+      name: d.name,                     // required
+      status: d.status ?? ProjectStatus.DRAFT,
+      contractType: d.contractType,     // enum or undefined
+      budgetGBP: d.budgetGBP,           // number | undefined is fine
+      client: { connect: { id: d.clientId } }, // checked relation
+
     },
   });
 

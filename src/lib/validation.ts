@@ -20,8 +20,13 @@ export const createProjectSchema = z.object({
   code: z.string().min(2),       // required
   name: z.string().min(2),       // required
   clientId: z.string().min(1),   // required
+
   status: z.enum(projectStatusEnum).optional(),
   contractType: z.enum(contractTypeEnum).optional(),
+
+  status: z.nativeEnum(ProjectStatus).optional(),
+  contractType: z.nativeEnum(ContractType).optional(),
+
   budgetGBP: z.coerce.number().optional(),
 }).strict();
 
