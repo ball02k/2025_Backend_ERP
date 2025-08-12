@@ -10,9 +10,8 @@ r.get("/", async (_req, res) => {
 });
 
 r.get("/:id", async (req, res) => {
-  const { id } = req.params;
   const client = await prisma.client.findUnique({
-    where: { id },
+    where: { id: req.params.id },
     include: {
       contacts: true,
       projects: { select: { id: true, code: true, name: true, status: true } },
@@ -25,14 +24,9 @@ r.get("/:id", async (req, res) => {
 r.post("/", async (req, res) => {
   const parsed = createClientSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.format());
-
-  const { name, regNo, vatNo } = parsed.data; // 'name' is definitely present
-  const client = await prisma.client.create({
-    data: { name, regNo, vatNo },
-  });
-
+  const { name, regNo, vatNo } = parsed.data;
+  const client = await prisma.client.create({ data: { name, regNo, vatNo } });
   res.status(201).json(client);
 });
 
-export const router = r;
 export default r;

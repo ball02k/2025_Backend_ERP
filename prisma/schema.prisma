@@ -7,6 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// --- Enums ---
 enum ProjectStatus {
   DRAFT
   ACTIVE
@@ -32,6 +33,7 @@ enum WorkStage {
   RIBA_7
 }
 
+// --- Models ---
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -58,6 +60,7 @@ model Client {
   updatedAt DateTime   @updatedAt
   projects  Project[]
   contacts  Contact[]
+  documents Document[]
 }
 
 model Contact {

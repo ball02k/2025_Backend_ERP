@@ -1,32 +1,20 @@
 import { z } from "zod";
 
-const projectStatusEnum = [
-  "DRAFT",
-  "ACTIVE",
-  "ON_HOLD",
-  "COMPLETED",
-  "CANCELLED",
-] as const;
-
-const contractTypeEnum = ["JCT", "NEC4", "OTHER"] as const;
+export const ProjectStatusEnum = z.enum(["DRAFT", "ACTIVE", "ON_HOLD", "COMPLETED", "CANCELLED"]);
+export const ContractTypeEnum  = z.enum(["JCT", "NEC4", "OTHER"]);
 
 export const createClientSchema = z.object({
-  name: z.string().min(2),   // required
+  name: z.string().min(2),
   regNo: z.string().optional(),
   vatNo: z.string().optional(),
 }).strict();
 
 export const createProjectSchema = z.object({
-  code: z.string().min(2),       // required
-  name: z.string().min(2),       // required
-  clientId: z.string().min(1),   // required
-
-  status: z.enum(projectStatusEnum).optional(),
-  contractType: z.enum(contractTypeEnum).optional(),
-
-  status: z.nativeEnum(ProjectStatus).optional(),
-  contractType: z.nativeEnum(ContractType).optional(),
-
+  code: z.string().min(2),
+  name: z.string().min(2),
+  clientId: z.string().min(1),
+  status: ProjectStatusEnum.optional(),
+  contractType: ContractTypeEnum.optional(),
   budgetGBP: z.coerce.number().optional(),
 }).strict();
 
