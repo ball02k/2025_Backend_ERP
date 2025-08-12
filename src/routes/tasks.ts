@@ -20,4 +20,5 @@ r.post("/", async (req, res) => {
   res.status(201).json(task);
 });
 
+export const router = r;
 export default r;

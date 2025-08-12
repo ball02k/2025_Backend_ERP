@@ -34,4 +34,5 @@ r.post("/", async (req, res) => {
   res.status(201).json(client);
 });
 
+export const router = r;
 export default r;

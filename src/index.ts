@@ -5,9 +5,9 @@ import path from "path";
 import fs from "fs";
 import YAML from "yaml";
 import swaggerUi from "swagger-ui-express";
-import projects from "./routes/projects";
-import clients from "./routes/clients";
-import tasks from "./routes/tasks";
+import { router as projects } from "./routes/projects";
+import { router as clients } from "./routes/clients";
+import { router as tasks } from "./routes/tasks";
 
 const app = express();
 app.use(cors({ origin: "http://localhost:5174" }));
