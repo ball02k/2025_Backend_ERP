@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/db";
 import { createTaskSchema } from "../lib/validation";
 const r = Router();
+
 r.get("/", async (req, res) => {
   const { projectId, overdue } = req.query as { projectId?: string; overdue?: string };
   const where: any = {};
@@ -10,6 +11,7 @@ r.get("/", async (req, res) => {
   const tasks = await prisma.task.findMany({ where, orderBy: { createdAt: "desc" } });
   res.json(tasks);
 });
+
 r.post("/", async (req, res) => {
   const parsed = createTaskSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.format());
@@ -17,4 +19,5 @@ r.post("/", async (req, res) => {
   await prisma.auditLog.create({ data: { entity: "Task", entityId: task.id, action: "CREATE", diff: task as any } });
   res.status(201).json(task);
 });
+
 export default r;
