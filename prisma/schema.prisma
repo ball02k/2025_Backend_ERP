@@ -59,6 +59,11 @@ model Client {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   projects     Project[]
+  contacts     Contact[]
+
+  @@index([name])
+  @@index([vatNo])
+  @@index([companyRegNo])
 }
 
 model Project {
@@ -99,4 +104,25 @@ model Task {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model Contact {
+  id       Int    @id @default(autoincrement())
+  clientId Int
+  client   Client @relation(fields: [clientId], references: [id])
+
+  firstName String
+  lastName  String?
+  email     String?
+  phone     String?
+  role      String? // QS, PM, Buyer, etc.
+  isPrimary Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clientId, email])
+  @@index([clientId, isPrimary])
+  @@index([email])
+  @@index([role])
 }

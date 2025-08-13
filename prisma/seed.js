@@ -11,6 +11,11 @@ async function upsertMany(model, items) {
   }
 }
 
+async function findOrCreate(model, where, data) {
+  const existing = await model.findFirst({ where });
+  return existing ?? model.create({ data });
+}
+
 async function run() {
   console.log('Seeding lookups and sample data...');
 
@@ -54,6 +59,26 @@ async function run() {
     where: { id: 1 },
     update: { name: 'Acme Civils' },
     create: { name: 'Acme Civils' },
+  });
+
+  await findOrCreate(prisma.contact, { clientId: client.id, email: 'pm@acme.com' }, {
+    clientId: client.id,
+    firstName: 'Paula',
+    lastName: 'Manager',
+    email: 'pm@acme.com',
+    phone: '+44 20 7946 0000',
+    role: 'Project Manager',
+    isPrimary: true,
+  });
+
+  await findOrCreate(prisma.contact, { clientId: client.id, email: 'qs@acme.com' }, {
+    clientId: client.id,
+    firstName: 'Quentin',
+    lastName: 'Surveyor',
+    email: 'qs@acme.com',
+    phone: '+44 20 7946 0001',
+    role: 'QS',
+    isPrimary: false,
   });
 
   const a001 = await prisma.project.upsert({
