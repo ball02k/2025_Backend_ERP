@@ -14,10 +14,11 @@
     "studio": "prisma studio"
   },
   "dependencies": {
-    "express": "^4.19.2",
+    "@prisma/client": "^6.13.0",
     "cors": "^2.8.5",
+    "express": "^4.19.2",
     "morgan": "^1.10.0",
-    "@prisma/client": "^6.13.0"
+    "zod": "^4.0.17"
   },
   "devDependencies": {
     "nodemon": "^3.1.10",
