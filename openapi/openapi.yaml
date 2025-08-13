@@ -189,7 +189,9 @@ components:
         id: { type: string }
         code: { type: string }
         name: { type: string }
-        status: { type: string }
+        status:
+          type: string
+          enum: [DRAFT, ACTIVE, ON_HOLD, COMPLETED, CANCELLED]
         client:
           type: object
           properties:
@@ -202,7 +204,9 @@ components:
         clientId: { type: string }
         code: { type: string }
         name: { type: string }
-        status: { type: string }
+        status:
+          type: string
+          enum: [DRAFT, ACTIVE, ON_HOLD, COMPLETED, CANCELLED]
     ProjectDetail:
       allOf:
         - $ref: "#/components/schemas/Project"

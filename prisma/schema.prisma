@@ -7,31 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// --- Enums ---
-enum ProjectStatus {
-  DRAFT
-  ACTIVE
-  ON_HOLD
-  COMPLETED
-  CANCELLED
-}
-
-enum ContractType {
-  JCT
-  NEC4
-  OTHER
-}
-
-enum WorkStage {
-  RIBA_0
-  RIBA_1
-  RIBA_2
-  RIBA_3
-  RIBA_4
-  RIBA_5
-  RIBA_6
-  RIBA_7
-}
+// --- Enums removed ---
 
 // --- Models ---
 model User {
@@ -78,29 +54,30 @@ model Contact {
 }
 
 model Project {
-  id            String        @id @default(cuid())
-  code          String        @unique
+  id            String      @id @default(cuid())
+  code          String      @unique
   name          String
   clientId      String
-  client        Client        @relation(fields: [clientId], references: [id])
-  status        ProjectStatus @default(DRAFT)
+  client        Client      @relation(fields: [clientId], references: [id])
+  // enums removed -> plain strings with defaults
+  status        String      @default("DRAFT") @db.VarChar(24)
   type          String?
-  contractType  ContractType? @default(OTHER)
-  workStage     WorkStage?    @default(RIBA_0)
+  contractType  String?     @default("OTHER") @db.VarChar(24)
+  workStage     String?     @default("RIBA_0") @db.VarChar(24)
   address1      String?
   address2      String?
   city          String?
   postcode      String?
   startDate     DateTime?
   endDate       DateTime?
-  budgetGBP     Decimal?      @db.Decimal(18, 2)
-  retentionPct  Decimal?      @db.Decimal(5, 2)
-  cisApplicable Boolean       @default(false)
+  budgetGBP     Decimal?    @db.Decimal(18, 2)
+  retentionPct  Decimal?    @db.Decimal(5, 2)
+  cisApplicable Boolean     @default(false)
   riskLevel     String?
   carbonTarget  String?
   notes         String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
   tasks         Task[]
   variations    Variation[]
   documents     Document[]
