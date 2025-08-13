@@ -15,6 +15,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/reference', require('./routes/reference')(prisma));
+app.use('/api/clients', require('./routes/clients')(prisma));
 app.use('/api/projects', require('./routes/projects')(prisma));
 app.use('/api/tasks', require('./routes/tasks')(prisma));
 
