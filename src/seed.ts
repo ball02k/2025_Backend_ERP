@@ -21,6 +21,7 @@ async function run() {
       clientId: acme.id,
       status: "ACTIVE",
       contractType: "NEC4",
+      workStage: "RIBA_0",
       budgetGBP: 2500000 as any,
     },
   });
@@ -34,6 +35,7 @@ async function run() {
       clientId: roadco.id,
       status: "ON_HOLD",
       contractType: "JCT",
+      workStage: "RIBA_1",
       budgetGBP: 900000 as any,
     },
   });
