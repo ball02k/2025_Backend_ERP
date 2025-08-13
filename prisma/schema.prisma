@@ -7,128 +7,96 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// --- Enums removed ---
+model ProjectStatus {
+  id        Int       @id @default(autoincrement())
+  tenantId  Int?
+  key       String
+  label     String
+  colorHex  String?
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  projects  Project[] @relation("ProjectStatusRel")
 
-// --- Models ---
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  role      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  tasks     Task[]
+  @@unique([tenantId, key])
+}
+
+model ProjectType {
+  id        Int       @id @default(autoincrement())
+  tenantId  Int?
+  key       String
+  label     String
+  colorHex  String?
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  projects  Project[] @relation("ProjectTypeRel")
+
+  @@unique([tenantId, key])
+}
+
+model TaskStatus {
+  id        Int     @id @default(autoincrement())
+  tenantId  Int?
+  key       String
+  label     String
+  colorHex  String?
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+  tasks     Task[]  @relation("TaskStatusRel")
+
+  @@unique([tenantId, key])
 }
 
 model Client {
-  id        String     @id @default(cuid())
-  name      String
-  regNo     String?
-  vatNo     String?
-  address1  String?
-  address2  String?
-  city      String?
-  postcode  String?
-  country   String?    @default("UK")
-  phone     String?
-  website   String?
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  projects  Project[]
-  contacts  Contact[]
-  documents Document[]
-}
-
-model Contact {
-  id        String   @id @default(cuid())
-  clientId  String
-  client    Client   @relation(fields: [clientId], references: [id])
-  name      String
-  title     String?
-  email     String?
-  phone     String?
-  primary   Boolean  @default(false)
-  notes     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           Int       @id @default(autoincrement())
+  name         String
+  companyRegNo String?
+  vatNo        String?
+  address1     String?
+  address2     String?
+  city         String?
+  county       String?
+  postcode     String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  projects     Project[]
 }
 
 model Project {
-  id            String      @id @default(cuid())
-  code          String      @unique
-  name          String
-  clientId      String
-  client        Client      @relation(fields: [clientId], references: [id])
-  // enums removed -> plain strings with defaults
-  status        String      @default("DRAFT") @db.VarChar(24)
-  type          String?
-  contractType  String?     @default("OTHER") @db.VarChar(24)
-  workStage     String?     @default("RIBA_0") @db.VarChar(24)
-  address1      String?
-  address2      String?
-  city          String?
-  postcode      String?
-  startDate     DateTime?
-  endDate       DateTime?
-  budgetGBP     Decimal?    @db.Decimal(18, 2)
-  retentionPct  Decimal?    @db.Decimal(5, 2)
-  cisApplicable Boolean     @default(false)
-  riskLevel     String?
-  carbonTarget  String?
-  notes         String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  tasks         Task[]
-  variations    Variation[]
-  documents     Document[]
+  id          Int     @id @default(autoincrement())
+  code        String? @unique
+  name        String
+  description String?
+  clientId    Int
+  client      Client  @relation(fields: [clientId], references: [id])
+
+  statusId  Int
+  statusRel ProjectStatus @relation("ProjectStatusRel", fields: [statusId], references: [id])
+  typeId    Int
+  typeRel   ProjectType   @relation("ProjectTypeRel", fields: [typeId], references: [id])
+
+  budget      Decimal?  @db.Decimal(18, 2)
+  actualSpend Decimal?  @db.Decimal(18, 2)
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tasks Task[]
 }
 
 model Task {
-  id          String    @id @default(cuid())
-  projectId   String
-  project     Project   @relation(fields: [projectId], references: [id])
+  id        Int     @id @default(autoincrement())
+  projectId Int
+  project   Project @relation(fields: [projectId], references: [id])
+
   title       String
   description String?
-  assigneeId  String?
-  assignee    User?     @relation(fields: [assigneeId], references: [id])
-  priority    String?
-  status      String
-  startDate   DateTime?
   dueDate     DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-}
+  assignee    String?
 
-model Variation {
-  id          String   @id @default(cuid())
-  projectId   String
-  project     Project  @relation(fields: [projectId], references: [id])
-  title       String
-  description String?
-  amountGBP   Decimal  @db.Decimal(18, 2)
-  status      String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
+  statusId  Int
+  statusRel TaskStatus @relation("TaskStatusRel", fields: [statusId], references: [id])
 
-model Document {
-  id        String   @id @default(cuid())
-  projectId String?
-  project   Project? @relation(fields: [projectId], references: [id])
-  clientId  String?
-  client    Client?  @relation(fields: [clientId], references: [id])
-  name      String
-  url       String
-  kind      String?
   createdAt DateTime @default(now())
-}
-
-model AuditLog {
-  id       String   @id @default(cuid())
-  actorId  String?
-  entity   String
-  entityId String
-  action   String
-  diff     Json?
-  at       DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
