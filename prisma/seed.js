@@ -115,6 +115,7 @@ async function run() {
     });
 
     await seedVariations();
+    await seedDocuments();
 
     console.log('Seed complete');
   } catch (e) {
@@ -189,6 +190,23 @@ async function seedVariations() {
 
       counter++;
     }
+  }
+}
+
+async function seedDocuments(){
+  const projects = await prisma.project.findMany({ take: 2, orderBy: { id: 'asc' } });
+  for (const p of projects) {
+    await prisma.document.create({
+      data: {
+        fileName: `sample_${p.code || p.id}.pdf`,
+        contentType: 'application/pdf',
+        size: BigInt(12345),
+        storageProvider: 'local',
+        storageKey: `seed/${Date.now()}_${p.id}_sample.pdf`,
+        uploadedBy: 'seed',
+        links: { create: [{ projectId: p.id, note: 'seed link' }] },
+      },
+    });
   }
 }
 

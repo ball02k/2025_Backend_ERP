@@ -88,6 +88,7 @@ model Project {
 
   tasks Task[]
   variations  Variation[]
+  documentLinks   DocumentLink[]
 }
 
 model Task {
@@ -169,6 +170,7 @@ model Variation {
   // Relations
   lines             VariationLine[]
   statusHistory     VariationStatusHistory[]
+  documentLinks     DocumentLink[]
 
   @@index([projectId])
   @@index([type])
@@ -204,5 +206,49 @@ model VariationStatusHistory {
   note         String?   @db.VarChar(255)
   changedAt    DateTime  @default(now())
 
+  @@index([variationId])
+}
+
+model Document {
+  id               Int       @id @default(autoincrement())
+  fileName         String    @db.VarChar(255)
+  contentType      String?   @db.VarChar(128)
+  size             BigInt?
+  storageProvider  String    @db.VarChar(16)   // "local" | "s3"
+  storageKey       String    @db.VarChar(512)
+  etag             String?   @db.VarChar(128)
+  checksum_sha256  String?   @db.VarChar(64)
+  tags             String?   @db.Text
+
+  uploadedBy       String?   @db.VarChar(128)
+  uploadedAt       DateTime  @default(now())
+
+  is_deleted       Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  links            DocumentLink[]
+
+  @@index([storageKey])
+  @@index([storageProvider])
+  @@index([uploadedAt])
+}
+
+model DocumentLink {
+  id          Int       @id @default(autoincrement())
+  documentId  Int
+  document    Document  @relation(fields: [documentId], references: [id])
+
+  projectId   Int?
+  project     Project?  @relation(fields: [projectId], references: [id])
+
+  variationId Int?
+  variation   Variation? @relation(fields: [variationId], references: [id])
+
+  note        String?   @db.VarChar(255)
+  createdAt   DateTime  @default(now())
+
+  @@index([documentId])
+  @@index([projectId])
   @@index([variationId])
 }
