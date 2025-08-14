@@ -32,6 +32,10 @@ app.use('/api/variations', variationsRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/projects', projectsOverviewRouter);
 
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api/dev/snapshot', require('./routes/dev_snapshot.cjs'));
+}
+
 // serve local uploads in dev for quick previews
 if ((process.env.STORAGE_PROVIDER || 'local').toLowerCase() === 'local') {
   app.use('/files', express.static('uploads'));
