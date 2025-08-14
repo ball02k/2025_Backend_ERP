@@ -51,6 +51,32 @@ module.exports = (prisma) => {
     } catch (e) { next(e); }
   });
 
+  // GET /api/projects/:id
+  router.get('/:id', async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
+
+      const row = await prisma.project.findUnique({
+        where: { id },
+        include: {
+          client: { select: { id: true, name: true } },
+          statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
+          typeRel: { select: { id: true, key: true, label: true, colorHex: true } },
+          tasks: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
+            },
+          },
+        },
+      });
+
+      if (!row) return res.status(404).json({ error: 'Project not found' });
+      res.json(row);
+    } catch (e) { next(e); }
+  });
+
   // POST /api/projects
   router.post('/', async (req, res, next) => {
     try {
@@ -87,6 +113,24 @@ module.exports = (prisma) => {
         include: { client: true, statusRel: true, typeRel: true },
       });
       res.json(updated);
+    } catch (e) { next(e); }
+  });
+
+  // DELETE /api/projects/:id
+  router.delete('/:id', async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
+
+      const exists = await prisma.project.findUnique({ where: { id }, select: { id: true } });
+      if (!exists) return res.status(404).json({ error: 'Project not found' });
+
+      await prisma.$transaction(async (tx) => {
+        await tx.task.deleteMany({ where: { projectId: id } });
+        await tx.project.delete({ where: { id } });
+      });
+
+      res.status(204).end();
     } catch (e) { next(e); }
   });
 

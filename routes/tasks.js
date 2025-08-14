@@ -86,5 +86,19 @@ module.exports = (prisma) => {
     } catch (e) { next(e); }
   });
 
+  // DELETE /api/tasks/:id
+  router.delete('/:id', async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
+
+      const exists = await prisma.task.findUnique({ where: { id }, select: { id: true } });
+      if (!exists) return res.status(404).json({ error: 'Task not found' });
+
+      await prisma.task.delete({ where: { id } });
+      res.status(204).end();
+    } catch (e) { next(e); }
+  });
+
   return router;
 };
