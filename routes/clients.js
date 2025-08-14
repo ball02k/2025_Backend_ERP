@@ -26,6 +26,7 @@ module.exports = (prisma) => {
           skip: (page - 1) * pageSize,
           take: pageSize,
           include: {
+
             _count: {
               select: {
                 projects: true,
@@ -33,6 +34,9 @@ module.exports = (prisma) => {
                 contacts: true,
               }
             },
+
+            _count: { select: { projects: true, contacts: true } },
+
             contacts: {
               where: { isPrimary: true },
               take: 1,

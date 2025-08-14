@@ -115,7 +115,11 @@ model Contact {
   lastName  String?
   email     String?
   phone     String?
+
   role      String? // QS, PM, Buyer, etc.
+
+  role      String? // e.g., QS, PM, Buyer, Site Supervisor
+
   isPrimary Boolean @default(false)
 
   createdAt DateTime @default(now())
