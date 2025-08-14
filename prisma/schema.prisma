@@ -59,7 +59,7 @@ model Client {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   projects     Project[]
-  contacts      Contact[]   // REQUIRED for includes/counts
+  contacts     Contact[] // REQUIRED for includes/counts
 
   @@index([name])
   @@index([vatNo])
@@ -86,9 +86,8 @@ model Project {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  tasks Task[]
-  variations  Variation[]
-  documentLinks   DocumentLink[]
+  tasks      Task[]
+  variations Variation[]
 }
 
 model Task {
@@ -109,68 +108,67 @@ model Task {
 }
 
 model Contact {
-  id         Int      @id @default(autoincrement())
-  clientId   Int
-  client     Client   @relation(fields: [clientId], references: [id])
+  id       Int    @id @default(autoincrement())
+  clientId Int
+  client   Client @relation(fields: [clientId], references: [id])
 
-  firstName  String
-  lastName   String?
-  email      String?
-  phone      String?
-  role       String?
-  isPrimary  Boolean  @default(false)
+  firstName String
+  lastName  String?
+  email     String?
+  phone     String?
+  role      String?
+  isPrimary Boolean @default(false)
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
+  @@unique([clientId, email])
   @@index([clientId, isPrimary])
   @@index([email])
   @@index([role])
-  @@unique([clientId, email])
 }
 
 model Variation {
-  id                Int       @id @default(autoincrement())
-  projectId         Int
-  project           Project   @relation(fields: [projectId], references: [id])
+  id        Int     @id @default(autoincrement())
+  projectId Int
+  project   Project @relation(fields: [projectId], references: [id])
 
   // Core identifiers
-  referenceCode     String?   @db.VarChar(64)
-  title             String    @db.VarChar(255)
-  description       String?   @db.Text
+  referenceCode String? @db.VarChar(64)
+  title         String  @db.VarChar(255)
+  description   String? @db.Text
 
   // Strings (avoid Prisma enums)
-  type              String    @db.VarChar(24)
-  status            String    @db.VarChar(24)
-  reason_code       String?   @db.VarChar(64)
+  type        String  @db.VarChar(24)
+  status      String  @db.VarChar(24)
+  reason_code String? @db.VarChar(64)
 
   // Commercials
-  estimated_cost    Decimal?  @db.Decimal(18,2)
-  estimated_sell    Decimal?  @db.Decimal(18,2)
-  agreed_cost       Decimal?  @db.Decimal(18,2)
-  agreed_sell       Decimal?  @db.Decimal(18,2)
+  estimated_cost Decimal? @db.Decimal(18, 2)
+  estimated_sell Decimal? @db.Decimal(18, 2)
+  agreed_cost    Decimal? @db.Decimal(18, 2)
+  agreed_sell    Decimal? @db.Decimal(18, 2)
 
   // Dates
-  notifiedDate      DateTime?
-  submittedDate     DateTime?
-  reviewedDate      DateTime?
-  approvedDate      DateTime?
-  rejectedDate      DateTime?
-  instructedDate    DateTime?
-  pricedDate        DateTime?
-  agreedDate        DateTime?
-  voIssuedDate      DateTime?
-  voAcceptedDate    DateTime?
+  notifiedDate   DateTime?
+  submittedDate  DateTime?
+  reviewedDate   DateTime?
+  approvedDate   DateTime?
+  rejectedDate   DateTime?
+  instructedDate DateTime?
+  pricedDate     DateTime?
+  agreedDate     DateTime?
+  voIssuedDate   DateTime?
+  voAcceptedDate DateTime?
 
   // Meta
-  is_deleted        Boolean   @default(false)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  is_deleted Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   // Relations
-  lines             VariationLine[]
-  statusHistory     VariationStatusHistory[]
-  documentLinks     DocumentLink[]
+  lines         VariationLine[]
+  statusHistory VariationStatusHistory[]
 
   @@index([projectId])
   @@index([type])
@@ -179,77 +177,65 @@ model Variation {
 }
 
 model VariationLine {
-  id           Int       @id @default(autoincrement())
-  variationId  Int
-  variation    Variation @relation(fields: [variationId], references: [id])
+  id          Int       @id @default(autoincrement())
+  variationId Int
+  variation   Variation @relation(fields: [variationId], references: [id])
 
-  cost_code    String?   @db.VarChar(64)
-  description  String    @db.VarChar(255)
-  qty          Decimal   @db.Decimal(18,2)
-  unit         String?   @db.VarChar(32)
-  unit_cost    Decimal   @db.Decimal(18,2)
-  unit_sell    Decimal?  @db.Decimal(18,2)
+  cost_code   String?  @db.VarChar(64)
+  description String   @db.VarChar(255)
+  qty         Decimal  @db.Decimal(18, 2)
+  unit        String?  @db.VarChar(32)
+  unit_cost   Decimal  @db.Decimal(18, 2)
+  unit_sell   Decimal? @db.Decimal(18, 2)
 
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([variationId])
 }
 
 model VariationStatusHistory {
-  id           Int       @id @default(autoincrement())
-  variationId  Int
-  variation    Variation @relation(fields: [variationId], references: [id])
+  id          Int       @id @default(autoincrement())
+  variationId Int
+  variation   Variation @relation(fields: [variationId], references: [id])
 
-  fromStatus   String?   @db.VarChar(24)
-  toStatus     String    @db.VarChar(24)
-  note         String?   @db.VarChar(255)
-  changedAt    DateTime  @default(now())
+  fromStatus String?  @db.VarChar(24)
+  toStatus   String   @db.VarChar(24)
+  note       String?  @db.VarChar(255)
+  changedAt  DateTime @default(now())
 
   @@index([variationId])
 }
 
 model Document {
-  id               Int       @id @default(autoincrement())
-  fileName         String    @db.VarChar(255)
-  contentType      String?   @db.VarChar(128)
-  size             BigInt?
-  storageProvider  String    @db.VarChar(16)   // "local" | "s3"
-  storageKey       String    @db.VarChar(512)
-  etag             String?   @db.VarChar(128)
-  checksum_sha256  String?   @db.VarChar(64)
-  tags             String?   @db.Text
+  id              BigInt    @id @default(autoincrement())
+  fileName        String
+  storageKey      String
+  storageProvider String
+  size            BigInt?
+  contentType     String?
+  uploadedAt      DateTime  @default(now())
+  uploadedBy      String?
+  tags            String?   @db.Text // CSV of lowercase tokens
+  is_deleted      Boolean   @default(false)
+  deletedAt       DateTime?
 
-  uploadedBy       String?   @db.VarChar(128)
-  uploadedAt       DateTime  @default(now())
+  links DocumentLink[]
+  // If you want to map to an existing lowercase table, uncomment:
+  // @@map("documents")
 
-  is_deleted       Boolean   @default(false)
-  deletedAt        DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  links            DocumentLink[]
-
-  @@index([storageKey])
-  @@index([storageProvider])
   @@index([uploadedAt])
 }
 
 model DocumentLink {
-  id          Int       @id @default(autoincrement())
-  documentId  Int
-  document    Document  @relation(fields: [documentId], references: [id])
-
+  id          BigInt   @id @default(autoincrement())
+  documentId  BigInt
   projectId   Int?
-  project     Project?  @relation(fields: [projectId], references: [id])
-
   variationId Int?
-  variation   Variation? @relation(fields: [variationId], references: [id])
+  note        String?
+  createdAt   DateTime @default(now())
 
-  note        String?   @db.VarChar(255)
-  createdAt   DateTime  @default(now())
-
-  @@index([documentId])
-  @@index([projectId])
-  @@index([variationId])
+  document Document @relation(fields: [documentId], references: [id])
+  // If you have Project/Variation models with BigInt ids, you can add relations later.
+  // For now they remain nullable numeric FKs without relation constraints.
 }

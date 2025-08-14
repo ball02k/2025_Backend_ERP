@@ -8,7 +8,12 @@
     "smoke:docs": "node scripts/documents-smoke.mjs",
     "health": "curl -s http://localhost:${PORT:-3001}/healthz || true",
     "dev": "nodemon index.cjs",
-    "db:seed": "node prisma/seed.js"
+    "db:seed": "node prisma/seed.js",
+    "db:migrate": "prisma migrate dev --name init_documents",
+    "db:deploy": "prisma migrate deploy",
+    "db:reset": "prisma migrate reset --force && npm run db:seed",
+    "predev": "prisma migrate deploy && prisma generate",
+    "db:check": "node scripts/check-db.cjs"
   },
   "dependencies": {
     "@prisma/client": "6.14.0",
@@ -17,11 +22,12 @@
     "cors": "^2.8.5",
     "express": "4.19.2",
     "morgan": "^1.10.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "pg": "^8.11.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.10",
-    "prisma": "^6.13.0"
+    "prisma": "6.14.0"
   },
   "engines": { "node": ">=20 <21" }
 }
