@@ -26,7 +26,8 @@ module.exports = (prisma) => {
           skip: (page - 1) * pageSize,
           take: pageSize,
           include: {
-            _count: { select: { projects: true, contacts: true } },
+            // Only count projects to avoid potential contact count crash
+            _count: { select: { projects: true } },
             contacts: {
               where: { isPrimary: true },
               take: 1,
