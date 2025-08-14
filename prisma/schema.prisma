@@ -224,6 +224,7 @@ model Document {
   uploadedAt       DateTime  @default(now())
 
   is_deleted       Boolean   @default(false)
+  deletedAt        DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
