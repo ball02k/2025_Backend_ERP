@@ -1,6 +1,8 @@
 const express = require("express");
 const router = express.Router();
-const { prisma, Prisma, dec } = require("../utils/prisma.cjs");
+const { prisma, dec } = require("../utils/prisma.cjs");
+const { computeTotals } = require("../utils/variations.cjs");
+const { resolve: resolveLookup } = require("../utils/lookups.cjs");
 const DEV = process.env.NODE_ENV !== "production";
 
 // Allowed workflow transitions
@@ -29,57 +31,19 @@ function parseNumber(n, fallback = null) {
   return Number.isFinite(v) ? v : fallback;
 }
 
-// Optional lookup resolver. Works only if a LookupValue model exists with { id, category, key }.
-// If not present, it safely falls back to provided strings.
-async function resolveLookupKey(category, id, fallback) {
-  if (!id) return fallback ?? null;
-  try {
-    const hasModel =
-      prisma.lookupValue && typeof prisma.lookupValue.findFirst === "function";
-    if (!hasModel) return fallback ?? null;
-
-    const lv = await prisma.lookupValue.findFirst({
-      where: { id: Number(id), category: String(category) },
-      select: { key: true },
-    });
-    return lv?.key ?? fallback ?? null;
-  } catch {
-    return fallback ?? null;
-  }
-}
-
-// Helper to compute totals on detail reads
-function computeTotals(row) {
-  const hasLines = Array.isArray(row?.lines) && row.lines.length > 0;
-  if (hasLines) {
-    let cost = 0;
-    let sell = 0;
-    for (const L of row.lines) {
-      const qty = Number(L.qty ?? 0);
-      const unit_cost = Number(L.unit_cost ?? 0);
-      const unit_sell = Number(L.unit_sell ?? 0);
-      cost += qty * unit_cost;
-      sell += qty * unit_sell;
-    }
-    return {
-      lines_cost: Number(cost.toFixed(2)),
-      lines_sell: Number(sell.toFixed(2)),
-      margin: Number((sell - cost).toFixed(2)),
-    };
-  }
-  const estCost = Number(row?.estimated_cost ?? 0);
-  const estSell = Number(row?.estimated_sell ?? 0);
-  return {
-    lines_cost: estCost,
-    lines_sell: estSell,
-    margin: Number((estSell - estCost).toFixed(2)),
-  };
-}
-
 // LIST
 router.get("/", async (req, res) => {
   try {
-    const { projectId, status, type, q, limit = 20, offset = 0 } = req.query;
+    const {
+      projectId,
+      status,
+      type,
+      q,
+      limit = 20,
+      offset = 0,
+      totals,
+      includeTotals,
+    } = req.query;
     const where = { is_deleted: false };
     if (projectId) where.projectId = Number(projectId);
     if (status) where.status = String(status);
@@ -111,6 +75,25 @@ router.get("/", async (req, res) => {
       }),
       prisma.variation.count({ where }),
     ]);
+
+    const wantTotals =
+      totals === "1" ||
+      totals === "true" ||
+      includeTotals === "1" ||
+      includeTotals === "true";
+    if (wantTotals && rows.length) {
+      const ids = rows.map((r) => r.id);
+      const lines = await prisma.variationLine.findMany({
+        where: { variationId: { in: ids } },
+      });
+      const grouped = lines.reduce((m, l) => {
+        (m[l.variationId] ||= []).push(l);
+        return m;
+      }, {});
+      rows.forEach((r) => {
+        r.totals = computeTotals(r, grouped[r.id] || []);
+      });
+    }
 
     res.json({
       data: Array.isArray(rows) ? rows : [],
@@ -151,7 +134,7 @@ router.get("/:id", async (req, res) => {
     });
     if (!row) return res.status(404).json({ error: "Not found" });
 
-    const totals = computeTotals(row);
+    const totals = computeTotals(row, row.lines || []);
     res.json({ data: { ...row, totals } });
   } catch (err) {
     console.error(err);
@@ -172,7 +155,7 @@ router.post("/", async (req, res) => {
       description,
       type,
       typeLookupId,
-      status = "draft",
+      status,
       statusLookupId,
       reason_code,
       reasonLookupId,
@@ -199,17 +182,28 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const typeKey = await resolveLookupKey("variation.type", typeLookupId, type);
-    const statusKey = await resolveLookupKey(
-      "variation.status",
-      statusLookupId,
-      status || "draft"
-    );
-    const reasonKey = await resolveLookupKey(
-      "variation.reason",
-      reasonLookupId,
-      reason_code
-    );
+    let resolvedType = type;
+    let resolvedStatus = status;
+    let resolvedReason = reason_code;
+
+    if (!resolvedType && typeLookupId) {
+      const val = await resolveLookup(typeLookupId, "variation_type", prisma);
+      if (!val) return res.status(400).json({ error: "Unknown typeLookupId" });
+      resolvedType = val;
+    }
+    if (!resolvedStatus && statusLookupId) {
+      const val = await resolveLookup(statusLookupId, "variation_status", prisma);
+      if (!val)
+        return res.status(400).json({ error: "Unknown statusLookupId" });
+      resolvedStatus = val;
+    }
+    if (!resolvedReason && reasonLookupId) {
+      const val = await resolveLookup(reasonLookupId, "variation_reason", prisma);
+      if (!val)
+        return res.status(400).json({ error: "Unknown reasonLookupId" });
+      resolvedReason = val;
+    }
+    if (!resolvedStatus) resolvedStatus = "draft";
 
     const created = await prisma.variation.create({
       data: {
@@ -217,9 +211,9 @@ router.post("/", async (req, res) => {
         referenceCode: referenceCode || null,
         title,
         description: description || null,
-        type: String(typeKey),
-        status: String(statusKey),
-        reason_code: reasonKey || null,
+        type: String(resolvedType),
+        status: String(resolvedStatus),
+        reason_code: resolvedReason || null,
         estimated_cost: estimated_cost ?? null,
         estimated_sell: estimated_sell ?? null,
         agreed_cost: agreed_cost ?? null,
@@ -251,7 +245,7 @@ router.post("/", async (req, res) => {
           : undefined,
         statusHistory: {
           create: [
-            { fromStatus: null, toStatus: String(statusKey || "draft"), note: "created" },
+            { fromStatus: null, toStatus: String(resolvedStatus), note: "created" },
           ],
         },
       },
@@ -309,21 +303,27 @@ router.put("/:id", async (req, res) => {
         await tx.variationLine.deleteMany({ where: { variationId: id } });
       }
 
-      const typeKey = await resolveLookupKey(
-        "variation.type",
-        typeLookupId,
-        type ?? existing.type
-      );
-      const statusKey = await resolveLookupKey(
-        "variation.status",
-        statusLookupId,
-        status ?? existing.status
-      );
-      const reasonKey = await resolveLookupKey(
-        "variation.reason",
-        reasonLookupId,
-        reason_code ?? existing.reason_code
-      );
+      let resolvedType = type ?? existing.type;
+      let resolvedStatus = status ?? existing.status;
+      let resolvedReason = reason_code ?? existing.reason_code;
+
+      if (!resolvedType && typeLookupId) {
+        const val = await resolveLookup(typeLookupId, "variation_type", prisma);
+        if (!val) return res.status(400).json({ error: "Unknown typeLookupId" });
+        resolvedType = val;
+      }
+      if (!resolvedStatus && statusLookupId) {
+        const val = await resolveLookup(statusLookupId, "variation_status", prisma);
+        if (!val)
+          return res.status(400).json({ error: "Unknown statusLookupId" });
+        resolvedStatus = val;
+      }
+      if (!resolvedReason && reasonLookupId) {
+        const val = await resolveLookup(reasonLookupId, "variation_reason", prisma);
+        if (!val)
+          return res.status(400).json({ error: "Unknown reasonLookupId" });
+        resolvedReason = val;
+      }
 
       const upd = await tx.variation.update({
         where: { id },
@@ -331,9 +331,9 @@ router.put("/:id", async (req, res) => {
           referenceCode: referenceCode ?? existing.referenceCode,
           title: title ?? existing.title,
           description: description ?? existing.description,
-          type: String(typeKey),
-          status: String(statusKey),
-          reason_code: reasonKey,
+          type: String(resolvedType),
+          status: String(resolvedStatus),
+          reason_code: resolvedReason,
           estimated_cost: estimated_cost ?? existing.estimated_cost,
           estimated_sell: estimated_sell ?? existing.estimated_sell,
           agreed_cost: agreed_cost ?? existing.agreed_cost,
