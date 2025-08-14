@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
+const DEV = process.env.NODE_ENV !== "production";
 
 // Allowed workflow transitions
 const ALLOWED = {
@@ -105,8 +106,6 @@ router.get("/", async (req, res) => {
               name: true,
               statusId: true,
               typeId: true,
-              status: { select: { key: true, label: true } },
-              type: { select: { key: true, label: true } },
             },
           },
         },
@@ -120,7 +119,10 @@ router.get("/", async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch variations" });
+    res.status(500).json({
+      error: "Failed to fetch variations",
+      details: DEV ? String(err.message) : undefined,
+    });
   }
 });
 
@@ -138,8 +140,6 @@ router.get("/:id", async (req, res) => {
             name: true,
             statusId: true,
             typeId: true,
-            status: { select: { key: true, label: true } },
-            type: { select: { key: true, label: true } },
           },
         },
         lines: true,
@@ -152,7 +152,10 @@ router.get("/:id", async (req, res) => {
     res.json({ data: { ...row, totals } });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch variation" });
+    res.status(500).json({
+      error: "Failed to fetch variation",
+      details: DEV ? String(err.message) : undefined,
+    });
   }
 });
 
@@ -255,7 +258,10 @@ router.post("/", async (req, res) => {
     res.status(201).json({ data: created });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to create variation" });
+    res.status(500).json({
+      error: "Failed to create variation",
+      details: DEV ? String(err.message) : undefined,
+    });
   }
 });
 
@@ -366,7 +372,10 @@ router.put("/:id", async (req, res) => {
     res.json({ data: updated });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to update variation" });
+    res.status(500).json({
+      error: "Failed to update variation",
+      details: DEV ? String(err.message) : undefined,
+    });
   }
 });
 
@@ -426,7 +435,10 @@ router.patch("/:id/status", async (req, res) => {
     res.json({ data: updated });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to change status" });
+    res.status(500).json({
+      error: "Failed to change status",
+      details: DEV ? String(err.message) : undefined,
+    });
   }
 });
 
@@ -447,7 +459,10 @@ router.delete("/:id", async (req, res) => {
     res.json({ data: deleted });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to delete variation" });
+    res.status(500).json({
+      error: "Failed to delete variation",
+      details: DEV ? String(err.message) : undefined,
+    });
   }
 });
 
