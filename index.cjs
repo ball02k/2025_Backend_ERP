@@ -11,9 +11,8 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '5mb' }));
 app.use(morgan('dev'));
 
-app.get('/health', (_req, res) => {
-  res.json({ ok: true });
-});
+const PORT = process.env.PORT || 3001;
+app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
 app.use('/api/reference', require('./routes/reference')(prisma));
 app.use('/api/clients', require('./routes/clients')(prisma));
@@ -22,9 +21,6 @@ app.use('/api/projects', require('./routes/projects')(prisma));
 app.use('/api/tasks', require('./routes/tasks')(prisma));
 app.use("/api/variations", variationsRouter);
 
-const port = process.env.PORT || 3001;
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+app.listen(PORT, () => console.log(`API on :${PORT}`));
 
 module.exports = app;
