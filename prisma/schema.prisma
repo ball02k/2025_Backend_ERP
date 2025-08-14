@@ -68,31 +68,53 @@ model Client {
 
 model Project {
   id          Int     @id @default(autoincrement())
-  code        String? @unique
+  tenantId    String
+  code        String  @unique
   name        String
   description String?
-  clientId    Int
-  client      Client  @relation(fields: [clientId], references: [id])
 
-  statusId  Int
-  statusRel ProjectStatus @relation("ProjectStatusRel", fields: [statusId], references: [id])
-  typeId    Int
-  typeRel   ProjectType   @relation("ProjectTypeRel", fields: [typeId], references: [id])
+  clientId Int?
+  client   Client? @relation(fields: [clientId], references: [id])
 
+  // Legacy lookup relations (retain for compatibility)
+  statusId  Int?
+  statusRel ProjectStatus? @relation("ProjectStatusRel", fields: [statusId], references: [id])
+  typeId    Int?
+  typeRel   ProjectType?   @relation("ProjectTypeRel", fields: [typeId], references: [id])
+
+  // Simple string fields for lean project
+  status         String
+  type           String
+  projectManagerId Int?
+  country        String?
+  currency       String?
+  unitSystem     String?
+  taxScheme      String?
+  contractForm   String?
+  startPlanned   DateTime?
+  endPlanned     DateTime?
+  startActual    DateTime?
+  endActual      DateTime?
+  labels         Json?
+
+  // Existing financial/schedule fields retained
   budget      Decimal?  @db.Decimal(18, 2)
   actualSpend Decimal?  @db.Decimal(18, 2)
   startDate   DateTime?
   endDate     DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   tasks      Task[]
   variations Variation[]
+  snapshot   ProjectSnapshot?
 }
 
 model Task {
   id        Int     @id @default(autoincrement())
   projectId Int
+  tenantId  String
   project   Project @relation(fields: [projectId], references: [id])
 
   title       String
@@ -105,6 +127,8 @@ model Task {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([tenantId, projectId])
 }
 
 model Contact {
@@ -131,6 +155,7 @@ model Contact {
 model Variation {
   id        Int     @id @default(autoincrement())
   projectId Int
+  tenantId  String
   project   Project @relation(fields: [projectId], references: [id])
 
   // Core identifiers
@@ -174,6 +199,7 @@ model Variation {
   @@index([type])
   @@index([status])
   @@index([referenceCode])
+  @@index([tenantId, projectId])
 }
 
 model VariationLine {
@@ -205,6 +231,58 @@ model VariationStatusHistory {
   changedAt  DateTime @default(now())
 
   @@index([variationId])
+}
+
+model ProjectSnapshot {
+  projectId             Int     @id
+  tenantId              String
+
+  // Financial
+  budget                Decimal? @db.Decimal(18,2)
+  committed             Decimal? @db.Decimal(18,2)
+  actual                Decimal? @db.Decimal(18,2)
+  retentionHeld         Decimal? @db.Decimal(18,2)
+  forecastAtComplete    Decimal? @db.Decimal(18,2)
+  variance              Decimal? @db.Decimal(18,2)
+
+  // Schedule
+  schedulePct           Int?
+  criticalAtRisk        Int?
+
+  // Variations
+  variationsDraft         Int?
+  variationsSubmitted     Int?
+  variationsApproved      Int?
+  variationsValueApproved Decimal? @db.Decimal(18,2)
+
+  // Tasks
+  tasksOverdue          Int?
+  tasksDueThisWeek      Int?
+
+  // RFIs (placeholder counts until RFI module lands)
+  rfisOpen              Int?
+  rfisAvgAgeDays        Int?
+
+  // QA/QC
+  qaOpenNCR             Int?
+  qaOpenPunch           Int?
+
+  // H&S
+  hsIncidentsThisMonth  Int?
+  hsOpenPermits         Int?
+
+  // Procurement
+  procurementCriticalLate Int?
+  procurementPOsOpen      Int?
+
+  // Carbon
+  carbonTarget          Decimal? @db.Decimal(18,2)
+  carbonToDate          Decimal? @db.Decimal(18,2)
+  carbonUnit            String?
+
+  updatedAt             DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model Document {

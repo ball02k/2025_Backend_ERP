@@ -8,6 +8,7 @@ const prisma = new PrismaClient();
 
 const variationsRouter = require('./routes/variations.cjs');
 const documentsRouter = require('./routes/documents.cjs');
+const projectsOverviewRouter = require('./routes/projects_overview');
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '5mb' }));
@@ -29,6 +30,7 @@ app.use('/api/projects', require('./routes/projects')(prisma));
 app.use('/api/tasks', require('./routes/tasks')(prisma));
 app.use('/api/variations', variationsRouter);
 app.use('/api/documents', documentsRouter);
+app.use('/api/projects', projectsOverviewRouter);
 
 // serve local uploads in dev for quick previews
 if ((process.env.STORAGE_PROVIDER || 'local').toLowerCase() === 'local') {
