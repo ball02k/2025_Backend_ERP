@@ -107,22 +107,22 @@ model Task {
 }
 
 model Contact {
-  id       Int    @id @default(autoincrement())
-  clientId Int
-  client   Client @relation(fields: [clientId], references: [id])
+  id         Int      @id @default(autoincrement())
+  clientId   Int
+  client     Client   @relation(fields: [clientId], references: [id])
 
-  firstName String
-  lastName  String?
-  email     String?
-  phone     String?
-  role      String? // e.g., QS, PM, Buyer, Site Supervisor
-  isPrimary Boolean @default(false)
+  firstName  String
+  lastName   String?
+  email      String?
+  phone      String?
+  role       String?
+  isPrimary  Boolean  @default(false)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  @@unique([clientId, email])
   @@index([clientId, isPrimary])
   @@index([email])
   @@index([role])
+  @@unique([clientId, email])
 }

@@ -90,12 +90,15 @@ module.exports = (prisma) => {
     try {
       const id = Number(req.params.id);
       const body = contactBodySchema.partial().parse(req.body);
+
+      const current = await prisma.contact.findUnique({ where: { id } });
+      if (!current) return res.status(404).json({ error: 'Contact not found' });
+
       if (body.isPrimary === true) {
-        const current = await prisma.contact.findUnique({ where: { id } });
-        if (current) {
-          await prisma.contact.updateMany({ where: { clientId: current.clientId, isPrimary: true }, data: { isPrimary: false } });
-        }
+        const targetClientId = body.clientId ?? current.clientId;
+        await prisma.contact.updateMany({ where: { clientId: targetClientId, isPrimary: true }, data: { isPrimary: false } });
       }
+
       const updated = await prisma.contact.update({ where: { id }, data: body });
       res.json(updated);
     } catch (e) { next(e); }
