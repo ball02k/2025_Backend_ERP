@@ -87,6 +87,7 @@ model Project {
   updatedAt   DateTime  @updatedAt
 
   tasks Task[]
+  variations  Variation[]
 }
 
 model Task {
