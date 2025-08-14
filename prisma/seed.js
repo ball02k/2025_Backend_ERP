@@ -2,13 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function upsertMany(model, items) {
-  for (const item of items) {
-    await model.upsert({
-      where: { key: item.key },
-      update: {},
-      create: item,
-    });
-  }
+  await model.createMany({ data: items, skipDuplicates: true });
 }
 
 async function findOrCreate(model, where, data) {
