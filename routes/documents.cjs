@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { prisma, Prisma, dec } = require('../utils/prisma.cjs');
+const { prisma, Prisma } = require('../utils/prisma.cjs');
 const { makeStorageKey, signKey, verifyKey, writeLocalStream } = require('../utils/storage.cjs');
 
 // Helper: CSV tag utils
@@ -106,7 +106,7 @@ router.get('/:id', async (req, res) => {
   try {
     const id = BigInt(req.params.id);
     const doc = await prisma.document.findUnique({
-      where: { id: Number(id) },
+      where: { id },
       include: { links: true },
     });
     if (!doc || doc.is_deleted) return res.status(404).json({ error: 'Not found' });
@@ -159,25 +159,11 @@ router.put('/local/upload/:key', async (req, res) => {
 // COMPLETE: record metadata & optional links
 async function completeHandler(req, res) {
   try {
-    const {
-      storageKey,
-      storageProvider,
-      fileName,
-      size,
-      contentType,
-      projectId,
-      variationId,
-      uploadedBy,
-      tags,
-      etag,
-      checksum_sha256,
-      note,
-    } = req.body || {};
+    const { storageKey, storageProvider, fileName, size, contentType, projectId, variationId, uploadedBy, tags } = req.body || {};
 
-    if (!storageProvider || !storageKey || !fileName) {
-      return res.status(400).json({ error: 'storageProvider, storageKey, fileName are required' });
+    if (!storageKey || !storageProvider || !fileName) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
-
     if (size != null && (isNaN(size) || Number(size) < 0)) {
       return res.status(400).json({ error: 'Invalid size' });
     }
@@ -187,13 +173,11 @@ async function completeHandler(req, res) {
 
     const created = await prisma.document.create({
       data: {
-        storageProvider: String(storageProvider),
-        storageKey: String(storageKey),
-        fileName: String(fileName),
+        storageKey,
+        storageProvider,
+        fileName,
         size: size != null ? BigInt(size) : null,
         contentType: contentType || null,
-        etag: etag || null,
-        checksum_sha256: checksum_sha256 || null,
         uploadedBy: uploadedBy || null,
         tags: toCsv(tags),
       },
@@ -205,15 +189,17 @@ async function completeHandler(req, res) {
           documentId: created.id,
           projectId: projectId ? Number(projectId) : null,
           variationId: variationId ? Number(variationId) : null,
-          note: note || null,
         },
       });
     }
 
     return res.json({ data: created });
   } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: 'Failed to complete document', details: DEV ? String(e.message) : undefined });
+    // P2021 = table/view not found; give a helpful hint
+    if (e.code === 'P2021') {
+      return res.status(500).json({ error: 'Schema not migrated. Run: npm run db:migrate' });
+    }
+    return res.status(500).json({ error: 'Failed to complete document', details: String(e.message || e) });
   }
 }
 
@@ -223,10 +209,10 @@ router.post('/complete', completeHandler);
 router.delete('/:id', async (req, res) => {
   try {
     const id = BigInt(req.params.id);
-    const existing = await prisma.document.findUnique({ where: { id: Number(id) } });
+    const existing = await prisma.document.findUnique({ where: { id } });
     if (!existing || existing.is_deleted) return res.status(404).json({ error: 'Not found' });
     const updated = await prisma.document.update({
-      where: { id: Number(id) },
+      where: { id },
       data: { is_deleted: true, deletedAt: new Date() },
     });
     return res.json({ data: updated });
@@ -243,15 +229,15 @@ router.post('/:id/link', async (req, res) => {
   try {
     const id = BigInt(req.params.id);
     const doc = await prisma.document.findFirst({
-      where: { id: Number(id), is_deleted: false },
+      where: { id, is_deleted: false },
     });
     if (!doc) return res.status(404).json({ error: 'Document not found' });
 
     const link = await prisma.documentLink.create({
       data: {
-        documentId: Number(id),
-        projectId: projectId ? Number(BigInt(projectId)) : null,
-        variationId: variationId ? Number(BigInt(variationId)) : null,
+        documentId: id,
+        projectId: projectId ? Number(projectId) : null,
+        variationId: variationId ? Number(variationId) : null,
         note: note || null,
       },
     });
@@ -269,9 +255,9 @@ router.post('/:id/unlink', async (req, res) => {
   try {
     const id = BigInt(req.params.id);
     const where = {
-      documentId: Number(id),
-      ...(projectId ? { projectId: Number(BigInt(projectId)) } : {}),
-      ...(variationId ? { variationId: Number(BigInt(variationId)) } : {}),
+      documentId: id,
+      ...(projectId ? { projectId: Number(projectId) } : {}),
+      ...(variationId ? { variationId: Number(variationId) } : {}),
     };
     const result = await prisma.documentLink.deleteMany({ where });
     return res.json({ data: { deleted: result.count } });
