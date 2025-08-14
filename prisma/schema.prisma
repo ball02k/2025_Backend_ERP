@@ -59,7 +59,7 @@ model Client {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   projects     Project[]
-  contacts     Contact[]
+  contacts      Contact[]   // REQUIRED for includes/counts
 
   @@index([name])
   @@index([vatNo])
