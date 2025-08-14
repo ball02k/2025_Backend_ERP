@@ -175,16 +175,16 @@ async function run() {
       });
     }
 
-    await prisma.task.createMany({
-      data: [
-        { projectId: a001.id, tenantId: 'demo', title: 'Site setup', statusId: done.id },
-        { projectId: a001.id, tenantId: 'demo', title: 'Traffic management plan', statusId: inProgress.id },
-        { projectId: a001.id, tenantId: 'demo', title: 'Utilities survey', statusId: open.id },
-        { projectId: r101.id, tenantId: 'demo', title: 'Milling schedule', statusId: open.id },
-        { projectId: r101.id, tenantId: 'demo', title: 'Asphalt supplier PO', statusId: blocked.id },
-      ],
-      skipDuplicates: true,
-    });
+      await prisma.task.createMany({
+        data: [
+          { projectId: a001.id, tenantId: 'demo', title: 'Site setup', status: 'DONE', statusId: done.id },
+          { projectId: a001.id, tenantId: 'demo', title: 'Traffic management plan', status: 'IN_PROGRESS', statusId: inProgress.id },
+          { projectId: a001.id, tenantId: 'demo', title: 'Utilities survey', status: 'OPEN', statusId: open.id },
+          { projectId: r101.id, tenantId: 'demo', title: 'Milling schedule', status: 'OPEN', statusId: open.id },
+          { projectId: r101.id, tenantId: 'demo', title: 'Asphalt supplier PO', status: 'BLOCKED', statusId: blocked.id },
+        ],
+        skipDuplicates: true,
+      });
 
     await seedVariations();
     await seedDocuments();
