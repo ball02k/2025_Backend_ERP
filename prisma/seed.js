@@ -83,11 +83,14 @@ async function run() {
       where: { code: 'A001' },
       update: {},
       create: {
+        tenantId: 'demo',
         code: 'A001',
         name: 'A14 Junction Upgrade',
         clientId: client.id,
         statusId: active.id,
         typeId: civils.id,
+        status: 'ACTIVE',
+        type: 'CIVILS',
       },
     });
 
@@ -95,21 +98,90 @@ async function run() {
       where: { code: 'R101' },
       update: {},
       create: {
+        tenantId: 'demo',
         code: 'R101',
         name: 'Ring Road Resurfacing',
         clientId: client.id,
         statusId: onHold.id,
         typeId: commercial.id,
+        status: 'ON_HOLD',
+        type: 'COMMERCIAL',
       },
     });
 
+    const projects = await prisma.project.findMany({ select: { id: true, tenantId: true } });
+
+    for (const p of projects) {
+      await prisma.projectSnapshot.upsert({
+        where: { projectId: p.id },
+        update: {
+          tenantId: p.tenantId,
+          budget: 2500000,
+          committed: 1900000,
+          actual: 1420000,
+          retentionHeld: 120000,
+          forecastAtComplete: 2550000,
+          variance: 50000,
+          schedulePct: 47,
+          criticalAtRisk: 3,
+          variationsDraft: 2,
+          variationsSubmitted: 3,
+          variationsApproved: 5,
+          variationsValueApproved: 180000,
+          tasksOverdue: 7,
+          tasksDueThisWeek: 15,
+          rfisOpen: 6,
+          rfisAvgAgeDays: 9,
+          qaOpenNCR: 2,
+          qaOpenPunch: 18,
+          hsIncidentsThisMonth: 1,
+          hsOpenPermits: 4,
+          procurementCriticalLate: 2,
+          procurementPOsOpen: 14,
+          carbonTarget: 120,
+          carbonToDate: 78,
+          carbonUnit: "tCO2e",
+          updatedAt: new Date(),
+        },
+        create: {
+          projectId: p.id,
+          tenantId: p.tenantId,
+          budget: 2500000,
+          committed: 1900000,
+          actual: 1420000,
+          retentionHeld: 120000,
+          forecastAtComplete: 2550000,
+          variance: 50000,
+          schedulePct: 47,
+          criticalAtRisk: 3,
+          variationsDraft: 2,
+          variationsSubmitted: 3,
+          variationsApproved: 5,
+          variationsValueApproved: 180000,
+          tasksOverdue: 7,
+          tasksDueThisWeek: 15,
+          rfisOpen: 6,
+          rfisAvgAgeDays: 9,
+          qaOpenNCR: 2,
+          qaOpenPunch: 18,
+          hsIncidentsThisMonth: 1,
+          hsOpenPermits: 4,
+          procurementCriticalLate: 2,
+          procurementPOsOpen: 14,
+          carbonTarget: 120,
+          carbonToDate: 78,
+          carbonUnit: "tCO2e",
+        },
+      });
+    }
+
     await prisma.task.createMany({
       data: [
-        { projectId: a001.id, title: 'Site setup', statusId: done.id },
-        { projectId: a001.id, title: 'Traffic management plan', statusId: inProgress.id },
-        { projectId: a001.id, title: 'Utilities survey', statusId: open.id },
-        { projectId: r101.id, title: 'Milling schedule', statusId: open.id },
-        { projectId: r101.id, title: 'Asphalt supplier PO', statusId: blocked.id },
+        { projectId: a001.id, tenantId: 'demo', title: 'Site setup', statusId: done.id },
+        { projectId: a001.id, tenantId: 'demo', title: 'Traffic management plan', statusId: inProgress.id },
+        { projectId: a001.id, tenantId: 'demo', title: 'Utilities survey', statusId: open.id },
+        { projectId: r101.id, tenantId: 'demo', title: 'Milling schedule', statusId: open.id },
+        { projectId: r101.id, tenantId: 'demo', title: 'Asphalt supplier PO', statusId: blocked.id },
       ],
       skipDuplicates: true,
     });
@@ -151,6 +223,7 @@ async function seedVariations() {
       await prisma.variation.create({
         data: {
           projectId: p.id,
+          tenantId: 'demo',
           referenceCode: `${type}-${String(counter).padStart(4, '0')}`,
           title: `Site change #${counter}`,
           description: 'Seeded variation for demo',
