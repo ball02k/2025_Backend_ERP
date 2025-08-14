@@ -68,7 +68,7 @@ model Client {
 
 model Project {
   id          Int     @id @default(autoincrement())
-  tenantId    String
+  tenantId    String   @default("demo")
   code        String  @unique
   name        String
   description String?
@@ -83,8 +83,8 @@ model Project {
   typeRel   ProjectType?   @relation("ProjectTypeRel", fields: [typeId], references: [id])
 
   // Simple string fields for lean project
-  status         String
-  type           String
+  status         String   @default("Active")
+  type           String   @default("General")
   projectManagerId Int?
   country        String?
   currency       String?
@@ -116,13 +116,15 @@ model Project {
 model Task {
   id        Int     @id @default(autoincrement())
   projectId Int
-  tenantId  String
+  tenantId  String   @default("demo")
   project   Project @relation(fields: [projectId], references: [id])
 
   title       String
   description String?
   dueDate     DateTime?
   assignee    String?
+
+  status     String
 
   statusId  Int
   statusRel TaskStatus @relation("TaskStatusRel", fields: [statusId], references: [id])
