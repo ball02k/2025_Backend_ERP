@@ -109,6 +109,8 @@ model Project {
   tasks      Task[]
   variations Variation[]
   snapshot   ProjectSnapshot?
+
+  @@index([tenantId, status])
 }
 
 model Task {
@@ -129,6 +131,8 @@ model Task {
   updatedAt DateTime @updatedAt
 
   @@index([tenantId, projectId])
+  @@index([tenantId, projectId, status])
+  @@index([projectId, dueDate])
 }
 
 model Contact {
@@ -200,6 +204,7 @@ model Variation {
   @@index([status])
   @@index([referenceCode])
   @@index([tenantId, projectId])
+  @@index([tenantId, projectId, status])
 }
 
 model VariationLine {
@@ -316,4 +321,7 @@ model DocumentLink {
   document Document @relation(fields: [documentId], references: [id])
   // If you have Project/Variation models with BigInt ids, you can add relations later.
   // For now they remain nullable numeric FKs without relation constraints.
+
+  @@index([projectId])
+  @@index([variationId])
 }

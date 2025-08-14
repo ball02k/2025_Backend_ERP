@@ -3,6 +3,7 @@ const router = express.Router();
 const { prisma, Prisma, dec } = require("../utils/prisma.cjs");
 const { computeTotals } = require("../utils/variations.cjs");
 const { resolve: resolveLookup } = require("../utils/lookups.cjs");
+const { recomputeProjectSnapshot } = require("../services/projectSnapshot");
 const DEV = process.env.NODE_ENV !== "production";
 
 // Allowed workflow transitions
@@ -31,6 +32,10 @@ function parseNumber(n, fallback = null) {
   return Number.isFinite(v) ? v : fallback;
 }
 
+function getTenantId(req) {
+  return req.headers["x-tenant-id"] || "demo";
+}
+
 async function applyLookupStrings(body) {
   const pairs = [
     ["typeLookupId", "type", "variation_type"],
@@ -51,6 +56,7 @@ async function applyLookupStrings(body) {
 // LIST
 router.get("/", async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const {
       projectId,
       status,
@@ -61,7 +67,7 @@ router.get("/", async (req, res) => {
       totals,
       includeTotals,
     } = req.query;
-    const where = { is_deleted: false };
+    const where = { is_deleted: false, tenantId };
     if (projectId) where.projectId = Number(projectId);
     if (status) where.status = String(status);
     if (type) where.type = String(type);
@@ -128,9 +134,10 @@ router.get("/", async (req, res) => {
 // DETAIL
 router.get("/:id", async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const id = Number(req.params.id);
     const row = await prisma.variation.findFirst({
-      where: { id, is_deleted: false },
+      where: { id, tenantId, is_deleted: false },
       include: {
         project: {
           select: {
@@ -161,6 +168,7 @@ router.get("/:id", async (req, res) => {
 // CREATE
 router.post("/", async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const body = await applyLookupStrings({ ...req.body });
     const {
       projectId,
@@ -197,6 +205,7 @@ router.post("/", async (req, res) => {
 
     const created = await prisma.variation.create({
       data: {
+        tenantId,
         projectId: Number(projectId),
         referenceCode: referenceCode || null,
         title,
@@ -242,6 +251,7 @@ router.post("/", async (req, res) => {
       include: { lines: true, statusHistory: true },
     });
 
+    await recomputeProjectSnapshot(Number(created.projectId), tenantId);
     res.status(201).json({ data: created });
   } catch (err) {
     console.error(err);
@@ -255,9 +265,10 @@ router.post("/", async (req, res) => {
 // UPDATE
 router.put("/:id", async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const id = Number(req.params.id);
     const existing = await prisma.variation.findFirst({
-      where: { id, is_deleted: false },
+      where: { id, tenantId, is_deleted: false },
     });
     if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -342,6 +353,11 @@ router.put("/:id", async (req, res) => {
       return upd;
     });
 
+    await recomputeProjectSnapshot(Number(updated.projectId), tenantId);
+    if (updated.projectId !== existing.projectId) {
+      await recomputeProjectSnapshot(Number(existing.projectId), tenantId);
+    }
+
     res.json({ data: updated });
   } catch (err) {
     console.error(err);
@@ -355,12 +371,13 @@ router.put("/:id", async (req, res) => {
 // STATUS CHANGE
 router.patch("/:id/status", async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const id = Number(req.params.id);
     const { toStatus, note } = req.body || {};
     if (!toStatus) return res.status(400).json({ error: "toStatus is required" });
 
     const existing = await prisma.variation.findFirst({
-      where: { id, is_deleted: false },
+      where: { id, tenantId, is_deleted: false },
     });
     if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -405,6 +422,7 @@ router.patch("/:id/status", async (req, res) => {
       return u;
     });
 
+    await recomputeProjectSnapshot(Number(existing.projectId), tenantId);
     res.json({ data: updated });
   } catch (err) {
     console.error(err);
@@ -418,9 +436,10 @@ router.patch("/:id/status", async (req, res) => {
 // SOFT DELETE
 router.delete("/:id", async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const id = Number(req.params.id);
     const existing = await prisma.variation.findFirst({
-      where: { id, is_deleted: false },
+      where: { id, tenantId, is_deleted: false },
     });
     if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -429,6 +448,7 @@ router.delete("/:id", async (req, res) => {
       data: { is_deleted: true },
     });
 
+    await recomputeProjectSnapshot(Number(existing.projectId), tenantId);
     res.json({ data: deleted });
   } catch (err) {
     console.error(err);
