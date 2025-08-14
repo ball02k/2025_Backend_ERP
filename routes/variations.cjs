@@ -31,6 +31,23 @@ function parseNumber(n, fallback = null) {
   return Number.isFinite(v) ? v : fallback;
 }
 
+async function applyLookupStrings(body) {
+  const pairs = [
+    ["typeLookupId", "type", "variation_type"],
+    ["statusLookupId", "status", "variation_status"],
+    ["reasonLookupId", "reason_code", "variation_reason"],
+  ];
+  for (const [lk, sk, kind] of pairs) {
+    if (!body[sk] && body[lk]) {
+      const val = await resolveLookup(body[lk], kind, prisma);
+      if (!val) throw Object.assign(new Error(`Unknown ${lk}`), { status: 400 });
+      body[sk] = val;
+    }
+    delete body[lk];
+  }
+  return body;
+}
+
 // LIST
 router.get("/", async (req, res) => {
   try {
@@ -148,17 +165,15 @@ router.get("/:id", async (req, res) => {
 // CREATE
 router.post("/", async (req, res) => {
   try {
+    const body = await applyLookupStrings({ ...req.body });
     const {
       projectId,
       referenceCode,
       title,
       description,
       type,
-      typeLookupId,
       status,
-      statusLookupId,
       reason_code,
-      reasonLookupId,
       estimated_cost,
       estimated_sell,
       agreed_cost,
@@ -174,36 +189,15 @@ router.post("/", async (req, res) => {
       voIssuedDate,
       voAcceptedDate,
       lines = [],
-    } = req.body || {};
+    } = body || {};
 
-    if (!projectId || !title || !(type || typeLookupId)) {
+    if (!projectId || !title || !type) {
       return res.status(400).json({
-        error: "projectId, title, and type (or typeLookupId) are required",
+        error: "projectId, title, and type are required",
       });
     }
 
-    let resolvedType = type;
-    let resolvedStatus = status;
-    let resolvedReason = reason_code;
-
-    if (!resolvedType && typeLookupId) {
-      const val = await resolveLookup(typeLookupId, "variation_type", prisma);
-      if (!val) return res.status(400).json({ error: "Unknown typeLookupId" });
-      resolvedType = val;
-    }
-    if (!resolvedStatus && statusLookupId) {
-      const val = await resolveLookup(statusLookupId, "variation_status", prisma);
-      if (!val)
-        return res.status(400).json({ error: "Unknown statusLookupId" });
-      resolvedStatus = val;
-    }
-    if (!resolvedReason && reasonLookupId) {
-      const val = await resolveLookup(reasonLookupId, "variation_reason", prisma);
-      if (!val)
-        return res.status(400).json({ error: "Unknown reasonLookupId" });
-      resolvedReason = val;
-    }
-    if (!resolvedStatus) resolvedStatus = "draft";
+    const resolvedStatus = status || "draft";
 
     const created = await prisma.variation.create({
       data: {
@@ -211,9 +205,9 @@ router.post("/", async (req, res) => {
         referenceCode: referenceCode || null,
         title,
         description: description || null,
-        type: String(resolvedType),
+        type: String(type),
         status: String(resolvedStatus),
-        reason_code: resolvedReason || null,
+        reason_code: reason_code || null,
         estimated_cost: estimated_cost ?? null,
         estimated_sell: estimated_sell ?? null,
         agreed_cost: agreed_cost ?? null,
@@ -255,8 +249,8 @@ router.post("/", async (req, res) => {
     res.status(201).json({ data: created });
   } catch (err) {
     console.error(err);
-    res.status(500).json({
-      error: "Failed to create variation",
+    res.status(err.status || 500).json({
+      error: err.message || "Failed to create variation",
       details: DEV ? String(err.message) : undefined,
     });
   }
@@ -271,16 +265,14 @@ router.put("/:id", async (req, res) => {
     });
     if (!existing) return res.status(404).json({ error: "Not found" });
 
+    const body = await applyLookupStrings({ ...req.body });
     const {
       referenceCode,
       title,
       description,
       type,
-      typeLookupId,
       status,
-      statusLookupId,
       reason_code,
-      reasonLookupId,
       estimated_cost,
       estimated_sell,
       agreed_cost,
@@ -296,34 +288,16 @@ router.put("/:id", async (req, res) => {
       voIssuedDate,
       voAcceptedDate,
       lines,
-    } = req.body || {};
+    } = body || {};
 
     const updated = await prisma.$transaction(async (tx) => {
       if (Array.isArray(lines)) {
         await tx.variationLine.deleteMany({ where: { variationId: id } });
       }
 
-      let resolvedType = type ?? existing.type;
-      let resolvedStatus = status ?? existing.status;
-      let resolvedReason = reason_code ?? existing.reason_code;
-
-      if (!resolvedType && typeLookupId) {
-        const val = await resolveLookup(typeLookupId, "variation_type", prisma);
-        if (!val) return res.status(400).json({ error: "Unknown typeLookupId" });
-        resolvedType = val;
-      }
-      if (!resolvedStatus && statusLookupId) {
-        const val = await resolveLookup(statusLookupId, "variation_status", prisma);
-        if (!val)
-          return res.status(400).json({ error: "Unknown statusLookupId" });
-        resolvedStatus = val;
-      }
-      if (!resolvedReason && reasonLookupId) {
-        const val = await resolveLookup(reasonLookupId, "variation_reason", prisma);
-        if (!val)
-          return res.status(400).json({ error: "Unknown reasonLookupId" });
-        resolvedReason = val;
-      }
+      const resolvedType = type ?? existing.type;
+      const resolvedStatus = status ?? existing.status;
+      const resolvedReason = reason_code ?? existing.reason_code;
 
       const upd = await tx.variation.update({
         where: { id },
@@ -375,8 +349,8 @@ router.put("/:id", async (req, res) => {
     res.json({ data: updated });
   } catch (err) {
     console.error(err);
-    res.status(500).json({
-      error: "Failed to update variation",
+    res.status(err.status || 500).json({
+      error: err.message || "Failed to update variation",
       details: DEV ? String(err.message) : undefined,
     });
   }

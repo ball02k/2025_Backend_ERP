@@ -1,21 +1,13 @@
 const { Prisma } = require('./prisma.cjs');
 
+function safeNum(v) {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function computeTotals(variation, lines = []) {
-  const hasLines = Array.isArray(lines) && lines.length > 0;
-  let cost = 0;
-  let sell = 0;
-  if (hasLines) {
-    for (const l of lines) {
-      const qty = Number(l.qty ?? 0);
-      const unitCost = Number(l.unit_cost ?? l.unitCost ?? 0);
-      const unitSell = Number(l.unit_sell ?? l.unitSell ?? 0);
-      cost += qty * unitCost;
-      sell += qty * unitSell;
-    }
-  } else {
-    cost = Number(variation?.estimated_cost ?? 0);
-    sell = Number(variation?.estimated_sell ?? 0);
-  }
+  const cost = lines.reduce((a, l) => a + safeNum(l.qty) * safeNum(l.unit_cost), 0);
+  const sell = lines.reduce((a, l) => a + safeNum(l.qty) * safeNum(l.unit_sell), 0);
   const margin = sell - cost;
   const marginPct = sell ? margin / sell : 0;
   return {
