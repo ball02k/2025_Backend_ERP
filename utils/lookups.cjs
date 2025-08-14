@@ -1,8 +1,7 @@
-// Replace with real DB tables when ready.
 async function resolve(id, kind, prisma) {
-  // e.g., query a Lookup table by id & kind; for now, return null to enforce strings unless you wire it up.
-  // const row = await prisma.lookup.findFirst({ where: { id: BigInt(id), kind } });
+  // Replace with real Lookup table when ready.
+  // e.g. const row = await prisma.lookup.findFirst({ where: { id: Number(id), kind } });
   // return row?.value || null;
-  return null;
+  return null; // keep stub returning null for now
 }
 module.exports = { resolve };
