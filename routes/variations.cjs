@@ -114,8 +114,12 @@ router.get("/", async (req, res) => {
     ]);
 
     res.json({
-      data: rows,
-      meta: { total, limit: Number(limit), offset: Number(offset) },
+      data: Array.isArray(rows) ? rows : [],
+      meta: {
+        total: Number.isFinite(total) ? total : 0,
+        limit: Number(limit) || 20,
+        offset: Number(offset) || 0,
+      },
     });
   } catch (err) {
     console.error(err);
