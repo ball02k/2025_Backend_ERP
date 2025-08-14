@@ -126,3 +126,82 @@ model Contact {
   @@index([role])
   @@unique([clientId, email])
 }
+
+model Variation {
+  id                Int       @id @default(autoincrement())
+  projectId         Int
+  project           Project   @relation(fields: [projectId], references: [id])
+
+  // Core identifiers
+  referenceCode     String?   @db.VarChar(64)
+  title             String    @db.VarChar(255)
+  description       String?   @db.Text
+
+  // Strings (avoid Prisma enums)
+  type              String    @db.VarChar(24)
+  status            String    @db.VarChar(24)
+  reason_code       String?   @db.VarChar(64)
+
+  // Commercials
+  estimated_cost    Decimal?  @db.Decimal(18,2)
+  estimated_sell    Decimal?  @db.Decimal(18,2)
+  agreed_cost       Decimal?  @db.Decimal(18,2)
+  agreed_sell       Decimal?  @db.Decimal(18,2)
+
+  // Dates
+  notifiedDate      DateTime?
+  submittedDate     DateTime?
+  reviewedDate      DateTime?
+  approvedDate      DateTime?
+  rejectedDate      DateTime?
+  instructedDate    DateTime?
+  pricedDate        DateTime?
+  agreedDate        DateTime?
+  voIssuedDate      DateTime?
+  voAcceptedDate    DateTime?
+
+  // Meta
+  is_deleted        Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  lines             VariationLine[]
+  statusHistory     VariationStatusHistory[]
+
+  @@index([projectId])
+  @@index([type])
+  @@index([status])
+  @@index([referenceCode])
+}
+
+model VariationLine {
+  id           Int       @id @default(autoincrement())
+  variationId  Int
+  variation    Variation @relation(fields: [variationId], references: [id])
+
+  cost_code    String?   @db.VarChar(64)
+  description  String    @db.VarChar(255)
+  qty          Decimal   @db.Decimal(18,2)
+  unit         String?   @db.VarChar(32)
+  unit_cost    Decimal   @db.Decimal(18,2)
+  unit_sell    Decimal?  @db.Decimal(18,2)
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([variationId])
+}
+
+model VariationStatusHistory {
+  id           Int       @id @default(autoincrement())
+  variationId  Int
+  variation    Variation @relation(fields: [variationId], references: [id])
+
+  fromStatus   String?   @db.VarChar(24)
+  toStatus     String    @db.VarChar(24)
+  note         String?   @db.VarChar(255)
+  changedAt    DateTime  @default(now())
+
+  @@index([variationId])
+}
