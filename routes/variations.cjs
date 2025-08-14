@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { PrismaClient, Prisma } = require("@prisma/client");
-const prisma = new PrismaClient();
+const { prisma, Prisma, dec } = require("../utils/prisma.cjs");
 const DEV = process.env.NODE_ENV !== "production";
 
 // Allowed workflow transitions
@@ -77,8 +76,6 @@ function computeTotals(row) {
   };
 }
 
-const dec = (v) => (v == null ? null : new Prisma.Decimal(v));
-
 // LIST
 router.get("/", async (req, res) => {
   try {
@@ -118,7 +115,7 @@ router.get("/", async (req, res) => {
     res.json({
       data: Array.isArray(rows) ? rows : [],
       meta: {
-        total: Number.isFinite(total) ? total : 0,
+        total: Number(total) || 0,
         limit: Number(limit) || 20,
         offset: Number(offset) || 0,
       },

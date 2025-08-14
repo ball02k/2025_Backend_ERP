@@ -1,0 +1,28 @@
+name: Prisma & Repo Preflight
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.4'
+          cache: 'npm'
+      - run: npm ci
+      - name: Prisma validate
+        run: npx prisma validate
+      - name: Prisma generate
+        run: npx prisma generate
+      - name: Block incorrect Decimal usage
+        run: |
+          if grep -R --line-number "new prisma\\.Prisma\\.Decimal" routes prisma | cat; then
+            echo "::error::Do not use new prisma.Prisma.Decimal — import { Prisma } and use new Prisma.Decimal or helper."
+            exit 1
+          fi
+      - name: Basic lint (optional/cheap)
+        run: node -e "require('fs').accessSync('prisma/schema.prisma')"
