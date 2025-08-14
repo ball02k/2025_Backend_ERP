@@ -110,7 +110,76 @@ async function run() {
     skipDuplicates: true,
   });
 
+  await seedVariations();
+
   console.log('Seed complete');
+}
+
+async function seedVariations() {
+  const projects = await prisma.project.findMany({ take: 3, orderBy: { id: 'asc' } });
+  if (!projects.length) return;
+
+  let counter = 1;
+  for (const p of projects) {
+    const toMake = 6;
+    for (let i = 0; i < toMake; i++) {
+      const type = i % 3 === 0 ? 'CE' : i % 3 === 1 ? 'VARIATION' : 'VO';
+      const statusPool = [
+        'draft',
+        'submitted',
+        'under_review',
+        'approved',
+        'instructed',
+        'priced',
+        'agreed',
+        'vo_issued',
+        'vo_accepted',
+      ];
+      const status = statusPool[i % statusPool.length];
+
+      await prisma.variation.create({
+        data: {
+          projectId: p.id,
+          referenceCode: `${type}-${String(counter).padStart(4, '0')}`,
+          title: `Site change #${counter}`,
+          description: 'Seeded variation for demo',
+          type,
+          status,
+          reason_code: ['client_change', 'latent_condition', 'design_development'][i % 3],
+          estimated_cost: new prisma.Prisma.Decimal(500 + i * 50),
+          estimated_sell: new prisma.Prisma.Decimal(800 + i * 60),
+          notifiedDate: new Date(),
+          lines: {
+            create: [
+              {
+                cost_code: 'LAB',
+                description: 'Joinery labour (extra)',
+                qty: new prisma.Prisma.Decimal(8 + i),
+                unit: 'hr',
+                unit_cost: new prisma.Prisma.Decimal(35),
+                unit_sell: new prisma.Prisma.Decimal(55),
+              },
+              ...(i % 2 === 0
+                ? [
+                    {
+                      cost_code: 'MAT',
+                      description: 'Timber',
+                      qty: new prisma.Prisma.Decimal(12),
+                      unit: 'item',
+                      unit_cost: new prisma.Prisma.Decimal(18.5),
+                      unit_sell: new prisma.Prisma.Decimal(28.0),
+                    },
+                  ]
+                : []),
+            ],
+          },
+          statusHistory: { create: [{ fromStatus: null, toStatus: status, note: 'seed' }] },
+        },
+      });
+
+      counter++;
+    }
+  }
 }
 
 run()
