@@ -4,7 +4,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "preflight": "node scripts/preflight.mjs",
+    "preflight": "node scripts/preflight.cjs",
+    "smoke:docs": "node scripts/documents-smoke.mjs",
     "health": "curl -s http://localhost:${PORT:-3001}/healthz || true",
     "dev": "nodemon index.cjs",
     "db:seed": "node prisma/seed.js"

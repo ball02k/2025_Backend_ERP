@@ -1,0 +1,28 @@
+name: Preflight
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+      - run: npm ci
+      - run: npx prisma validate && npx prisma generate
+      - name: Forbid bad Decimal usage
+        run: |
+          if grep -R "new prisma\.Prisma\.Decimal" -n --include=\*.{js,cjs,mjs,ts} .; then
+            echo "Do not use new prisma.Prisma.Decimal — use new Prisma.Decimal"
+            exit 1
+          fi
+      - name: Optional smokes
+        if: ${{ github.event_name == 'push' && false }} # flip to true when you have ephemeral env
+        run: |
+          node scripts/variations-smoke.mjs || true
+          npm run smoke:docs || true
