@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { PrismaClient } = require("@prisma/client");
+const { PrismaClient, Prisma } = require("@prisma/client");
 const prisma = new PrismaClient();
 const DEV = process.env.NODE_ENV !== "production";
 
@@ -76,6 +76,8 @@ function computeTotals(row) {
     margin: Number((estSell - estCost).toFixed(2)),
   };
 }
+
+const dec = (v) => (v == null ? null : new Prisma.Decimal(v));
 
 // LIST
 router.get("/", async (req, res) => {
@@ -240,12 +242,12 @@ router.post("/", async (req, res) => {
               create: lines.map((L) => ({
                 cost_code: L.cost_code || null,
                 description: L.description,
-                qty: new prisma.Prisma.Decimal(parseNumber(L.qty, 0) ?? 0),
+                qty: dec(parseNumber(L.qty, 0) ?? 0),
                 unit: L.unit || null,
-                unit_cost: new prisma.Prisma.Decimal(parseNumber(L.unit_cost, 0) ?? 0),
+                unit_cost: dec(parseNumber(L.unit_cost, 0) ?? 0),
                 unit_sell:
                   L.unit_sell != null
-                    ? new prisma.Prisma.Decimal(parseNumber(L.unit_sell, 0) ?? 0)
+                    ? dec(parseNumber(L.unit_sell, 0) ?? 0)
                     : null,
               })),
             }
@@ -355,12 +357,12 @@ router.put("/:id", async (req, res) => {
                   create: lines.map((L) => ({
                     cost_code: L.cost_code || null,
                     description: L.description,
-                    qty: new prisma.Prisma.Decimal(parseNumber(L.qty, 0) ?? 0),
+                    qty: dec(parseNumber(L.qty, 0) ?? 0),
                     unit: L.unit || null,
-                    unit_cost: new prisma.Prisma.Decimal(parseNumber(L.unit_cost, 0) ?? 0),
+                    unit_cost: dec(parseNumber(L.unit_cost, 0) ?? 0),
                     unit_sell:
                       L.unit_sell != null
-                        ? new prisma.Prisma.Decimal(parseNumber(L.unit_sell, 0) ?? 0)
+                        ? dec(parseNumber(L.unit_sell, 0) ?? 0)
                         : null,
                   })),
                 },
