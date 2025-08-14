@@ -98,7 +98,17 @@ router.get("/", async (req, res) => {
         skip: Number(offset) || 0,
         take: Number(limit) || 20,
         include: {
-          project: { select: { id: true, name: true, status: true, type: true } },
+          project: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              statusId: true,
+              typeId: true,
+              status: { select: { key: true, label: true } },
+              type: { select: { key: true, label: true } },
+            },
+          },
         },
       }),
       prisma.variation.count({ where }),
@@ -121,7 +131,17 @@ router.get("/:id", async (req, res) => {
     const row = await prisma.variation.findFirst({
       where: { id, is_deleted: false },
       include: {
-        project: { select: { id: true, name: true, status: true, type: true } },
+        project: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            statusId: true,
+            typeId: true,
+            status: { select: { key: true, label: true } },
+            type: { select: { key: true, label: true } },
+          },
+        },
         lines: true,
         statusHistory: { orderBy: { changedAt: "asc" } },
       },
