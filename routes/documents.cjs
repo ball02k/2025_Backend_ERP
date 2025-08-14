@@ -1,7 +1,19 @@
 const express = require('express');
 const router = express.Router();
-const { prisma } = require('../utils/prisma.cjs');
+const { prisma, Prisma, dec } = require('../utils/prisma.cjs');
 const { makeStorageKey, signKey, verifyKey, writeLocalStream } = require('../utils/storage.cjs');
+
+// Helper: CSV tag utils
+const toCsv = (arr) =>
+  Array.from(
+    new Set((arr || []).map((s) => String(s).trim().toLowerCase()).filter(Boolean))
+  ).join(',');
+const hasTag = (csv, tag) =>
+  (csv || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .includes(String(tag).toLowerCase());
 
 const DEV = process.env.NODE_ENV !== 'production';
 const STORAGE_PROVIDER = (process.env.STORAGE_PROVIDER || 'local').toLowerCase(); // 'local' | 's3'
@@ -25,29 +37,64 @@ function ensureS3(){
 
 // LIST
 router.get('/', async (req, res) => {
-  try {
-    const { projectId, variationId, q, limit = 20, offset = 0 } = req.query;
-    const where = { is_deleted: false };
-    if (q) where.fileName = { contains: String(q), mode: 'insensitive' };
-    if (projectId || variationId) {
-      where.links = { some: {
-        ...(projectId ? { projectId: Number(projectId) } : {}),
-        ...(variationId ? { variationId: Number(variationId) } : {}),
-      } };
-    }
+  const {
+    q,
+    tag,
+    from,
+    to,
+    projectId,
+    variationId,
+    limit = 50,
+    offset = 0,
+    includeDeleted,
+  } = req.query;
 
+  const where = {
+    ...(includeDeleted ? {} : { is_deleted: false }),
+    ...(projectId || variationId
+      ? {
+          links: {
+            some: {
+              ...(projectId ? { projectId: Number(projectId) } : {}),
+              ...(variationId ? { variationId: Number(variationId) } : {}),
+            },
+          },
+        }
+      : {}),
+  };
+
+  if (q) {
+    where.OR = [
+      { fileName: { contains: q, mode: 'insensitive' } },
+      { storageKey: { contains: q, mode: 'insensitive' } },
+      { tags: { contains: String(q).toLowerCase() } },
+    ];
+  }
+
+  if (from || to) {
+    where.uploadedAt = {};
+    if (from) where.uploadedAt.gte = new Date(from);
+    if (to) where.uploadedAt.lte = new Date(to);
+  }
+
+  try {
     const [rows, total] = await Promise.all([
       prisma.document.findMany({
         where,
+        include: { links: true },
         orderBy: { uploadedAt: 'desc' },
-        skip: Number(offset) || 0,
-        take: Number(limit) || 20,
-        include: { links: { select: { id: true, projectId: true, variationId: true, note: true } } },
+        take: Number(limit),
+        skip: Number(offset),
       }),
       prisma.document.count({ where }),
     ]);
 
-    res.json({ data: rows ?? [], meta: { total: Number(total)||0, limit: Number(limit)||20, offset: Number(offset)||0 } });
+    const filtered = tag ? rows.filter((r) => hasTag(r.tags, tag)) : rows;
+
+    res.json({
+      data: filtered,
+      meta: { total, limit: Number(limit), offset: Number(offset) },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch documents', details: DEV ? String(err.message) : undefined });
@@ -57,13 +104,15 @@ router.get('/', async (req, res) => {
 // DETAIL
 router.get('/:id', async (req, res) => {
   try {
-    const id = Number(req.params.id);
-    const row = await prisma.document.findFirst({ where: { id, is_deleted: false }, include: { links: true } });
-    if (!row) return res.status(404).json({ error: 'Not found' });
-    res.json({ data: row });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch document', details: DEV ? String(err.message) : undefined });
+    const id = BigInt(req.params.id);
+    const doc = await prisma.document.findUnique({
+      where: { id: Number(id) },
+      include: { links: true },
+    });
+    if (!doc || doc.is_deleted) return res.status(404).json({ error: 'Not found' });
+    return res.json({ data: doc });
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid id' });
   }
 });
 
@@ -108,55 +157,126 @@ router.put('/local/upload/:key', async (req, res) => {
 });
 
 // COMPLETE: record metadata & optional links
-router.post('/complete', async (req, res) => {
+async function completeHandler(req, res) {
   try {
     const {
-      storageProvider, storageKey, fileName, contentType, size,
-      etag, checksum_sha256, uploadedBy, projectId, variationId, note, tags
+      storageKey,
+      storageProvider,
+      fileName,
+      size,
+      contentType,
+      projectId,
+      variationId,
+      uploadedBy,
+      tags,
+      etag,
+      checksum_sha256,
+      note,
     } = req.body || {};
 
     if (!storageProvider || !storageKey || !fileName) {
       return res.status(400).json({ error: 'storageProvider, storageKey, fileName are required' });
     }
 
-    const doc = await prisma.document.create({
+    if (size != null && (isNaN(size) || Number(size) < 0)) {
+      return res.status(400).json({ error: 'Invalid size' });
+    }
+    if (contentType && typeof contentType !== 'string') {
+      return res.status(400).json({ error: 'Invalid contentType' });
+    }
+
+    const created = await prisma.document.create({
       data: {
         storageProvider: String(storageProvider),
         storageKey: String(storageKey),
         fileName: String(fileName),
-        contentType: contentType || null,
         size: size != null ? BigInt(size) : null,
+        contentType: contentType || null,
         etag: etag || null,
         checksum_sha256: checksum_sha256 || null,
-        tags: tags || null,
         uploadedBy: uploadedBy || null,
-        links: (projectId || variationId) ? {
-          create: [{
-            projectId: projectId ? Number(projectId) : null,
-            variationId: variationId ? Number(variationId) : null,
-            note: note || null
-          }],
-        } : undefined,
+        tags: toCsv(tags),
       },
-      include: { links: true },
     });
 
-    res.status(201).json({ data: doc });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to complete upload', details: DEV ? String(err.message) : undefined });
+    if (projectId || variationId) {
+      await prisma.documentLink.create({
+        data: {
+          documentId: created.id,
+          projectId: projectId ? Number(projectId) : null,
+          variationId: variationId ? Number(variationId) : null,
+          note: note || null,
+        },
+      });
+    }
+
+    return res.json({ data: created });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to complete document', details: DEV ? String(e.message) : undefined });
   }
-});
+}
+
+router.post('/complete', completeHandler);
 
 // SOFT DELETE
 router.delete('/:id', async (req, res) => {
   try {
-    const id = Number(req.params.id);
-    const doc = await prisma.document.update({ where: { id }, data: { is_deleted: true } });
-    res.json({ data: doc });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to delete document', details: DEV ? String(err.message) : undefined });
+    const id = BigInt(req.params.id);
+    const existing = await prisma.document.findUnique({ where: { id: Number(id) } });
+    if (!existing || existing.is_deleted) return res.status(404).json({ error: 'Not found' });
+    const updated = await prisma.document.update({
+      where: { id: Number(id) },
+      data: { is_deleted: true, deletedAt: new Date() },
+    });
+    return res.json({ data: updated });
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+});
+
+// POST /api/documents/:id/link
+router.post('/:id/link', async (req, res) => {
+  const { projectId, variationId, note } = req.body || {};
+  if (!projectId && !variationId)
+    return res.status(400).json({ error: 'Provide projectId or variationId' });
+  try {
+    const id = BigInt(req.params.id);
+    const doc = await prisma.document.findFirst({
+      where: { id: Number(id), is_deleted: false },
+    });
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    const link = await prisma.documentLink.create({
+      data: {
+        documentId: Number(id),
+        projectId: projectId ? Number(BigInt(projectId)) : null,
+        variationId: variationId ? Number(BigInt(variationId)) : null,
+        note: note || null,
+      },
+    });
+    return res.json({ data: link });
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid ids' });
+  }
+});
+
+// POST /api/documents/:id/unlink
+router.post('/:id/unlink', async (req, res) => {
+  const { projectId, variationId } = req.body || {};
+  if (!projectId && !variationId)
+    return res.status(400).json({ error: 'Provide projectId or variationId' });
+  try {
+    const id = BigInt(req.params.id);
+    const where = {
+      documentId: Number(id),
+      ...(projectId ? { projectId: Number(BigInt(projectId)) } : {}),
+      ...(variationId ? { variationId: Number(BigInt(variationId)) } : {}),
+    };
+    const result = await prisma.documentLink.deleteMany({ where });
+    return res.json({ data: { deleted: result.count } });
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid ids' });
   }
 });
 
