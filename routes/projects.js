@@ -116,7 +116,7 @@ module.exports = (prisma) => {
     } catch (e) { next(e); }
   });
 
-  // DELETE /api/projects/:id
+  // DELETE /api/projects/:id  (safe transactional delete)
   router.delete('/:id', async (req, res, next) => {
     try {
       const id = Number(req.params.id);

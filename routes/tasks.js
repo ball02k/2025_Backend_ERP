@@ -33,7 +33,7 @@ module.exports = (prisma) => {
           take: pageSize,
           include: {
             project: { select: { id: true, name: true } },
-            statusRel: true,
+            statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
           },
         }),
       ]);
@@ -59,7 +59,7 @@ module.exports = (prisma) => {
         },
         include: {
           project: { select: { id: true, name: true } },
-          statusRel: true,
+          statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
         },
       });
       res.status(201).json(created);
@@ -79,7 +79,7 @@ module.exports = (prisma) => {
         },
         include: {
           project: { select: { id: true, name: true } },
-          statusRel: true,
+          statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
         },
       });
       res.json(updated);
