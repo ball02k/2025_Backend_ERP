@@ -1,6 +1,13 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+async function assertProjectMember({ userId, projectId, tenantId }) {
+  return prisma.projectMembership.findFirst({
+    where: { tenantId, projectId, userId },
+    select: { id: true, role: true },
+  });
+}
+
 async function requireProjectMember(req, res, next) {
   try {
     const projectId = Number(
@@ -9,9 +16,10 @@ async function requireProjectMember(req, res, next) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) return res.status(401).json({ error: 'Unauthorized' });
     if (!projectId) return res.status(400).json({ error: 'projectId required' });
-    const member = await prisma.projectMembership.findFirst({
-      where: { tenantId, projectId, userId: req.user.id },
-      select: { id: true, role: true },
+    const member = await assertProjectMember({
+      userId: req.user.id,
+      projectId,
+      tenantId,
     });
     if (!member)
       return res
@@ -25,5 +33,5 @@ async function requireProjectMember(req, res, next) {
   }
 }
 
-module.exports = { requireProjectMember };
+module.exports = { requireProjectMember, assertProjectMember };
 
