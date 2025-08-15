@@ -113,6 +113,17 @@ add(
   `${schemaPath}: variationId Int?`
 );
 
+// Procurement models
+const poBlock = extractBlock(schema, 'PurchaseOrder');
+const poLineBlock = extractBlock(schema, 'POLine');
+const deliveryBlock = extractBlock(schema, 'Delivery');
+add(
+  'SCHEMA',
+  poBlock.length > 0 && poLineBlock.length > 0 && deliveryBlock.length > 0,
+  'PurchaseOrder, POLine, Delivery models present',
+  `${schemaPath}: add models PurchaseOrder, POLine, Delivery`
+);
+
 const snapBlock = extractBlock(schema, 'ProjectSnapshot');
 add(
   'SNAPSHOT',
@@ -153,13 +164,33 @@ add(
   `${schemaPath}: add @@index([projectId]) and @@index([variationId])`
 );
 
+add(
+  'INDEXES',
+  has(poBlock, '@@unique([tenantId, code])') && has(poBlock, '@@index([tenantId, projectId, status])'),
+  'PurchaseOrder indexes for tenantId/code unique and tenantId/projectId/status',
+  `${schemaPath}: add @@unique([tenantId, code]) and @@index([tenantId, projectId, status])`
+);
+add(
+  'INDEXES',
+  has(poLineBlock, '@@index([tenantId, poId])'),
+  'POLine index for tenantId/poId',
+  `${schemaPath}: add @@index([tenantId, poId])`
+);
+add(
+  'INDEXES',
+  has(deliveryBlock, '@@index([tenantId, poId])') && has(deliveryBlock, '@@index([poId, expectedAt])'),
+  'Delivery indexes for tenantId/poId and poId/expectedAt',
+  `${schemaPath}: add @@index([tenantId, poId]) and @@index([poId, expectedAt])`
+);
+
 // Route checks
 function checkImport(filePath) {
   const content = read(filePath);
-  return /recomputeProjectSnapshot/.test(content);
+  return /recomputeProjectSnapshot|recomputeProcurement/.test(content);
 }
 const tasksPath = path.join(__dirname, '..', 'routes', 'tasks.js');
 const variationsPath = path.join(__dirname, '..', 'routes', 'variations.cjs');
+const procurementPath = path.join(__dirname, '..', 'routes', 'procurement.cjs');
 add(
   'ROUTES',
   checkImport(tasksPath),
@@ -171,6 +202,12 @@ add(
   checkImport(variationsPath),
   'variations.cjs imports recomputeProjectSnapshot',
   `${variationsPath}: const { recomputeProjectSnapshot } = require('../services/projectSnapshot');`
+);
+add(
+  'ROUTES',
+  checkImport(procurementPath),
+  'procurement.cjs imports recompute helper',
+  `${procurementPath}: const { recomputeProcurement } = require('../services/projectSnapshot');`
 );
 
 function hasCall(content, routeSig) {
@@ -275,6 +312,9 @@ let t = checkTenant(tasksPath, tasksContent);
 add('TENANT SCOPING', t.ok, 'tasks.js tenantId in all where clauses', t.fix);
 t = checkTenant(variationsPath, variationsContent);
 add('TENANT SCOPING', t.ok, 'variations.cjs tenantId in all where clauses', t.fix);
+const procurementContent = read(procurementPath);
+t = checkTenant(procurementPath, procurementContent);
+add('TENANT SCOPING', t.ok, 'procurement.cjs tenantId in all where clauses', t.fix);
 
 // Output
 for (const [g, msgs] of Object.entries(groups)) {
