@@ -1,5 +1,4 @@
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const { prisma } = require("../utils/prisma.cjs");
 
 async function recomputeProjectSnapshot(projectId, tenantId) {
   // Variations
@@ -51,4 +50,35 @@ async function recomputeProjectSnapshot(projectId, tenantId) {
   });
 }
 
-module.exports = { recomputeProjectSnapshot };
+
+
+async function recomputeProcurement(projectId, tenantId) {
+  const now = new Date();
+  const [posOpen, criticalLate] = await Promise.all([
+    prisma.purchaseOrder.count({ where: { projectId, tenantId, status: "Open" } }),
+    prisma.delivery.count({
+      where: {
+        po: { projectId, tenantId },
+        expectedAt: { lt: now },
+        receivedAt: null,
+      },
+    }),
+  ]);
+  await prisma.projectSnapshot.upsert({
+    where: { projectId },
+    update: {
+      tenantId,
+      procurementPOsOpen: posOpen,
+      procurementCriticalLate: criticalLate,
+      updatedAt: new Date(),
+    },
+    create: {
+      projectId,
+      tenantId,
+      procurementPOsOpen: posOpen,
+      procurementCriticalLate: criticalLate,
+    },
+  });
+}
+
+module.exports = { recomputeProjectSnapshot, recomputeProcurement };
