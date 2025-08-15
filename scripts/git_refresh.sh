@@ -1,31 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
+cd "$(dirname "$0")/.."
 branch="${1:-main}"
 
-echo "→ Checking status…"
-git status -sb
+echo "→ Status"
+git status -sb || true
 
-# Stash only if there are changes
+# Stash if dirty
 if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "→ Stashing local changes…"
   git stash push -u -m "auto-stash: $(date -Iseconds)" || true
 fi
 
-echo "→ Fetching…"
+echo "→ Fetch + rebase"
 git fetch origin
+git checkout "$branch"
+git pull --rebase origin "$branch"
 
-echo "→ Rebasing onto origin/${branch}…"
-git checkout "${branch}"
-git pull --rebase origin "${branch}"
-
-# Re‑apply stash if any
+# Re-apply stash if present
 if git stash list | grep -q "auto-stash"; then
-  echo "→ Applying latest auto-stash…"
+  echo "→ Applying auto-stash"
   git stash pop || true
 fi
 
-echo "→ Final status:"
-git status -sb
+echo "→ Final status"
+git status -sb || true
 
-# Optional cleanup of untracked junk that isn't ignored
-# git clean -fd

@@ -1,60 +1,69 @@
-const { PrismaClient } = require('@prisma/client');
+#!/usr/bin/env node
+/* eslint-disable */
 const crypto = require('crypto');
-
+const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-const tId = 'demo';
-const passwordSHA = crypto.createHash('sha256').update('demo123!').digest('hex');
 
-async function main() {
-  await prisma.$transaction(async (tx) => {
+(async () => {
+  const tId = 'demo';
+  const hash = crypto.createHash('sha256').update('demo123!').digest('hex');
+
+  const { user, client, project } = await prisma.$transaction(async (tx) => {
     const user = await tx.user.upsert({
-      where: { email: 'demo@example.com' },
-      update: { name: 'Demo User', tenantId: tId, passwordSHA },
+      where: { email: 'demo@erp.local' },
+      update: { name: 'Demo User', passwordSHA: hash, tenantId: tId },
       create: {
         tenantId: tId,
-        email: 'demo@example.com',
+        email: 'demo@erp.local',
         name: 'Demo User',
-        passwordSHA,
+        passwordSHA: hash,
       },
     });
 
-    let client = await tx.client.findFirst({ where: { name: 'Demo Client' } });
-    if (!client) {
-      client = await tx.client.create({
-        data: {
-          name: 'Demo Client',
-          companyRegNo: 'DEMO-REG',
-          vatNo: 'DEMO-VAT',
-          address1: '1 Demo Street',
-          city: 'Demoville',
-          postcode: 'DE1 1AA',
-        },
-      });
-    }
+    const client = await tx.client.upsert({
+      where: { id: 1 },
+      update: {},
+      create: {
+        id: 1,
+        name: 'Acme Construction Ltd',
+      },
+    });
 
     const project = await tx.project.upsert({
-      where: { code: 'DEMO' },
-      update: { name: 'Demo Project', tenantId: tId, clientId: client.id },
+      where: { code: 'PRJ-001' },
+      update: {
+        name: 'HQ Fit-Out',
+        status: 'active',
+        type: 'fit-out',
+        tenantId: tId,
+        clientId: client.id,
+      },
       create: {
         tenantId: tId,
-        code: 'DEMO',
-        name: 'Demo Project',
+        code: 'PRJ-001',
+        name: 'HQ Fit-Out',
+        status: 'active',
+        type: 'fit-out',
         clientId: client.id,
       },
     });
 
-    await tx.projectSnapshot.upsert({
-      where: { projectId: project.id },
-      update: { tenantId: tId },
-      create: {
-        projectId: project.id,
-        tenantId: tId,
-        financialBudget: 0,
-        financialCommitted: 0,
-        financialActual: 0,
-        financialForecast: 0,
-      },
-    });
+    try {
+      await tx.projectSnapshot.upsert({
+        where: { projectId: project.id },
+        update: { tenantId: tId },
+        create: {
+          projectId: project.id,
+          tenantId: tId,
+          financialBudget: 0,
+          financialCommitted: 0,
+          financialActual: 0,
+          financialForecast: 0,
+        },
+      });
+    } catch (e) {
+      if (!/ProjectSnapshot/i.test(String(e))) throw e;
+    }
 
     await tx.projectMembership.upsert({
       where: {
@@ -64,23 +73,23 @@ async function main() {
           userId: user.id,
         },
       },
-      update: { role: 'Owner' },
+      update: { role: 'owner' },
       create: {
         tenantId: tId,
         projectId: project.id,
         userId: user.id,
-        role: 'Owner',
+        role: 'owner',
       },
     });
-  });
-  console.log('Demo seed complete');
-}
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
+    return { user, client, project };
   });
+
+  console.log('✔ Seeded demo tenant with user/client/project(+snapshot/membership)');
+  await prisma.$disconnect();
+})().catch(async (e) => {
+  console.error(e);
+  await prisma.$disconnect();
+  process.exit(1);
+});
+
