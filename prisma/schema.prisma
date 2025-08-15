@@ -124,7 +124,7 @@ model Task {
   dueDate     DateTime?
   assignee    String?
 
-  status     String
+  status     String   @default("Open")
 
   statusId  Int
   statusRel TaskStatus @relation("TaskStatusRel", fields: [statusId], references: [id])

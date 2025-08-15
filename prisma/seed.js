@@ -89,8 +89,8 @@ async function run() {
         clientId: client.id,
         statusId: active.id,
         typeId: civils.id,
-        status: 'ACTIVE',
-        type: 'CIVILS',
+        status: active.label,
+        type: civils.label,
       },
     });
 
@@ -104,8 +104,8 @@ async function run() {
         clientId: client.id,
         statusId: onHold.id,
         typeId: commercial.id,
-        status: 'ON_HOLD',
-        type: 'COMMERCIAL',
+        status: onHold.label,
+        type: commercial.label,
       },
     });
 
@@ -177,11 +177,11 @@ async function run() {
 
       await prisma.task.createMany({
         data: [
-          { projectId: a001.id, tenantId: 'demo', title: 'Site setup', status: 'DONE', statusId: done.id },
-          { projectId: a001.id, tenantId: 'demo', title: 'Traffic management plan', status: 'IN_PROGRESS', statusId: inProgress.id },
-          { projectId: a001.id, tenantId: 'demo', title: 'Utilities survey', status: 'OPEN', statusId: open.id },
-          { projectId: r101.id, tenantId: 'demo', title: 'Milling schedule', status: 'OPEN', statusId: open.id },
-          { projectId: r101.id, tenantId: 'demo', title: 'Asphalt supplier PO', status: 'BLOCKED', statusId: blocked.id },
+          { projectId: a001.id, tenantId: 'demo', title: 'Site setup', status: done.label, statusId: done.id },
+          { projectId: a001.id, tenantId: 'demo', title: 'Traffic management plan', status: inProgress.label, statusId: inProgress.id },
+          { projectId: a001.id, tenantId: 'demo', title: 'Utilities survey', status: open.label, statusId: open.id },
+          { projectId: r101.id, tenantId: 'demo', title: 'Milling schedule', status: open.label, statusId: open.id },
+          { projectId: r101.id, tenantId: 'demo', title: 'Asphalt supplier PO', status: blocked.label, statusId: blocked.id },
         ],
         skipDuplicates: true,
       });
