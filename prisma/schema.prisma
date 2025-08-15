@@ -68,7 +68,7 @@ model Client {
 
 model Project {
   id          Int     @id @default(autoincrement())
-  tenantId    String   @default("demo")
+  tenantId    String  @default("demo")
   code        String  @unique
   name        String
   description String?
@@ -83,19 +83,19 @@ model Project {
   typeRel   ProjectType?   @relation("ProjectTypeRel", fields: [typeId], references: [id])
 
   // Simple string fields for lean project
-  status         String   @default("Active")
-  type           String   @default("General")
+  status           String    @default("Active")
+  type             String    @default("General")
   projectManagerId Int?
-  country        String?
-  currency       String?
-  unitSystem     String?
-  taxScheme      String?
-  contractForm   String?
-  startPlanned   DateTime?
-  endPlanned     DateTime?
-  startActual    DateTime?
-  endActual      DateTime?
-  labels         Json?
+  country          String?
+  currency         String?
+  unitSystem       String?
+  taxScheme        String?
+  contractForm     String?
+  startPlanned     DateTime?
+  endPlanned       DateTime?
+  startActual      DateTime?
+  endActual        DateTime?
+  labels           Json?
 
   // Existing financial/schedule fields retained
   budget      Decimal?  @db.Decimal(18, 2)
@@ -106,18 +106,16 @@ model Project {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tasks      Task[]
-  variations Variation[]
-  snapshot   ProjectSnapshot?
-  memberships ProjectMembership[]
+  tasks          Task[]
+  variations     Variation[]
+  snapshot       ProjectSnapshot?
+  memberships    ProjectMembership[]
   purchaseOrders PurchaseOrder[]
 
   budgetLines BudgetLine[]
   commitments Commitment[]
   actualCosts ActualCost[]
-  forecasts Forecast[]
-
-
+  forecasts   Forecast[]
 
   @@index([tenantId, status])
 }
@@ -125,7 +123,7 @@ model Project {
 model Task {
   id        Int     @id @default(autoincrement())
   projectId Int
-  tenantId  String   @default("demo")
+  tenantId  String  @default("demo")
   project   Project @relation(fields: [projectId], references: [id])
 
   title       String
@@ -133,7 +131,7 @@ model Task {
   dueDate     DateTime?
   assignee    String?
 
-  status     String   @default("Open")
+  status String @default("Open")
 
   statusId  Int
   statusRel TaskStatus @relation("TaskStatusRel", fields: [statusId], references: [id])
@@ -250,16 +248,16 @@ model VariationStatusHistory {
 }
 
 model ProjectSnapshot {
-  projectId             Int     @id
-  tenantId              String
+  projectId Int    @id
+  tenantId  String
 
   // Financial
-  budget                Decimal? @db.Decimal(18,2)
-  committed             Decimal? @db.Decimal(18,2)
-  actual                Decimal? @db.Decimal(18,2)
-  retentionHeld         Decimal? @db.Decimal(18,2)
-  forecastAtComplete    Decimal? @db.Decimal(18,2)
-  variance              Decimal? @db.Decimal(18,2)
+  budget             Decimal? @db.Decimal(18, 2)
+  committed          Decimal? @db.Decimal(18, 2)
+  actual             Decimal? @db.Decimal(18, 2)
+  retentionHeld      Decimal? @db.Decimal(18, 2)
+  forecastAtComplete Decimal? @db.Decimal(18, 2)
+  variance           Decimal? @db.Decimal(18, 2)
 
   financialBudget    Decimal @default(0)
   financialCommitted Decimal @default(0)
@@ -267,41 +265,41 @@ model ProjectSnapshot {
   financialForecast  Decimal @default(0)
 
   // Schedule
-  schedulePct           Int?
-  criticalAtRisk        Int?
+  schedulePct    Int?
+  criticalAtRisk Int?
 
   // Variations
   variationsDraft         Int?
   variationsSubmitted     Int?
   variationsApproved      Int?
-  variationsValueApproved Decimal? @db.Decimal(18,2)
+  variationsValueApproved Decimal? @db.Decimal(18, 2)
 
   // Tasks
-  tasksOverdue          Int?
-  tasksDueThisWeek      Int?
+  tasksOverdue     Int?
+  tasksDueThisWeek Int?
 
   // RFIs (placeholder counts until RFI module lands)
-  rfisOpen              Int?
-  rfisAvgAgeDays        Int?
+  rfisOpen       Int?
+  rfisAvgAgeDays Int?
 
   // QA/QC
-  qaOpenNCR             Int?
-  qaOpenPunch           Int?
+  qaOpenNCR   Int?
+  qaOpenPunch Int?
 
   // H&S
-  hsIncidentsThisMonth  Int?
-  hsOpenPermits         Int?
+  hsIncidentsThisMonth Int?
+  hsOpenPermits        Int?
 
   // Procurement
   procurementCriticalLate Int?
   procurementPOsOpen      Int?
 
   // Carbon
-  carbonTarget          Decimal? @db.Decimal(18,2)
-  carbonToDate          Decimal? @db.Decimal(18,2)
-  carbonUnit            String?
+  carbonTarget Decimal? @db.Decimal(18, 2)
+  carbonToDate Decimal? @db.Decimal(18, 2)
+  carbonUnit   String?
 
-  updatedAt             DateTime @default(now())
+  updatedAt DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
@@ -343,39 +341,42 @@ model DocumentLink {
 }
 
 model User {
-  id          Int      @id @default(autoincrement())
-  tenantId    String   @default("demo")
-  email       String   @unique
+  id          Int                 @id @default(autoincrement())
+  tenantId    String              @default("demo")
+  email       String              @unique
   name        String
   passwordSHA String
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isActive    Boolean             @default(true)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
   memberships ProjectMembership[]
   userRoles   UserRole[]
+
   @@index([tenantId, email])
 }
 
 model Role {
-  id        Int      @id @default(autoincrement())
-  tenantId  String   @default("demo")
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              Int              @id @default(autoincrement())
+  tenantId        String           @default("demo")
+  name            String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   userRoles       UserRole[]
   rolePermissions RolePermission[]
+
   @@unique([tenantId, name], name: "tenantId_name")
   @@index([tenantId, name])
 }
 
 model Permission {
-  id        Int      @id @default(autoincrement())
-  tenantId  String   @default("demo")
-  key       String
-  label     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              Int              @id @default(autoincrement())
+  tenantId        String           @default("demo")
+  key             String
+  label           String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   rolePermissions RolePermission[]
+
   @@unique([tenantId, key])
   @@index([tenantId, key])
 }
@@ -385,20 +386,22 @@ model UserRole {
   tenantId String @default("demo")
   userId   Int
   roleId   Int
-  user User @relation(fields: [userId], references: [id])
-  role Role @relation(fields: [roleId], references: [id])
+  user     User   @relation(fields: [userId], references: [id])
+  role     Role   @relation(fields: [roleId], references: [id])
+
   @@unique([tenantId, userId, roleId], name: "tenantId_userId_roleId")
   @@index([tenantId, userId])
   @@index([tenantId, roleId])
 }
 
 model RolePermission {
-  id           Int    @id @default(autoincrement())
-  tenantId     String @default("demo")
+  id           Int        @id @default(autoincrement())
+  tenantId     String     @default("demo")
   roleId       Int
   permissionId Int
-  role       Role       @relation(fields: [roleId], references: [id])
-  permission Permission @relation(fields: [permissionId], references: [id])
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
   @@unique([tenantId, roleId, permissionId])
   @@index([tenantId, roleId])
   @@index([tenantId, permissionId])
@@ -411,121 +414,123 @@ model ProjectMembership {
   userId    Int
   role      String   @default("Member")
   createdAt DateTime @default(now())
-  project Project @relation(fields: [projectId], references: [id])
-  user    User    @relation(fields: [userId], references: [id])
+  project   Project  @relation(fields: [projectId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
   @@unique([tenantId, projectId, userId], name: "tenantId_projectId_userId")
   @@index([tenantId, projectId])
   @@index([tenantId, userId])
 }
 
-
 model PurchaseOrder {
-  id         Int      @id @default(autoincrement())
-  tenantId   String   @default("demo")
+  id         Int        @id @default(autoincrement())
+  tenantId   String     @default("demo")
   projectId  Int
   code       String
   supplier   String
-  status     String   @default("Open")
-  orderDate  DateTime @default(now())
-  total      Decimal  @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  project    Project  @relation(fields: [projectId], references: [id])
+  status     String     @default("Open")
+  orderDate  DateTime   @default(now())
+  total      Decimal    @default(0)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  project    Project    @relation(fields: [projectId], references: [id])
   lines      POLine[]
   deliveries Delivery[]
+
   @@unique([tenantId, code])
   @@index([tenantId, projectId, status])
 }
 
 model POLine {
-  id        Int     @id @default(autoincrement())
-  tenantId  String  @default("demo")
+  id        Int           @id @default(autoincrement())
+  tenantId  String        @default("demo")
   poId      Int
   item      String
-  qty       Decimal @default(0)
+  qty       Decimal       @default(0)
   unit      String
-  unitCost  Decimal @default(0)
-  lineTotal Decimal @default(0)
+  unitCost  Decimal       @default(0)
+  lineTotal Decimal       @default(0)
   po        PurchaseOrder @relation(fields: [poId], references: [id])
+
   @@index([tenantId, poId])
 }
 
 model Delivery {
-  id          Int      @id @default(autoincrement())
-  tenantId    String   @default("demo")
-  poId        Int
-  expectedAt  DateTime
-  receivedAt  DateTime?
-  note        String?
-  po          PurchaseOrder @relation(fields: [poId], references: [id])
+  id         Int           @id @default(autoincrement())
+  tenantId   String        @default("demo")
+  poId       Int
+  expectedAt DateTime
+  receivedAt DateTime?
+  note       String?
+  po         PurchaseOrder @relation(fields: [poId], references: [id])
+
   @@index([tenantId, poId])
   @@index([poId, expectedAt])
 }
 
 model BudgetLine {
-  id         Int      @id @default(autoincrement())
-  tenantId   String   @default("demo")
-  projectId  Int
-  code       String?
-  category   String?
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  projectId   Int
+  code        String?
+  category    String?
   description String?
-  amount     Decimal  @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  amount      Decimal  @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  project    Project  @relation(fields: [projectId], references: [id])
+  project Project @relation(fields: [projectId], references: [id])
 
   @@index([tenantId, projectId])
 }
 
 model Commitment {
-  id         Int      @id @default(autoincrement())
-  tenantId   String   @default("demo")
-  projectId  Int
-  linkedPoId Int?
-  ref        String?
-  supplier   String?
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  projectId   Int
+  linkedPoId  Int?
+  ref         String?
+  supplier    String?
   description String?
-  amount     Decimal  @default(0)
-  status     String   @default("Open")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  amount      Decimal  @default(0)
+  status      String   @default("Open")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  project    Project  @relation(fields: [projectId], references: [id])
+  project Project @relation(fields: [projectId], references: [id])
 
   @@index([tenantId, projectId, status])
 }
 
 model ActualCost {
-  id         Int      @id @default(autoincrement())
-  tenantId   String   @default("demo")
-  projectId  Int
-  ref        String?
-  supplier   String?
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  projectId   Int
+  ref         String?
+  supplier    String?
   description String?
-  amount     Decimal  @default(0)
-  incurredAt DateTime @default(now())
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  amount      Decimal  @default(0)
+  incurredAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  project    Project  @relation(fields: [projectId], references: [id])
+  project Project @relation(fields: [projectId], references: [id])
 
   @@index([tenantId, projectId, incurredAt])
 }
 
 model Forecast {
-  id         Int      @id @default(autoincrement())
-  tenantId   String   @default("demo")
-  projectId  Int
-  period     String
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  projectId   Int
+  period      String
   description String?
-  amount     Decimal  @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  amount      Decimal  @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  project    Project  @relation(fields: [projectId], references: [id])
+  project Project @relation(fields: [projectId], references: [id])
 
   @@unique([tenantId, projectId, period])
   @@index([tenantId, projectId])
 }
-
