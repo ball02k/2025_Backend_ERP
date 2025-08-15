@@ -227,20 +227,20 @@ add(
 );
 
 // BFF checks
-const overviewPath = path.join(__dirname, '..', 'routes', 'projects_overview.js');
+const overviewPath = path.join(__dirname, '..', 'routes', 'projects_overview.cjs');
 const overviewContent = read(overviewPath);
 const indexPath = path.join(__dirname, '..', 'index.cjs');
 const indexContent = read(indexPath);
 add(
   'BFF',
   /app\.use\(["']\/api\/projects["'],\s*projectsOverviewRouter\)/.test(indexContent),
-  'projects_overview.js mounted under /api/projects',
+  'projects_overview.cjs mounted under /api/projects',
   `${indexPath}: app.use('/api/projects', projectsOverviewRouter)`
 );
 add(
   'BFF',
   /res\.json\({\s*project[\s\S]*widgets[\s\S]*quickLinks/.test(overviewContent),
-  'projects_overview.js returns project/widgets/quickLinks',
+  'projects_overview.cjs returns project/widgets/quickLinks',
   `${overviewPath}: res.json({ project, widgets: ..., quickLinks: ... })`
 );
 

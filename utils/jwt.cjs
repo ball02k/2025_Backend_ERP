@@ -1,65 +1,46 @@
 const crypto = require('crypto');
 
-function base64url(str) {
-  return Buffer.from(str).toString('base64url');
+function b64url(input) {
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
 }
 
-function parseExpiry(expiresIn) {
-  if (typeof expiresIn === 'number') return expiresIn;
-  if (typeof expiresIn === 'string') {
-    const m = expiresIn.match(/^(\d+)([smhd])$/);
-    if (m) {
-      const v = Number(m[1]);
-      const unit = m[2];
-      return unit === 's'
-        ? v
-        : unit === 'm'
-        ? v * 60
-        : unit === 'h'
-        ? v * 3600
-        : unit === 'd'
-        ? v * 86400
-        : 0;
-    }
-  }
-  return 0;
+function b64urlJSON(obj) {
+  return b64url(JSON.stringify(obj));
 }
 
-function sign(payload, secret, options = {}) {
+function sign(payload, secret, opts = {}) {
   const header = { alg: 'HS256', typ: 'JWT' };
-  const expSec = options.expiresIn ? parseExpiry(options.expiresIn) : 0;
-  const body = {
-    ...payload,
-    ...(expSec ? { exp: Math.floor(Date.now() / 1000) + expSec } : {}),
-  };
-  const encodedHeader = base64url(JSON.stringify(header));
-  const encodedPayload = base64url(JSON.stringify(body));
-  const data = `${encodedHeader}.${encodedPayload}`;
-  const signature = crypto
+  const now = Math.floor(Date.now() / 1000);
+  const exp = opts.expiresIn ? now + opts.expiresIn : undefined;
+  const body = { ...payload, ...(exp ? { exp } : {}) };
+  const data = `${b64urlJSON(header)}.${b64urlJSON(body)}`;
+  const sig = crypto
     .createHmac('sha256', secret)
     .update(data)
-    .digest('base64url');
-  return `${data}.${signature}`;
+    .digest('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+  return `${data}.${sig}`;
 }
 
 function verify(token, secret) {
-  const parts = token.split('.');
-  if (parts.length !== 3) throw new Error('Invalid token');
-  const [encodedHeader, encodedPayload, signature] = parts;
-  const data = `${encodedHeader}.${encodedPayload}`;
-  const expected = crypto
+  const [h, p, s] = token.split('.');
+  if (!h || !p || !s) throw new Error('Invalid token');
+  const check = crypto
     .createHmac('sha256', secret)
-    .update(data)
-    .digest('base64url');
-  const sigBuf = Buffer.from(signature);
-  const expBuf = Buffer.from(expected);
-  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
-    throw new Error('Invalid signature');
-  }
-  const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString());
-  if (payload.exp && Math.floor(Date.now() / 1000) >= payload.exp) {
-    throw new Error('Token expired');
-  }
+    .update(`${h}.${p}`)
+    .digest('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+  if (check !== s) throw new Error('Bad signature');
+  const payload = JSON.parse(Buffer.from(p, 'base64').toString('utf8'));
+  if (payload.exp && Math.floor(Date.now() / 1000) > payload.exp) throw new Error('Expired');
   return payload;
 }
 

@@ -203,18 +203,26 @@ async function run() {
       update: {},
       create: { tenantId: 'demo', userId: user.id, roleId: role.id },
     });
-    const projectOne = await prisma.project.findFirst({ where: { id: 1 } });
-    if (projectOne) {
+    const firstDemoProject = await prisma.project.findFirst({
+      where: { tenantId: 'demo' },
+      orderBy: { id: 'asc' },
+    });
+    if (firstDemoProject) {
       await prisma.projectMembership.upsert({
         where: {
           tenantId_projectId_userId: {
             tenantId: 'demo',
-            projectId: projectOne.id,
+            projectId: firstDemoProject.id,
             userId: user.id,
           },
         },
         update: {},
-        create: { tenantId: 'demo', projectId: projectOne.id, userId: user.id, role: 'Member' },
+        create: {
+          tenantId: 'demo',
+          projectId: firstDemoProject.id,
+          userId: user.id,
+          role: 'Member',
+        },
       });
     }
 

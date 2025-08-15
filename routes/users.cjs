@@ -1,19 +1,22 @@
 const express = require('express');
-const { prisma } = require('../utils/prisma.cjs');
+const { PrismaClient } = require('@prisma/client');
 const { requireAuth } = require('../middleware/auth.cjs');
 
+const prisma = new PrismaClient();
 const router = express.Router();
 
-router.get('/', requireAuth, async (req, res, next) => {
-  try {
-    const users = await prisma.user.findMany({
-      where: { tenantId: req.user.tenantId },
-      select: { id: true, email: true, name: true, isActive: true },
-    });
-    res.json({ users });
-  } catch (e) {
-    next(e);
-  }
+router.get('/', requireAuth, async (req, res) => {
+  const users = await prisma.user.findMany({
+    where: { tenantId: req.user.tenantId },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      isActive: true,
+      createdAt: true,
+    },
+  });
+  res.json({ users });
 });
 
 module.exports = router;
