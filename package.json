@@ -6,7 +6,7 @@
   "scripts": {
     "preflight": "node scripts/preflight.cjs",
     "smoke:docs": "node scripts/documents-smoke.mjs",
-    "health": "curl -s http://localhost:${PORT:-3001}/healthz || true",
+    "health": "curl -s http://localhost:${PORT:-3001}/health || true",
     "dev": "nodemon index.cjs",
     "db:seed": "node prisma/seed.js",
     "db:migrate": "prisma migrate dev --name init_documents",

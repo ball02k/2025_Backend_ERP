@@ -109,6 +109,7 @@ model Project {
   tasks      Task[]
   variations Variation[]
   snapshot   ProjectSnapshot?
+  memberships ProjectMembership[]
 
   @@index([tenantId, status])
 }
@@ -327,3 +328,80 @@ model DocumentLink {
   @@index([projectId])
   @@index([variationId])
 }
+
+model User {
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  email       String   @unique
+  name        String
+  passwordSHA String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  memberships ProjectMembership[]
+  userRoles   UserRole[]
+  @@index([tenantId, email])
+}
+
+model Role {
+  id        Int      @id @default(autoincrement())
+  tenantId  String   @default("demo")
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+  @@unique([tenantId, name])
+  @@index([tenantId, name])
+}
+
+model Permission {
+  id        Int      @id @default(autoincrement())
+  tenantId  String   @default("demo")
+  key       String
+  label     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  rolePermissions RolePermission[]
+  @@unique([tenantId, key])
+  @@index([tenantId, key])
+}
+
+model UserRole {
+  id       Int    @id @default(autoincrement())
+  tenantId String @default("demo")
+  userId   Int
+  roleId   Int
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+  @@unique([tenantId, userId, roleId])
+  @@index([tenantId, userId])
+  @@index([tenantId, roleId])
+}
+
+model RolePermission {
+  id           Int    @id @default(autoincrement())
+  tenantId     String @default("demo")
+  roleId       Int
+  permissionId Int
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+  @@unique([tenantId, roleId, permissionId])
+  @@index([tenantId, roleId])
+  @@index([tenantId, permissionId])
+}
+
+model ProjectMembership {
+  id        Int      @id @default(autoincrement())
+  tenantId  String   @default("demo")
+  projectId Int
+  userId    Int
+  role      String   @default("Member")
+  createdAt DateTime @default(now())
+  project Project @relation(fields: [projectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+  @@unique([tenantId, projectId, userId])
+  @@index([tenantId, projectId])
+  @@index([tenantId, userId])
+}
+
