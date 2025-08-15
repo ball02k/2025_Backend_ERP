@@ -405,3 +405,47 @@ model ProjectMembership {
   @@index([tenantId, userId])
 }
 
+
+model PurchaseOrder {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  projectId  Int
+  code       String
+  supplier   String
+  status     String   @default("Open")
+  orderDate  DateTime @default(now())
+  total      Decimal  @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  project    Project  @relation(fields: [projectId], references: [id])
+  lines      POLine[]
+  deliveries Delivery[]
+  @@unique([tenantId, code])
+  @@index([tenantId, projectId, status])
+}
+
+model POLine {
+  id        Int     @id @default(autoincrement())
+  tenantId  String  @default("demo")
+  poId      Int
+  item      String
+  qty       Decimal @default(0)
+  unit      String
+  unitCost  Decimal @default(0)
+  lineTotal Decimal @default(0)
+  po        PurchaseOrder @relation(fields: [poId], references: [id])
+  @@index([tenantId, poId])
+}
+
+model Delivery {
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  poId        Int
+  expectedAt  DateTime
+  receivedAt  DateTime?
+  note        String?
+  po          PurchaseOrder @relation(fields: [poId], references: [id])
+  @@index([tenantId, poId])
+  @@index([poId, expectedAt])
+}
+

@@ -42,6 +42,7 @@ app.use('/api/projects', requireAuth, projectsOverviewRouter);
 app.use('/api/tasks', requireAuth, require('./routes/tasks')(prisma));
 app.use('/api/variations', requireAuth, variationsRouter);
 app.use('/api/documents', requireAuth, documentsRouter);
+app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
 
 if (process.env.NODE_ENV !== 'production') {
   app.use('/api/dev/snapshot', requireAuth, require('./routes/dev_snapshot.cjs'));
