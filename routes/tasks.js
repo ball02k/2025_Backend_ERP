@@ -60,10 +60,15 @@ module.exports = (prisma) => {
     try {
       const tenantId = getTenantId(req);
       const body = taskBodySchema.parse(req.body);
+      const statusRow = await prisma.taskStatus.findFirst({
+        where: { id: body.statusId },
+        select: { label: true },
+      });
       const created = await prisma.task.create({
         data: {
           ...body,
           tenantId,
+          status: statusRow?.label || 'Open',
           ...(body.dueDate ? { dueDate: new Date(body.dueDate) } : {}),
         },
         include: {
@@ -88,11 +93,20 @@ module.exports = (prisma) => {
       if (!existing) return res.status(404).json({ error: 'Task not found' });
 
       const body = taskBodySchema.partial().parse(req.body);
+      let statusData = {};
+      if (body.statusId !== undefined) {
+        const statusRow = await prisma.taskStatus.findFirst({
+          where: { id: body.statusId },
+          select: { label: true },
+        });
+        statusData.status = statusRow?.label || undefined;
+      }
       const updated = await prisma.task.update({
         where: { id },
         data: {
           ...body,
           ...(body.dueDate ? { dueDate: new Date(body.dueDate) } : {}),
+          ...statusData,
         },
         include: {
           project: { select: { id: true, name: true } },
