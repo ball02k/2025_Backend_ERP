@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 
 const variationsRouter = require('./routes/variations.cjs');
 const documentsRouter = require('./routes/documents.cjs');
-const projectsOverviewRouter = require('./routes/projects_overview');
+const projectsOverviewRouter = require('./routes/projects_overview.cjs');
 const authRouter = require('./routes/auth.cjs');
 const meRouter = require('./routes/me.cjs');
 const usersRouter = require('./routes/users.cjs');
