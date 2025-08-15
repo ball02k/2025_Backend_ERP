@@ -111,10 +111,13 @@ model Project {
   snapshot   ProjectSnapshot?
   memberships ProjectMembership[]
   purchaseOrders PurchaseOrder[]
+
   budgetLines BudgetLine[]
   commitments Commitment[]
   actualCosts ActualCost[]
   forecasts Forecast[]
+
+
 
   @@index([tenantId, status])
 }
