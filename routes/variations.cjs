@@ -307,7 +307,7 @@ router.put("/:id", async (req, res) => {
       const resolvedReason = reason_code ?? existing.reason_code;
 
       const upd = await tx.variation.update({
-        where: { id },
+        where: { id, tenantId },
         data: {
           referenceCode: referenceCode ?? existing.referenceCode,
           title: title ?? existing.title,
@@ -403,7 +403,7 @@ router.patch("/:id/status", async (req, res) => {
 
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.variation.update({
-        where: { id },
+        where: { id, tenantId },
         data: {
           status: toStatus,
           ...(dateField ? { [dateField]: new Date() } : {}),
@@ -444,7 +444,7 @@ router.delete("/:id", async (req, res) => {
     if (!existing) return res.status(404).json({ error: "Not found" });
 
     const deleted = await prisma.variation.update({
-      where: { id },
+      where: { id, tenantId },
       data: { is_deleted: true },
     });
 

@@ -60,8 +60,12 @@ module.exports = (prisma) => {
     try {
       const tenantId = getTenantId(req);
       const body = taskBodySchema.parse(req.body);
+      const tIdInt = Number(tenantId);
       const statusRow = await prisma.taskStatus.findFirst({
-        where: { id: body.statusId },
+        where: {
+          id: body.statusId,
+          ...(Number.isInteger(tIdInt) ? { tenantId: tIdInt } : {}),
+        },
         select: { label: true },
       });
       const created = await prisma.task.create({
@@ -95,23 +99,32 @@ module.exports = (prisma) => {
       const body = taskBodySchema.partial().parse(req.body);
       let statusData = {};
       if (body.statusId !== undefined) {
+        const tIdInt = Number(tenantId);
         const statusRow = await prisma.taskStatus.findFirst({
-          where: { id: body.statusId },
+          where: {
+            id: body.statusId,
+            ...(Number.isInteger(tIdInt) ? { tenantId: tIdInt } : {}),
+          },
           select: { label: true },
         });
         statusData.status = statusRow?.label || undefined;
       }
-      const updated = await prisma.task.update({
-        where: { id },
-        data: {
-          ...body,
-          ...(body.dueDate ? { dueDate: new Date(body.dueDate) } : {}),
-          ...statusData,
-        },
-        include: {
-          project: { select: { id: true, name: true } },
-          statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
-        },
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.task.updateMany({
+          where: { id, tenantId },
+          data: {
+            ...body,
+            ...(body.dueDate ? { dueDate: new Date(body.dueDate) } : {}),
+            ...statusData,
+          },
+        });
+        return tx.task.findFirst({
+          where: { id, tenantId },
+          include: {
+            project: { select: { id: true, name: true } },
+            statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
+          },
+        });
       });
       await recomputeProjectSnapshot(Number(updated.projectId), tenantId);
       if (updated.projectId !== existing.projectId) {
@@ -134,7 +147,7 @@ module.exports = (prisma) => {
       });
       if (!task) return res.status(404).json({ error: 'Task not found' });
 
-      await prisma.task.delete({ where: { id } });
+      await prisma.task.deleteMany({ where: { id, tenantId } });
       await recomputeProjectSnapshot(Number(task.projectId), tenantId);
       res.status(204).end();
     } catch (e) { next(e); }
