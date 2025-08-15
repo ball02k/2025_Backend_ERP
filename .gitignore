@@ -11,3 +11,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 prisma/_migrations_backup/
+
+# Local dev artifacts
+uploads/
+scripts/local/
+migration.sql
