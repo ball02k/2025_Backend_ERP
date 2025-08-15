@@ -110,6 +110,7 @@ model Project {
   variations Variation[]
   snapshot   ProjectSnapshot?
   memberships ProjectMembership[]
+  purchaseOrders PurchaseOrder[]
 
   @@index([tenantId, status])
 }
