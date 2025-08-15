@@ -106,8 +106,9 @@ router.get("/", async (req, res) => {
       includeTotals === "true";
     if (wantTotals && rows.length) {
       const ids = rows.map((r) => r.id);
+      // tenant-scoped bulk op
       const lines = await prisma.variationLine.findMany({
-        where: { variationId: { in: ids } },
+        where: { tenantId, variationId: { in: ids } },
       });
       const grouped = lines.reduce((m, l) => {
         (m[l.variationId] ||= []).push(l);
@@ -299,7 +300,8 @@ router.put("/:id", async (req, res) => {
 
     const updated = await prisma.$transaction(async (tx) => {
       if (Array.isArray(lines)) {
-        await tx.variationLine.deleteMany({ where: { variationId: id } });
+        // tenant-scoped bulk op
+        await tx.variationLine.deleteMany({ where: { tenantId, variationId: id } });
       }
 
       const resolvedType = type ?? existing.type;
