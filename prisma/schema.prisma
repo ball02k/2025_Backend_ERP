@@ -110,6 +110,11 @@ model Project {
   variations Variation[]
   snapshot   ProjectSnapshot?
   memberships ProjectMembership[]
+  purchaseOrders PurchaseOrder[]
+  budgetLines BudgetLine[]
+  commitments Commitment[]
+  actualCosts ActualCost[]
+  forecasts Forecast[]
 
   @@index([tenantId, status])
 }
@@ -252,6 +257,11 @@ model ProjectSnapshot {
   retentionHeld         Decimal? @db.Decimal(18,2)
   forecastAtComplete    Decimal? @db.Decimal(18,2)
   variance              Decimal? @db.Decimal(18,2)
+
+  financialBudget    Decimal @default(0)
+  financialCommitted Decimal @default(0)
+  financialActual    Decimal @default(0)
+  financialForecast  Decimal @default(0)
 
   // Schedule
   schedulePct           Int?
@@ -447,5 +457,72 @@ model Delivery {
   po          PurchaseOrder @relation(fields: [poId], references: [id])
   @@index([tenantId, poId])
   @@index([poId, expectedAt])
+}
+
+model BudgetLine {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  projectId  Int
+  code       String?
+  category   String?
+  description String?
+  amount     Decimal  @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project    Project  @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId])
+}
+
+model Commitment {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  projectId  Int
+  linkedPoId Int?
+  ref        String?
+  supplier   String?
+  description String?
+  amount     Decimal  @default(0)
+  status     String   @default("Open")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project    Project  @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId, status])
+}
+
+model ActualCost {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  projectId  Int
+  ref        String?
+  supplier   String?
+  description String?
+  amount     Decimal  @default(0)
+  incurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project    Project  @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId, incurredAt])
+}
+
+model Forecast {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  projectId  Int
+  period     String
+  description String?
+  amount     Decimal  @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project    Project  @relation(fields: [projectId], references: [id])
+
+  @@unique([tenantId, projectId, period])
+  @@index([tenantId, projectId])
 }
 

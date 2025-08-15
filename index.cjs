@@ -13,6 +13,7 @@ const authRouter = require('./routes/auth.cjs');
 const meRouter = require('./routes/me.cjs');
 const usersRouter = require('./routes/users.cjs');
 const rolesRouter = require('./routes/roles.cjs');
+const financialsRouter = require('./routes/financials.cjs');
 const { attachUser, requireAuth } = require('./middleware/auth.cjs');
 
 app.use(cors({ origin: true, credentials: true }));
@@ -43,6 +44,7 @@ app.use('/api/tasks', requireAuth, require('./routes/tasks')(prisma));
 app.use('/api/variations', requireAuth, variationsRouter);
 app.use('/api/documents', requireAuth, documentsRouter);
 app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
+app.use('/api/financials', requireAuth, financialsRouter);
 
 if (process.env.NODE_ENV !== 'production') {
   app.use('/api/dev/snapshot', requireAuth, require('./routes/dev_snapshot.cjs'));

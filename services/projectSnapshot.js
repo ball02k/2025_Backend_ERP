@@ -81,4 +81,38 @@ async function recomputeProcurement(projectId, tenantId) {
   });
 }
 
-module.exports = { recomputeProjectSnapshot, recomputeProcurement };
+async function recomputeFinancials(projectId, tenantId) {
+  const now = new Date();
+
+  const [budget, committed, actual, forecast] = await Promise.all([
+    prisma.budgetLine.aggregate({
+      _sum: { amount: true },
+      where: { tenantId, projectId },
+    }),
+    prisma.commitment.aggregate({
+      _sum: { amount: true },
+      where: { tenantId, projectId, status: "Open" },
+    }),
+    prisma.actualCost.aggregate({
+      _sum: { amount: true },
+      where: { tenantId, projectId },
+    }),
+    prisma.forecast.aggregate({
+      _sum: { amount: true },
+      where: { tenantId, projectId },
+    }),
+  ]);
+
+  await prisma.projectSnapshot.updateMany({
+    where: { tenantId, projectId },
+    data: {
+      financialBudget: budget._sum.amount ?? 0,
+      financialCommitted: committed._sum.amount ?? 0,
+      financialActual: actual._sum.amount ?? 0,
+      financialForecast: forecast._sum.amount ?? 0,
+      updatedAt: now,
+    },
+  });
+}
+
+module.exports = { recomputeProjectSnapshot, recomputeProcurement, recomputeFinancials };
