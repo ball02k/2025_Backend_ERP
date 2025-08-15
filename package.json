@@ -7,14 +7,12 @@
     "preflight": "node scripts/preflight.cjs",
     "smoke:docs": "node scripts/documents-smoke.mjs",
     "health": "curl -s http://localhost:${PORT:-3001}/health || true",
+    "clean": "bash scripts/clean_install.sh",
+    "prisma:validate": "npx prisma validate",
+    "prisma:deploy": "npx prisma migrate deploy",
+    "seed:demo": "node scripts/dev_seed_demo.cjs",
     "dev": "nodemon index.cjs",
-    "dev:all": "npm run predev && node scripts/dev_seed_demo.cjs && nodemon index.cjs",
-    "db:seed": "node prisma/seed.js",
-    "db:migrate": "prisma migrate dev --name init_documents",
-    "db:deploy": "prisma migrate deploy",
-    "db:reset": "prisma migrate reset --force && npm run db:seed",
-    "predev": "prisma migrate deploy && prisma generate",
-    "db:check": "node scripts/check-db.cjs"
+    "dev:all": "npm run clean && npm run prisma:validate && npm run prisma:deploy && npm run seed:demo && npm run dev"
   },
   "dependencies": {
     "@prisma/client": "6.14.0",

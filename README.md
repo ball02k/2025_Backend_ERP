@@ -53,3 +53,12 @@ curl -s -X POST http://localhost:3001/api/documents/complete \
 
 4) LIST
 curl -s "http://localhost:3001/api/documents?projectId=1&limit=5" | jq '.meta, .data[].fileName'
+
+# Setup
+nvm use
+bash scripts/clean_install.sh
+npm run prisma:validate
+npm run prisma:deploy
+npm run seed:demo
+npm run dev
+# or: npm run dev:all
