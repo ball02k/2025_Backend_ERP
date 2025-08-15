@@ -1,16 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const { prisma } = require("../utils/prisma.cjs");
+const { requireProjectMember } = require("../middleware/membership.cjs");
 
-// TODO: replace with real auth/tenant resolution middleware
-function getTenantId(req) {
-  return req.headers["x-tenant-id"] || "demo";
-}
-
-router.get("/:id/overview", async (req, res) => {
+router.get("/:id/overview", requireProjectMember, async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const projectId = Number(req.params.id);
     if (Number.isNaN(projectId)) return res.status(400).json({ error: "Invalid project id" });
 

@@ -1,5 +1,6 @@
 const { PrismaClient, Prisma } = require('@prisma/client');
 const prisma = new PrismaClient();
+const crypto = require('crypto');
 
 // Safely create Decimal values; accepts number or string
 const d = (v) => (v == null ? null : new Prisma.Decimal(v));
@@ -185,6 +186,37 @@ async function run() {
         ],
         skipDuplicates: true,
       });
+
+    const passwordSHA = crypto.createHash('sha256').update('demo123').digest('hex');
+    const user = await prisma.user.upsert({
+      where: { email: 'pm@demo.local' },
+      update: {},
+      create: { tenantId: 'demo', email: 'pm@demo.local', name: 'Demo PM', passwordSHA },
+    });
+    const role = await prisma.role.upsert({
+      where: { tenantId_name: { tenantId: 'demo', name: 'Admin' } },
+      update: {},
+      create: { tenantId: 'demo', name: 'Admin' },
+    });
+    await prisma.userRole.upsert({
+      where: { tenantId_userId_roleId: { tenantId: 'demo', userId: user.id, roleId: role.id } },
+      update: {},
+      create: { tenantId: 'demo', userId: user.id, roleId: role.id },
+    });
+    const projectOne = await prisma.project.findFirst({ where: { id: 1 } });
+    if (projectOne) {
+      await prisma.projectMembership.upsert({
+        where: {
+          tenantId_projectId_userId: {
+            tenantId: 'demo',
+            projectId: projectOne.id,
+            userId: user.id,
+          },
+        },
+        update: {},
+        create: { tenantId: 'demo', projectId: projectOne.id, userId: user.id, role: 'Member' },
+      });
+    }
 
     await seedVariations();
     await seedDocuments();
