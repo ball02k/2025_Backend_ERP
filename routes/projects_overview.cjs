@@ -16,6 +16,7 @@ router.get("/:id/overview", requireProjectMember, async (req, res) => {
         clientId: true, projectManagerId: true,
         country: true, currency: true, unitSystem: true, taxScheme: true, contractForm: true,
         startPlanned: true, endPlanned: true, startActual: true, endActual: true,
+        client: { select: { id: true, name: true } },
       },
     });
     if (!project) return res.status(404).json({ error: "Project not found" });
