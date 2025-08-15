@@ -351,7 +351,7 @@ model Role {
   updatedAt DateTime @updatedAt
   userRoles       UserRole[]
   rolePermissions RolePermission[]
-  @@unique([tenantId, name])
+  @@unique([tenantId, name], name: "tenantId_name")
   @@index([tenantId, name])
 }
 
@@ -374,7 +374,7 @@ model UserRole {
   roleId   Int
   user User @relation(fields: [userId], references: [id])
   role Role @relation(fields: [roleId], references: [id])
-  @@unique([tenantId, userId, roleId])
+  @@unique([tenantId, userId, roleId], name: "tenantId_userId_roleId")
   @@index([tenantId, userId])
   @@index([tenantId, roleId])
 }
@@ -400,7 +400,7 @@ model ProjectMembership {
   createdAt DateTime @default(now())
   project Project @relation(fields: [projectId], references: [id])
   user    User    @relation(fields: [userId], references: [id])
-  @@unique([tenantId, projectId, userId])
+  @@unique([tenantId, projectId, userId], name: "tenantId_projectId_userId")
   @@index([tenantId, projectId])
   @@index([tenantId, userId])
 }

@@ -30,9 +30,9 @@ const PORT = process.env.PORT || 3001;
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 app.use('/auth', authRouter);
-app.use('/me', requireAuth, meRouter);
-app.use('/api/users', requireAuth, usersRouter);
-app.use('/api/roles', requireAuth, rolesRouter);
+app.use('/me', meRouter);
+app.use('/api/users', usersRouter);
+app.use('/api/roles', rolesRouter);
 app.use('/api/reference', requireAuth, require('./routes/reference')(prisma));
 app.use('/api/clients', requireAuth, require('./routes/clients')(prisma));
 app.use('/api/contacts', requireAuth, require('./routes/contacts')(prisma));
@@ -51,6 +51,12 @@ if (process.env.NODE_ENV !== 'production') {
 if ((process.env.STORAGE_PROVIDER || 'local').toLowerCase() === 'local') {
   app.use('/files', express.static('uploads'));
 }
+
+/* JSON error handler (keep last) */
+app.use((err, _req, res, _next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal Server Error' });
+});
 
 app.listen(PORT, () => console.log(`API on :${PORT}`));
 
