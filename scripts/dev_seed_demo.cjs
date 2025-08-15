@@ -22,7 +22,7 @@ const prisma = new PrismaClient();
 
     const client = await tx.client.upsert({
       where: { id: 1 },
-      update: {},
+      update: { name: 'Acme Construction Ltd' },
       create: {
         id: 1,
         name: 'Acme Construction Ltd',

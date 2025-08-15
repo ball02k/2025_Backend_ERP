@@ -62,3 +62,7 @@ npm run prisma:deploy
 npm run seed:demo
 npm run dev
 # or: npm run dev:all
+
+## Frontend
+
+Set `VITE_API_BASE_URL=http://localhost:3001` so the dashboard's `/api/projects` shows the seeded project.
