@@ -103,13 +103,25 @@ async function recomputeFinancials(projectId, tenantId) {
     }),
   ]);
 
+  const sums = {
+    budget: budget._sum.amount ?? 0,
+    committed: committed._sum.amount ?? 0,
+    actual: actual._sum.amount ?? 0,
+    forecast: forecast._sum.amount ?? 0,
+  };
+
   await prisma.projectSnapshot.updateMany({
     where: { tenantId, projectId },
     data: {
-      financialBudget: budget._sum.amount ?? 0,
-      financialCommitted: committed._sum.amount ?? 0,
-      financialActual: actual._sum.amount ?? 0,
-      financialForecast: forecast._sum.amount ?? 0,
+      financialBudget: sums.budget,
+      financialCommitted: sums.committed,
+      financialActual: sums.actual,
+      financialForecast: sums.forecast,
+      // legacy fields for compatibility
+      budget: sums.budget,
+      committed: sums.committed,
+      actual: sums.actual,
+      forecastAtComplete: sums.forecast,
       updatedAt: now,
     },
   });
