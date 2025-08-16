@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -16,7 +17,12 @@ const rolesRouter = require('./routes/roles.cjs');
 const financialsRouter = require('./routes/financials.cjs');
 const { attachUser, requireAuth } = require('./middleware/auth.cjs');
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(
+  cors({
+    origin: ['http://localhost:5174', 'http://127.0.0.1:5174'],
+    credentials: false,
+  })
+);
 app.use(express.json({ limit: '5mb' }));
 app.use(morgan('dev'));
 app.use(attachUser);
@@ -47,6 +53,36 @@ app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
 app.use('/api/financials', requireAuth, financialsRouter);
 
 if (process.env.NODE_ENV !== 'production') {
+  const SECRET = process.env.JWT_SECRET || 'devsecret';
+
+  app.post('/api/dev/login', express.json(), async (req, res) => {
+    try {
+      const { email, password } = req.body || {};
+      const user = await prisma.user.findFirst({
+        where: { tenantId: 'demo', email },
+      });
+      if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+      const crypto = require('crypto');
+      const hash = crypto
+        .createHash('sha256')
+        .update(password || '')
+        .digest('hex');
+      if (hash !== user.passwordSHA)
+        return res.status(401).json({ error: 'Invalid credentials' });
+
+      const token = jwt.sign(
+        { sub: String(user.id), tenantId: 'demo', email: user.email },
+        SECRET,
+        { algorithm: 'HS256', expiresIn: '12h' }
+      );
+      return res.json({ token });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: 'Login failed' });
+    }
+  });
+
   app.use('/api/dev/snapshot', requireAuth, require('./routes/dev_snapshot.cjs'));
 }
 
