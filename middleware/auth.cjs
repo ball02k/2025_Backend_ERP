@@ -8,16 +8,26 @@ function parseBearer(req) {
 }
 
 function attachUser(req, _res, next) {
+  const tenantHeader =
+    req.headers['x-tenant-id'] ||
+    (process.env.NODE_ENV === 'production' ? undefined : 'demo');
+  req.tenantId = tenantHeader;
   try {
     const tok = parseBearer(req);
     if (tok) {
       const payload = verify(tok, JWT_SECRET);
-      req.user = {
-        id: payload.sub,
-        tenantId: payload.tenantId,
-        email: payload.email,
-        roles: payload.roles || [],
-      };
+      if (
+        !tenantHeader ||
+        tenantHeader === payload.tenantId ||
+        process.env.NODE_ENV !== 'production'
+      ) {
+        req.user = {
+          id: payload.sub,
+          tenantId: payload.tenantId,
+          email: payload.email,
+          roles: payload.roles || [],
+        };
+      }
     }
   } catch (_e) {}
   next();
