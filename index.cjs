@@ -1,13 +1,15 @@
+require('dotenv/config');
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
-const jwt = require('jsonwebtoken');
+const { sign } = require('./utils/jwt.cjs');
 const pkg = require('./package.json');
 const { logError } = require('./utils/errors.cjs');
 
 const app = express();
 const prisma = new PrismaClient();
+const TENANT_DEFAULT = process.env.TENANT_DEFAULT || 'demo';
 
 const variationsRouter = require('./routes/variations.cjs');
 const documentsRouter = require('./routes/documents.cjs');
@@ -21,7 +23,8 @@ const { attachUser, requireAuth } = require('./middleware/auth.cjs');
 
 app.use(
   cors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: 'http://localhost:5173',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true,
   })
 );
@@ -61,26 +64,23 @@ if (process.env.NODE_ENV !== 'production') {
 
   app.post('/api/dev/login', express.json(), async (req, res) => {
     try {
-      const { email, password } = req.body || {};
-      const user = await prisma.user.findFirst({
-        where: { tenantId: 'demo', email },
+      const tId = req.user?.tenantId || TENANT_DEFAULT;
+      const user = await prisma.user.upsert({
+        where: { email: 'dev@demo.local' },
+        update: { tenantId: tId, name: 'Dev User' },
+        create: {
+          email: 'dev@demo.local',
+          name: 'Dev User',
+          tenantId: tId,
+          passwordSHA: '',
+        },
       });
-      if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-
-      const crypto = require('crypto');
-      const hash = crypto
-        .createHash('sha256')
-        .update(password || '')
-        .digest('hex');
-      if (hash !== user.passwordSHA)
-        return res.status(401).json({ error: 'Invalid credentials' });
-
-      const token = jwt.sign(
-        { sub: String(user.id), tenantId: 'demo', email: user.email },
+      const token = sign(
+        { sub: String(user.id), tenantId: tId },
         SECRET,
-        { algorithm: 'HS256', expiresIn: '12h' }
+        { expiresIn: 60 * 60 * 12 }
       );
-      return res.json({ token });
+      return res.json({ token, user });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ error: 'Login failed' });

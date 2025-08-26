@@ -2,10 +2,7 @@
 const express = require('express');
 const { tasksQuerySchema, taskBodySchema } = require('../lib/validation');
 const { recomputeProjectSnapshot } = require("../services/projectSnapshot");
-
-function getTenantId(req) {
-  return req.headers["x-tenant-id"] || "demo";
-}
+const { withTenant } = require('../utils/tenant.cjs');
 
 module.exports = (prisma) => {
   const router = express.Router();
@@ -13,12 +10,11 @@ module.exports = (prisma) => {
   // GET /api/tasks?search=&projectId=&statusId=&dueBefore=&dueAfter=&page=&pageSize=&sort=&order=
   router.get('/', async (req, res, next) => {
     try {
-      const tenantId = getTenantId(req);
+      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
       const { page, pageSize, sort, order, search, projectId, statusId, dueBefore, dueAfter } =
         tasksQuerySchema.parse(req.query);
 
-      const where = {
-        tenantId,
+      const where = withTenant({
         ...(projectId ? { projectId } : {}),
         ...(statusId ? { statusId } : {}),
         ...(search
@@ -29,7 +25,7 @@ module.exports = (prisma) => {
           : {}),
         ...(dueBefore ? { dueDate: { lte: new Date(dueBefore) } } : {}),
         ...(dueAfter ? { dueDate: { gte: new Date(dueAfter) } } : {}),
-      };
+      }, tenantId);
 
       const [total, rows] = await Promise.all([
         prisma.task.count({ where }),
@@ -58,7 +54,7 @@ module.exports = (prisma) => {
   // POST /api/tasks
   router.post('/', async (req, res, next) => {
     try {
-      const tenantId = getTenantId(req);
+      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
       const body = taskBodySchema.parse(req.body);
       const tIdInt = Number(tenantId);
       const statusRow = await prisma.taskStatus.findFirst({
@@ -88,7 +84,7 @@ module.exports = (prisma) => {
   // PUT /api/tasks/:id
   router.put('/:id', async (req, res, next) => {
     try {
-      const tenantId = getTenantId(req);
+      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
       const id = Number(req.params.id);
       const existing = await prisma.task.findFirst({
         where: { id, tenantId },
@@ -137,7 +133,7 @@ module.exports = (prisma) => {
   // DELETE /api/tasks/:id
   router.delete('/:id', async (req, res, next) => {
     try {
-      const tenantId = getTenantId(req);
+      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
       const id = Number(req.params.id);
       if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
 

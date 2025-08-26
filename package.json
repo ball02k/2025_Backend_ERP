@@ -4,17 +4,9 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "preflight": "node scripts/preflight.cjs",
-    "smoke:docs": "node scripts/documents-smoke.mjs",
-    "health": "curl -s http://localhost:${PORT:-3001}/health || true",
-    "clean": "bash scripts/clean_install.sh",
-    "prisma:validate": "npx prisma validate",
-    "prisma:deploy": "npx prisma migrate deploy",
-    "seed:demo": "node scripts/dev_seed_demo.cjs",
-    "seed": "node scripts/dev_seed_demo.cjs",
     "dev": "nodemon index.cjs",
-    "dev:all": "npm run clean && npm run prisma:validate && npm run prisma:deploy && npm run seed && npm run dev",
-    "smoke": "node scripts/smoke_api.cjs"
+    "seed": "node prisma/seed.js",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.617.0",
