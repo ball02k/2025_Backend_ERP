@@ -77,16 +77,25 @@ async function run() {
     { title: 'Upcoming task', dueDate: new Date(now.getTime() + 7 * msDay) },
   ];
   for (const t of tasks) {
-    await prisma.task.create({
-      data: {
+    const existing = await prisma.task.findFirst({
+      where: {
         tenantId: tId,
         projectId: activeProject.id,
         title: t.title,
-        dueDate: t.dueDate,
-        statusId: openStatus?.id,
-        status: 'Open',
       },
     });
+    if (!existing) {
+      await prisma.task.create({
+        data: {
+          tenantId: tId,
+          projectId: activeProject.id,
+          title: t.title,
+          dueDate: t.dueDate,
+          statusId: openStatus?.id,
+          status: 'Open',
+        },
+      });
+    }
   }
 
   const [users, clients, projects, tasksCount] = await Promise.all([
