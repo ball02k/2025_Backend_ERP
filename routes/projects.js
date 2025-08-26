@@ -1,10 +1,7 @@
 // routes/projects.js
 const express = require('express');
 const { projectsQuerySchema, projectBodySchema } = require('../lib/validation');
-
-function getTenantId(req) {
-  return req.headers['x-tenant-id'] || 'demo';
-}
+const { withTenant } = require('../utils/tenant.cjs');
 
 module.exports = (prisma) => {
   const router = express.Router();
@@ -12,12 +9,11 @@ module.exports = (prisma) => {
   // GET /api/projects?search=&statusId=&typeId=&clientId=&page=&pageSize=&sort=&order=
   router.get('/', async (req, res, next) => {
     try {
-      const tenantId = getTenantId(req);
+      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
       const { page, pageSize, sort, order, search, clientId, statusId, typeId } =
         projectsQuerySchema.parse(req.query);
 
-      const where = {
-        tenantId,
+      const where = withTenant({
         ...(clientId ? { clientId } : {}),
         ...(statusId ? { statusId } : {}),
         ...(typeId ? { typeId } : {}),
@@ -28,7 +24,7 @@ module.exports = (prisma) => {
               { description: { contains: search, mode: 'insensitive' } },
             ]}
           : {}),
-      };
+      }, tenantId);
 
       const [total, rows] = await Promise.all([
         prisma.project.count({ where }),
@@ -60,7 +56,7 @@ module.exports = (prisma) => {
   // GET /api/projects/:id
   router.get('/:id', async (req, res, next) => {
     try {
-      const tenantId = getTenantId(req);
+      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
       const id = Number(req.params.id);
       if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
 
@@ -87,7 +83,7 @@ module.exports = (prisma) => {
   // POST /api/projects
   router.post('/', async (req, res, next) => {
     try {
-      const tenantId = getTenantId(req);
+      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
       const body = projectBodySchema.parse(req.body);
       const created = await prisma.project.create({
         data: {
@@ -108,7 +104,7 @@ module.exports = (prisma) => {
   // PUT /api/projects/:id
   router.put('/:id', async (req, res, next) => {
     try {
-      const tenantId = getTenantId(req);
+      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
       const id = Number(req.params.id);
       const existing = await prisma.project.findFirst({ where: { id, tenantId } });
       if (!existing) return res.status(404).json({ error: 'Project not found' });
@@ -132,7 +128,7 @@ module.exports = (prisma) => {
   // DELETE /api/projects/:id  (safe transactional delete)
   router.delete('/:id', async (req, res, next) => {
     try {
-      const tenantId = getTenantId(req);
+      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
       const id = Number(req.params.id);
       if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
 

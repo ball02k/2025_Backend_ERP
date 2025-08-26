@@ -1,6 +1,7 @@
 const { verify } = require('../utils/jwt.cjs');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+const DEFAULT_TENANT = process.env.TENANT_DEFAULT || 'demo';
 
 function parseBearer(req) {
   const h = req.headers.authorization || '';
@@ -10,7 +11,7 @@ function parseBearer(req) {
 function attachUser(req, _res, next) {
   const tenantHeader =
     req.headers['x-tenant-id'] ||
-    (process.env.NODE_ENV === 'production' ? undefined : 'demo');
+    (process.env.NODE_ENV === 'production' ? undefined : DEFAULT_TENANT);
   req.tenantId = tenantHeader;
   try {
     const tok = parseBearer(req);
