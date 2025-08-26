@@ -3,6 +3,8 @@ const cors = require('cors');
 const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
 const jwt = require('jsonwebtoken');
+const pkg = require('./package.json');
+const { logError } = require('./utils/errors.cjs');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -19,8 +21,8 @@ const { attachUser, requireAuth } = require('./middleware/auth.cjs');
 
 app.use(
   cors({
-    origin: ['http://localhost:5174', 'http://127.0.0.1:5174'],
-    credentials: false,
+    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    credentials: true,
   })
 );
 app.use(express.json({ limit: '5mb' }));
@@ -34,7 +36,9 @@ app.set('json replacer', (key, value) =>
 );
 
 const PORT = process.env.PORT || 3001;
-app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get(['/health', '/api/health'], (_req, res) =>
+  res.json({ ok: true, version: pkg.version, time: new Date().toISOString() })
+);
 
 app.use('/auth', authRouter);
 app.use('/me', meRouter);
@@ -93,8 +97,10 @@ if ((process.env.STORAGE_PROVIDER || 'local').toLowerCase() === 'local') {
 
 /* JSON error handler (keep last) */
 app.use((err, _req, res, _next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Internal Server Error' });
+  logError(err);
+  const status = err.status || err.statusCode || 500;
+  const message = err.message || 'Internal Server Error';
+  res.status(status).json({ error: message });
 });
 
 app.listen(PORT, () => console.log(`API on :${PORT}`));
