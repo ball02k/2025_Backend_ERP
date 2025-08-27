@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "nodemon index.cjs",
     "seed": "node prisma/seed.js",
+    "seed:demo": "node scripts/dev-seed.cjs",
     "postinstall": "prisma generate"
   },
   "dependencies": {
