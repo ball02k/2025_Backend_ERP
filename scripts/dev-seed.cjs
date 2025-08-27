@@ -3,104 +3,126 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 (async () => {
-  const TENANT_STR = process.env.TENANT_DEFAULT || 'demo';           // Project/Task: String
-  const STATUS_TENANT_ID = Number(process.env.STATUS_TENANT_ID || 1); // TaskStatus: Int
+  const TENANT = process.env.TENANT_DEFAULT || 'demo';
+  const STATUS_TENANT_ID = 1; // integer for status tables
 
+  // Demo values
   const DEMO_CLIENTS = [
-    { name: 'Acme Developments',  companyRegNo: '01234567' },
-    { name: 'The Crown Estate',   companyRegNo: '00000000' },
-    { name: 'Orbit Housing',      companyRegNo: '09876543' },
-    { name: 'G4S Facilities',     companyRegNo: '06543210' },
-    { name: 'Canary Wharf Group', companyRegNo: '11111111' },
+    { name:'Acme Developments', companyRegNo:'01234567' },
+    { name:'Crown Estate', companyRegNo:'00000000' },
+    { name:'Orbit Housing', companyRegNo:'09876543' },
   ];
-
   const DEMO_PROJECTS = [
-    { code:'P-1001', name:'Canary Wharf Fit-out',   status:'Active',  type:'Fit-out',        clientName:'Canary Wharf Group' },
-    { code:'P-1002', name:'NHS Clinic Refurb',      status:'Active',  type:'Healthcare',     clientName:'Acme Developments'  },
-    { code:'P-1003', name:'Orbit Housing Block A',  status:'Active',  type:'Residential',    clientName:'Orbit Housing'      },
-    { code:'P-1004', name:'Crown Estate Lobby',     status:'Pending', type:'Commercial',     clientName:'The Crown Estate'   },
-    { code:'P-1005', name:'G4S HQ M&E',             status:'Active',  type:'Infrastructure', clientName:'G4S Facilities'     },
-    { code:'P-1006', name:'School Sports Hall',     status:'Active',  type:'Education',      clientName:'Acme Developments'  },
+    { code:'P-001', name:'Acme Tower', status:'Active', type:'Commercial', clientName:'Acme Developments' },
+    { code:'P-002', name:'Orbit Block A', status:'Active', type:'Residential', clientName:'Orbit Housing' },
+    { code:'P-003', name:'Crown Lobby', status:'Pending', type:'Fit-out', clientName:'Crown Estate' },
   ];
-
   const DEMO_TASKS = [
-    { title:'RIBA Stage 3 sign-off', status:'done',        due:'2025-08-01', projectCode:'P-1001' },
-    { title:'Steel delivery',        status:'overdue',     due:'2025-08-10', projectCode:'P-1002' },
-    { title:'M&E design review',     status:'in_progress', due:'2025-09-05', projectCode:'P-1005' },
-    { title:'Planning condition 12', status:'in_progress', due:'2025-09-12', projectCode:'P-1003' },
-    { title:'Glazing package award', status:'overdue',     due:'2025-08-15', projectCode:'P-1001' },
-    { title:'Asbestos survey',       status:'done',        due:'2025-07-25', projectCode:'P-1004' },
-    { title:'Joinery shop drawings', status:'in_progress', due:'2025-09-01', projectCode:'P-1006' },
-    { title:'Fire stopping audit',   status:'overdue',     due:'2025-08-20', projectCode:'P-1003' },
+    { title:'Site survey', status:'in_progress', due:'2025-09-01', projectCode:'P-001' },
+    { title:'Steel delivery', status:'overdue', due:'2025-08-15', projectCode:'P-002' },
+    { title:'Planning consent', status:'done', due:'2025-07-30', projectCode:'P-003' },
   ];
 
-  const STATUS_META = {
-    done:         { label: 'Done',         colorHex: '#10b981', sortOrder: 90,  isActive: true },
-    overdue:      { label: 'Overdue',      colorHex: '#ef4444', sortOrder: 80,  isActive: true },
-    in_progress:  { label: 'In Progress',  colorHex: '#3b82f6', sortOrder: 70,  isActive: true },
-  };
-  const toISO = (d) => new Date(d).toISOString();
+  // Clean up demo
+  const codes = DEMO_PROJECTS.map(p => p.code);
+  const names = DEMO_CLIENTS.map(c => c.name);
+  const existing = await prisma.project.findMany({ where: { code: { in: codes } }, select:{ id:true }});
+  const ids = existing.map(p => p.id);
+  if (ids.length) await prisma.task.deleteMany({ where:{ projectId:{ in: ids } }});
+  await prisma.project.deleteMany({ where:{ code:{ in: codes } }});
+  await prisma.client.deleteMany({ where:{ name:{ in: names } }});
 
-  // 1) Clear only our demo set
-  const projectCodes = DEMO_PROJECTS.map(p => p.code);
-  const clientNames  = DEMO_CLIENTS.map(c => c.name);
-  const existing = await prisma.project.findMany({ where: { code: { in: projectCodes } }, select: { id: true } });
-  const projectIds = existing.map(p => p.id);
-  if (projectIds.length) await prisma.task.deleteMany({ where: { projectId: { in: projectIds } } });
-  await prisma.project.deleteMany({ where: { code: { in: projectCodes } } });
-  await prisma.client.deleteMany({ where: { name: { in: clientNames } } });
-
-  // 2) Clients (no tenantId on Client)
-  const clientsByName = {};
-  for (const c of DEMO_CLIENTS) {
-    const client = await prisma.client.create({ data: { name: c.name, companyRegNo: c.companyRegNo } });
-    clientsByName[c.name] = client;
-  }
-
-  // 3) TaskStatus (compound unique tenantId+key)
-  const neededKeys = [...new Set(DEMO_TASKS.map(t => t.status))];
-  for (let i = 0; i < neededKeys.length; i++) {
-    const key = neededKeys[i];
-    const meta = STATUS_META[key] || { label: key, colorHex: null, sortOrder: 50 + i*5, isActive: true };
+  // Upsert statuses and types (compound unique on tenantId+key)
+  const statusKeys = ['done','overdue','in_progress'];
+  const projectStatuses = ['Active','Pending'];
+  const projectTypes = ['Commercial','Residential','Fit-out'];
+  for (const key of statusKeys) {
     await prisma.taskStatus.upsert({
       where: { tenantId_key: { tenantId: STATUS_TENANT_ID, key } },
       update: {},
-      create: { tenantId: STATUS_TENANT_ID, key, label: meta.label, colorHex: meta.colorHex, sortOrder: meta.sortOrder, isActive: meta.isActive }
+      create: { tenantId: STATUS_TENANT_ID, key, label: key, isActive:true },
+    });
+  }
+  for (const key of projectStatuses) {
+    await prisma.projectStatus.upsert({
+      where: { tenantId_key: { tenantId: STATUS_TENANT_ID, key } },
+      update: {},
+      create: { tenantId: STATUS_TENANT_ID, key, label: key, isActive:true },
+    });
+  }
+  for (const key of projectTypes) {
+    await prisma.projectType.upsert({
+      where: { tenantId_key: { tenantId: STATUS_TENANT_ID, key } },
+      update: {},
+      create: { tenantId: STATUS_TENANT_ID, key, label: key, isActive:true },
     });
   }
 
-  // 4) Projects (string tenant)
-  const projectsByCode = {};
+  // Create clients
+  const clientMap = {};
+  for (const c of DEMO_CLIENTS) {
+    const created = await prisma.client.create({
+      data:{ name:c.name, companyRegNo:c.companyRegNo }
+    });
+    clientMap[c.name] = created;
+  }
+
+  // Create projects with status/type by simple strings and tenantId
+  const projectMap = {};
   for (const p of DEMO_PROJECTS) {
-    const client = clientsByName[p.clientName];
-    const project = await prisma.project.upsert({
-      where: { code: p.code },
-      update: { name: p.name, status: p.status, type: p.type, client: { connect: { id: client.id } }, tenantId: TENANT_STR },
-      create: { code: p.code, name: p.name, status: p.status, type: p.type, client: { connect: { id: client.id } }, tenantId: TENANT_STR }
+    const client = clientMap[p.clientName];
+    const project = await prisma.project.create({
+      data:{
+        code:p.code,
+        name:p.name,
+        status:p.status,
+        type:p.type,
+        client:{ connect:{ id: client.id } },
+        tenantId:TENANT
+      }
     });
-    projectsByCode[p.code] = project;
+    projectMap[p.code] = project;
   }
 
-  // 5) Tasks (connect required relation statusRel using compound unique)
+  // Create tasks with relation to statusRel and project
   for (const t of DEMO_TASKS) {
-    const proj = projectsByCode[t.projectCode];
+    const proj = projectMap[t.projectCode];
     await prisma.task.create({
-      data: {
-        project:  { connect: { id: proj.id } },
-        tenantId: TENANT_STR,
-        title:    t.title,
-        status:   t.status,
-        dueDate:  toISO(t.due),
-        statusRel:{ connect: { tenantId_key: { tenantId: STATUS_TENANT_ID, key: t.status } } },
+      data:{
+        project:{ connect:{ id: proj.id } },
+        tenantId:TENANT,
+        title:t.title,
+        status:t.status,
+        dueDate:new Date(t.due).toISOString(),
+        statusRel:{ connect:{ tenantId_key:{ tenantId: STATUS_TENANT_ID, key: t.status } } }
       }
     });
   }
 
-  const cc = await prisma.client.count({ where: { name: { in: clientNames } } });
-  const pc = await prisma.project.count({ where: { code: { in: projectCodes } } });
-  const pids = Object.values(projectsByCode).map(p => p.id);
-  const tc = await prisma.task.count({ where: { projectId: { in: pids } } });
-  console.log('✅ Seed complete', { clients: cc, projects: pc, tasks: tc });
-  process.exit(0);
-})().catch(e => { console.error('Seed failed:', e); process.exit(1); });
+  // Example variation and document for demonstration
+  const var1 = await prisma.variation.create({
+    data:{
+      project:{ connect:{ id: projectMap['P-001'].id } },
+      tenantId:TENANT,
+      referenceCode:'VAR001',
+      title:'Change fire doors',
+      type:'Change',
+      status:'Draft',
+      estimated_cost:20000,
+      estimated_sell:25000
+    }
+  });
+  await prisma.document.create({
+    data:{
+      fileName:'spec.pdf',
+      storageKey:'uploads/spec.pdf',
+      storageProvider:'local',
+      size:50000n,
+      contentType:'application/pdf',
+      uploadedBy:'System'
+    }
+  });
 
+  console.log('Seed complete');
+  process.exit(0);
+})().catch((e) => { console.error('Seed error', e); process.exit(1); });
