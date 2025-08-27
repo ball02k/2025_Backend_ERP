@@ -3,12 +3,9 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 (async () => {
-  // IMPORTANT: In your schema, Project.tenantId and Task.tenantId are String.
-  //            TaskStatus.tenantId is Int and has a compound unique with key.
-  const TENANT_STR = process.env.TENANT_DEFAULT || 'demo';   // for Project/Task
-  const STATUS_TENANT_ID = Number(process.env.STATUS_TENANT_ID || 1); // for TaskStatus
+  const TENANT_STR = process.env.TENANT_DEFAULT || 'demo';           // Project/Task: String
+  const STATUS_TENANT_ID = Number(process.env.STATUS_TENANT_ID || 1); // TaskStatus: Int
 
-  // ---- Demo fixtures ----
   const DEMO_CLIENTS = [
     { name: 'Acme Developments',  companyRegNo: '01234567' },
     { name: 'The Crown Estate',   companyRegNo: '00000000' },
@@ -41,110 +38,69 @@ const prisma = new PrismaClient();
     done:         { label: 'Done',         colorHex: '#10b981', sortOrder: 90,  isActive: true },
     overdue:      { label: 'Overdue',      colorHex: '#ef4444', sortOrder: 80,  isActive: true },
     in_progress:  { label: 'In Progress',  colorHex: '#3b82f6', sortOrder: 70,  isActive: true },
-    // include 'open' if you need a default elsewhere
   };
-
   const toISO = (d) => new Date(d).toISOString();
 
-  // ---- 1) Clean previous demo data (by our codes/names only) ----
+  // 1) Clear only our demo set
   const projectCodes = DEMO_PROJECTS.map(p => p.code);
   const clientNames  = DEMO_CLIENTS.map(c => c.name);
-
-  const existingProjects = await prisma.project.findMany({
-    where: { code: { in: projectCodes } },
-    select: { id: true }
-  });
-  const projectIds = existingProjects.map(p => p.id);
-
-  if (projectIds.length) {
-    await prisma.task.deleteMany({ where: { projectId: { in: projectIds } } });
-  }
+  const existing = await prisma.project.findMany({ where: { code: { in: projectCodes } }, select: { id: true } });
+  const projectIds = existing.map(p => p.id);
+  if (projectIds.length) await prisma.task.deleteMany({ where: { projectId: { in: projectIds } } });
   await prisma.project.deleteMany({ where: { code: { in: projectCodes } } });
   await prisma.client.deleteMany({ where: { name: { in: clientNames } } });
 
-  // ---- 2) Create clients (Client has NO tenantId field) ----
+  // 2) Clients (no tenantId on Client)
   const clientsByName = {};
   for (const c of DEMO_CLIENTS) {
-    const client = await prisma.client.create({
-      data: { name: c.name, companyRegNo: c.companyRegNo }
-    });
+    const client = await prisma.client.create({ data: { name: c.name, companyRegNo: c.companyRegNo } });
     clientsByName[c.name] = client;
   }
 
-  // ---- 3) Ensure TaskStatus rows exist (compound unique: tenantId + key) ----
-  const neededKeys = Array.from(new Set(DEMO_TASKS.map(t => t.status)));
+  // 3) TaskStatus (compound unique tenantId+key)
+  const neededKeys = [...new Set(DEMO_TASKS.map(t => t.status))];
   for (let i = 0; i < neededKeys.length; i++) {
     const key = neededKeys[i];
-    const meta = STATUS_META[key] || { label: key, colorHex: null, sortOrder: 50 + i * 5, isActive: true };
+    const meta = STATUS_META[key] || { label: key, colorHex: null, sortOrder: 50 + i*5, isActive: true };
     await prisma.taskStatus.upsert({
-      // THIS is the important bit: use the compound unique input
       where: { tenantId_key: { tenantId: STATUS_TENANT_ID, key } },
       update: {},
-      create: {
-        tenantId: STATUS_TENANT_ID,
-        key,
-        label: meta.label,
-        colorHex: meta.colorHex,
-        sortOrder: meta.sortOrder,
-        isActive: meta.isActive,
-      }
+      create: { tenantId: STATUS_TENANT_ID, key, label: meta.label, colorHex: meta.colorHex, sortOrder: meta.sortOrder, isActive: meta.isActive }
     });
   }
 
-  // ---- 4) Upsert projects by code and set string tenantId ----
+  // 4) Projects (string tenant)
   const projectsByCode = {};
   for (const p of DEMO_PROJECTS) {
     const client = clientsByName[p.clientName];
     const project = await prisma.project.upsert({
       where: { code: p.code },
-      update: {
-        name: p.name,
-        status: p.status,
-        type: p.type,
-        client: { connect: { id: client.id } },
-        tenantId: TENANT_STR,
-      },
-      create: {
-        code: p.code,
-        name: p.name,
-        status: p.status,
-        type: p.type,
-        client: { connect: { id: client.id } },
-        tenantId: TENANT_STR,
-      }
+      update: { name: p.name, status: p.status, type: p.type, client: { connect: { id: client.id } }, tenantId: TENANT_STR },
+      create: { code: p.code, name: p.name, status: p.status, type: p.type, client: { connect: { id: client.id } }, tenantId: TENANT_STR }
     });
     projectsByCode[p.code] = project;
   }
 
-  // ---- 5) Create tasks (CONNECT required relation statusRel) ----
+  // 5) Tasks (connect required relation statusRel using compound unique)
   for (const t of DEMO_TASKS) {
     const proj = projectsByCode[t.projectCode];
     await prisma.task.create({
       data: {
-        project:  { connect: { id: proj.id } },                // required relation
-        tenantId: TENANT_STR,                                  // Task.tenantId is String
+        project:  { connect: { id: proj.id } },
+        tenantId: TENANT_STR,
         title:    t.title,
-        status:   t.status,                                    // keep string for UI filters
+        status:   t.status,
         dueDate:  toISO(t.due),
-        // THIS LINE fixes your error:
         statusRel:{ connect: { tenantId_key: { tenantId: STATUS_TENANT_ID, key: t.status } } },
       }
     });
   }
 
-  // ---- Summary ----
   const cc = await prisma.client.count({ where: { name: { in: clientNames } } });
   const pc = await prisma.project.count({ where: { code: { in: projectCodes } } });
   const pids = Object.values(projectsByCode).map(p => p.id);
   const tc = await prisma.task.count({ where: { projectId: { in: pids } } });
-  console.log('✅ Seed complete',
-    '\n TENANT_STR (Project/Task)=', TENANT_STR,
-    '\n STATUS_TENANT_ID (TaskStatus)=', STATUS_TENANT_ID,
-    '\n Counts =>', { clients: cc, projects: pc, tasks: tc }
-  );
-
+  console.log('✅ Seed complete', { clients: cc, projects: pc, tasks: tc });
   process.exit(0);
-})().catch((e) => {
-  console.error('Seed failed:', e);
-  process.exit(1);
-});
+})().catch(e => { console.error('Seed failed:', e); process.exit(1); });
+
