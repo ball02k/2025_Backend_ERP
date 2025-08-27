@@ -7,12 +7,17 @@ const { sign } = require('./utils/jwt.cjs');
 const pkg = require('./package.json');
 const { logError } = require('./utils/errors.cjs');
 
+// BigInt JSON patch
+BigInt.prototype.toJSON = function () {
+  return Number(this);
+};
+
 const app = express();
 const prisma = new PrismaClient();
 const TENANT_DEFAULT = process.env.TENANT_DEFAULT || 'demo';
 
 const variationsRouter = require('./routes/variations.cjs');
-const documentsRouter = require('./routes/documents.cjs');
+const documentsRouter = require('./routes/documents_v2.cjs');
 const projectsOverviewRouter = require('./routes/projects_overview.cjs');
 const authRouter = require('./routes/auth.cjs');
 const meRouter = require('./routes/me.cjs');

@@ -305,39 +305,34 @@ model ProjectSnapshot {
 }
 
 model Document {
-  id              BigInt    @id @default(autoincrement())
-  fileName        String
-  storageKey      String
-  storageProvider String
-  size            BigInt?
-  contentType     String?
-  uploadedAt      DateTime  @default(now())
-  uploadedBy      String?
-  tags            String?   @db.Text // CSV of lowercase tokens
-  is_deleted      Boolean   @default(false)
-  deletedAt       DateTime?
+  id           BigInt   @id @default(autoincrement())
+  tenantId     String
+  filename     String
+  mimeType     String
+  size         Int
+  storageKey   String   @unique
+  sha256       String?
+  uploadedAt   DateTime @default(now())
+  uploadedById String?
+  links        DocumentLink[]
 
-  links DocumentLink[]
-  // If you want to map to an existing lowercase table, uncomment:
-  // @@map("documents")
-
-  @@index([uploadedAt])
+  @@index([tenantId])
 }
 
 model DocumentLink {
-  id          BigInt   @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
+  tenantId    String
   documentId  BigInt
   projectId   Int?
   variationId Int?
-  note        String?
+  linkType    String
   createdAt   DateTime @default(now())
 
   document Document @relation(fields: [documentId], references: [id])
-  // If you have Project/Variation models with BigInt ids, you can add relations later.
-  // For now they remain nullable numeric FKs without relation constraints.
 
-  @@index([projectId])
-  @@index([variationId])
+  @@index([tenantId, projectId])
+  @@index([tenantId, variationId])
+  @@index([tenantId, documentId])
 }
 
 model User {
