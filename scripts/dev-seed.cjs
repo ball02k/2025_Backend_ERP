@@ -3,8 +3,9 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 (async () => {
-  // Projects/Tasks use string tenant IDs; TaskStatus uses INT.
-  const TENANT_STR = process.env.TENANT_DEFAULT || 'demo';  // for Project/Task
+  // IMPORTANT: In your schema, Project.tenantId and Task.tenantId are String.
+  //            TaskStatus.tenantId is Int and has a compound unique with key.
+  const TENANT_STR = process.env.TENANT_DEFAULT || 'demo';   // for Project/Task
   const STATUS_TENANT_ID = Number(process.env.STATUS_TENANT_ID || 1); // for TaskStatus
 
   // ---- Demo fixtures ----
@@ -36,25 +37,24 @@ const prisma = new PrismaClient();
     { title:'Fire stopping audit',   status:'overdue',     due:'2025-08-20', projectCode:'P-1003' },
   ];
 
-  // Optional: give your statuses nice labels/colors
   const STATUS_META = {
     done:         { label: 'Done',         colorHex: '#10b981', sortOrder: 90,  isActive: true },
     overdue:      { label: 'Overdue',      colorHex: '#ef4444', sortOrder: 80,  isActive: true },
     in_progress:  { label: 'In Progress',  colorHex: '#3b82f6', sortOrder: 70,  isActive: true },
-    open:         { label: 'Open',         colorHex: '#64748b', sortOrder: 60,  isActive: true },
+    // include 'open' if you need a default elsewhere
   };
 
   const toISO = (d) => new Date(d).toISOString();
 
-  // ---- 1) Clean previous demo data (only our demo entities) ----
+  // ---- 1) Clean previous demo data (by our codes/names only) ----
   const projectCodes = DEMO_PROJECTS.map(p => p.code);
   const clientNames  = DEMO_CLIENTS.map(c => c.name);
 
-  const existing = await prisma.project.findMany({
+  const existingProjects = await prisma.project.findMany({
     where: { code: { in: projectCodes } },
     select: { id: true }
   });
-  const projectIds = existing.map(p => p.id);
+  const projectIds = existingProjects.map(p => p.id);
 
   if (projectIds.length) {
     await prisma.task.deleteMany({ where: { projectId: { in: projectIds } } });
@@ -62,22 +62,22 @@ const prisma = new PrismaClient();
   await prisma.project.deleteMany({ where: { code: { in: projectCodes } } });
   await prisma.client.deleteMany({ where: { name: { in: clientNames } } });
 
-  // ---- 2) Create clients (Client has no tenantId) ----
+  // ---- 2) Create clients (Client has NO tenantId field) ----
   const clientsByName = {};
   for (const c of DEMO_CLIENTS) {
-    const created = await prisma.client.create({
+    const client = await prisma.client.create({
       data: { name: c.name, companyRegNo: c.companyRegNo }
     });
-    clientsByName[c.name] = created;
+    clientsByName[c.name] = client;
   }
 
   // ---- 3) Ensure TaskStatus rows exist (compound unique: tenantId + key) ----
   const neededKeys = Array.from(new Set(DEMO_TASKS.map(t => t.status)));
-  const statusIds = {};
   for (let i = 0; i < neededKeys.length; i++) {
     const key = neededKeys[i];
     const meta = STATUS_META[key] || { label: key, colorHex: null, sortOrder: 50 + i * 5, isActive: true };
-    const s = await prisma.taskStatus.upsert({
+    await prisma.taskStatus.upsert({
+      // THIS is the important bit: use the compound unique input
       where: { tenantId_key: { tenantId: STATUS_TENANT_ID, key } },
       update: {},
       create: {
@@ -89,10 +89,9 @@ const prisma = new PrismaClient();
         isActive: meta.isActive,
       }
     });
-    statusIds[key] = s.id;
   }
 
-  // ---- 4) Upsert projects by unique `code` and set string tenantId ----
+  // ---- 4) Upsert projects by code and set string tenantId ----
   const projectsByCode = {};
   for (const p of DEMO_PROJECTS) {
     const client = clientsByName[p.clientName];
@@ -117,17 +116,18 @@ const prisma = new PrismaClient();
     projectsByCode[p.code] = project;
   }
 
-  // ---- 5) Create tasks: connect project, set string tenantId, set required statusId ----
+  // ---- 5) Create tasks (CONNECT required relation statusRel) ----
   for (const t of DEMO_TASKS) {
     const proj = projectsByCode[t.projectCode];
     await prisma.task.create({
       data: {
-        project:  { connect: { id: proj.id } }, // relation required
-        tenantId: TENANT_STR,                    // Task.tenantId is String
+        project:  { connect: { id: proj.id } },                // required relation
+        tenantId: TENANT_STR,                                  // Task.tenantId is String
         title:    t.title,
-        status:   t.status,                      // keep string for quick filters in UI
-        statusId: statusIds[t.status],           // satisfy required relation
+        status:   t.status,                                    // keep string for UI filters
         dueDate:  toISO(t.due),
+        // THIS LINE fixes your error:
+        statusRel:{ connect: { tenantId_key: { tenantId: STATUS_TENANT_ID, key: t.status } } },
       }
     });
   }
