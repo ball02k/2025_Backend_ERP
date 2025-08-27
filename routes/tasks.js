@@ -1,153 +1,52 @@
-// routes/tasks.js
 const express = require('express');
-const { tasksQuerySchema, taskBodySchema } = require('../lib/validation');
-const { recomputeProjectSnapshot } = require("../services/projectSnapshot");
-const { withTenant } = require('../utils/tenant.cjs');
+const router = express.Router();
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 
-module.exports = (prisma) => {
-  const router = express.Router();
+router.get('/', async (req, res) => {
+  try {
+    // tenant: header wins; else env; else demo
+    const tenant = req.get('x-tenant-id') || process.env.TENANT_DEFAULT || 'demo';
 
-  // GET /api/tasks?search=&projectId=&statusId=&dueBefore=&dueAfter=&page=&pageSize=&sort=&order=
-  router.get('/', async (req, res, next) => {
-    try {
-      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
-      const { page, pageSize, sort, order, search, projectId, statusId, dueBefore, dueAfter } =
-        tasksQuerySchema.parse(req.query);
+    // pagination
+    const take = Math.min(Number(req.query.limit) || 20, 100);
+    const skip = Math.max(Number(req.query.offset) || 0, 0);
 
-      const where = withTenant({
-        ...(projectId ? { projectId } : {}),
-        ...(statusId ? { statusId } : {}),
-        ...(search
-          ? { OR: [
-              { title: { contains: search, mode: 'insensitive' } },
-              { description: { contains: search, mode: 'insensitive' } },
-            ]}
-          : {}),
-        ...(dueBefore ? { dueDate: { lte: new Date(dueBefore) } } : {}),
-        ...(dueAfter ? { dueDate: { gte: new Date(dueAfter) } } : {}),
-      }, tenantId);
+    // parse sort like "dueDate:asc" or "createdAt:desc"
+    const sortParam = String(req.query.sort || 'dueDate:desc');
+    const [rawField, rawDir] = sortParam.split(':');
+    const allowed = new Set([
+      'id', 'projectId', 'tenantId',
+      'title', 'description',
+      'dueDate', 'assignee', 'status', 'statusId',
+      'createdAt', 'updatedAt'
+    ]);
+    const field = allowed.has(rawField) ? rawField : 'dueDate';
+    const dir = (rawDir === 'asc' || rawDir === 'ASC') ? 'asc' : 'desc';
+    const orderBy = { [field]: dir }; // <-- valid Prisma shape
 
-      const [total, rows] = await Promise.all([
-        prisma.task.count({ where }),
-        prisma.task.findMany({
-          where,
-          orderBy: { [sort]: order },
-          skip: (page - 1) * pageSize,
-          take: pageSize,
-          include: {
-            project: { select: { id: true, name: true } },
-            statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
-          },
-        }),
-      ]);
+    // basic filter (expand as needed)
+    const where = { tenantId: tenant };
 
-      res.json({
-        page, pageSize, total, rows,
-        rowsMapped: rows.map(t => ({
-          ...t,
-          statusText: t.statusRel?.label ?? null,
-        })),
-      });
-    } catch (e) { next(e); }
-  });
-
-  // POST /api/tasks
-  router.post('/', async (req, res, next) => {
-    try {
-      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
-      const body = taskBodySchema.parse(req.body);
-      const tIdInt = Number(tenantId);
-      const statusRow = await prisma.taskStatus.findFirst({
-        where: {
-          id: body.statusId,
-          ...(Number.isInteger(tIdInt) ? { tenantId: tIdInt } : {}),
-        },
-        select: { label: true },
-      });
-      const created = await prisma.task.create({
-        data: {
-          ...body,
-          tenantId,
-          status: statusRow?.label || 'Open',
-          ...(body.dueDate ? { dueDate: new Date(body.dueDate) } : {}),
-        },
+    const [total, rows] = await Promise.all([
+      prisma.task.count({ where }),
+      prisma.task.findMany({
+        where,
+        orderBy,
+        skip,
+        take,
         include: {
           project: { select: { id: true, name: true } },
           statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
         },
-      });
-      await recomputeProjectSnapshot(Number(created.projectId), tenantId);
-      res.status(201).json(created);
-    } catch (e) { next(e); }
-  });
+      }),
+    ]);
 
-  // PUT /api/tasks/:id
-  router.put('/:id', async (req, res, next) => {
-    try {
-      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
-      const id = Number(req.params.id);
-      const existing = await prisma.task.findFirst({
-        where: { id, tenantId },
-        select: { projectId: true },
-      });
-      if (!existing) return res.status(404).json({ error: 'Task not found' });
+    res.json({ total, tasks: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Failed to fetch tasks' });
+  }
+});
 
-      const body = taskBodySchema.partial().parse(req.body);
-      let statusData = {};
-      if (body.statusId !== undefined) {
-        const tIdInt = Number(tenantId);
-        const statusRow = await prisma.taskStatus.findFirst({
-          where: {
-            id: body.statusId,
-            ...(Number.isInteger(tIdInt) ? { tenantId: tIdInt } : {}),
-          },
-          select: { label: true },
-        });
-        statusData.status = statusRow?.label || undefined;
-      }
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.task.updateMany({
-          where: { id, tenantId },
-          data: {
-            ...body,
-            ...(body.dueDate ? { dueDate: new Date(body.dueDate) } : {}),
-            ...statusData,
-          },
-        });
-        return tx.task.findFirst({
-          where: { id, tenantId },
-          include: {
-            project: { select: { id: true, name: true } },
-            statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
-          },
-        });
-      });
-      await recomputeProjectSnapshot(Number(updated.projectId), tenantId);
-      if (updated.projectId !== existing.projectId) {
-        await recomputeProjectSnapshot(Number(existing.projectId), tenantId);
-      }
-      res.json(updated);
-    } catch (e) { next(e); }
-  });
-
-  // DELETE /api/tasks/:id
-  router.delete('/:id', async (req, res, next) => {
-    try {
-      const tenantId = req.user?.tenantId || process.env.TENANT_DEFAULT || 'demo';
-      const id = Number(req.params.id);
-      if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
-
-      const task = await prisma.task.findFirst({
-        where: { id, tenantId },
-        select: { id: true, projectId: true },
-      });
-      if (!task) return res.status(404).json({ error: 'Task not found' });
-
-      await prisma.task.deleteMany({ where: { id, tenantId } });
-      await recomputeProjectSnapshot(Number(task.projectId), tenantId);
-      res.status(204).end();
-    } catch (e) { next(e); }
-  });
-
-  return router;
-};
+module.exports = router;
