@@ -3,16 +3,19 @@ const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+/**
+ * GET /api/tasks
+ * Supports ?limit, ?offset, ?sort=<field>:<asc|desc>
+ * Uses X-Tenant-Id header, else TENANT_DEFAULT, else 'demo'
+ */
 router.get('/', async (req, res) => {
   try {
-    // tenant: header wins; else env; else demo
     const tenant = req.get('x-tenant-id') || process.env.TENANT_DEFAULT || 'demo';
 
-    // pagination
     const take = Math.min(Number(req.query.limit) || 20, 100);
     const skip = Math.max(Number(req.query.offset) || 0, 0);
 
-    // parse sort like "dueDate:asc" or "createdAt:desc"
+    // Parse sort like "dueDate:asc"
     const sortParam = String(req.query.sort || 'dueDate:desc');
     const [rawField, rawDir] = sortParam.split(':');
     const allowed = new Set([
@@ -23,9 +26,8 @@ router.get('/', async (req, res) => {
     ]);
     const field = allowed.has(rawField) ? rawField : 'dueDate';
     const dir = (rawDir === 'asc' || rawDir === 'ASC') ? 'asc' : 'desc';
-    const orderBy = { [field]: dir }; // <-- valid Prisma shape
+    const orderBy = { [field]: dir };
 
-    // basic filter (expand as needed)
     const where = { tenantId: tenant };
 
     const [total, rows] = await Promise.all([
@@ -49,4 +51,4 @@ router.get('/', async (req, res) => {
   }
 });
 
-module.exports = router;
+module.exports = router; // <-- IMPORTANT: CommonJS export
