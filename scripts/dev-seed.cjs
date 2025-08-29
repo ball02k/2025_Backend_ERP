@@ -4,6 +4,7 @@ const prisma = new PrismaClient();
 
 (async () => {
   const TENANT = process.env.TENANT_DEFAULT || 'demo';
+  const devEmail = 'dev@demo.local';
   const STATUS_TENANT_ID = 1; // integer for status tables
 
   // Demo values
@@ -67,6 +68,13 @@ const prisma = new PrismaClient();
     clientMap[c.name] = created;
   }
 
+  // Ensure a dev user exists
+  const devUser = await prisma.user.upsert({
+    where: { email: devEmail },
+    update: { tenantId: TENANT, name: 'Dev User' },
+    create: { email: devEmail, name: 'Dev User', tenantId: TENANT, passwordSHA: '' },
+  });
+
   // Create projects with status/type by simple strings and tenantId
   const projectMap = {};
   for (const p of DEMO_PROJECTS) {
@@ -84,6 +92,15 @@ const prisma = new PrismaClient();
     projectMap[p.code] = project;
   }
 
+  // Add memberships for dev user to all demo projects
+  for (const proj of Object.values(projectMap)) {
+    await prisma.projectMembership.upsert({
+      where: { tenantId_projectId_userId: { tenantId: TENANT, projectId: proj.id, userId: devUser.id } },
+      update: {},
+      create: { tenantId: TENANT, projectId: proj.id, userId: devUser.id, role: 'Member' },
+    });
+  }
+
   // Create tasks with relation to statusRel and project
   for (const t of DEMO_TASKS) {
     const proj = projectMap[t.projectCode];
@@ -99,27 +116,64 @@ const prisma = new PrismaClient();
     });
   }
 
-  // Example variation and document for demonstration
+  // Example variation and document for demonstration (new schema)
   const var1 = await prisma.variation.create({
     data:{
       project:{ connect:{ id: projectMap['P-001'].id } },
       tenantId:TENANT,
-      referenceCode:'VAR001',
+      reference:'CE-101',
       title:'Change fire doors',
-      type:'Change',
-      status:'Draft',
-      estimated_cost:20000,
-      estimated_sell:25000
+      contractType:'NEC4',
+      type:'compensation_event',
+      status:'proposed',
+      reason:'Client instruction',
+      submissionDate: new Date().toISOString(),
+      value: 25000,
+      costImpact: 20000,
+      timeImpactDays: 3,
+      notes: 'Seeded example',
+      lines: {
+        create: [
+          { tenantId: TENANT, description: 'Replace doors set A', qty: 10.0, rate: 1000.0, value: 10000.0, sort: 1 },
+          { tenantId: TENANT, description: 'Adjust frames', qty: 1.0, rate: 15000.0, value: 15000.0, sort: 2 }
+        ]
+      }
     }
   });
+
+  // Budget, commitments, actual costs, forecast for variety
+  await prisma.budgetLine.createMany({
+    data: [
+      { tenantId: TENANT, projectId: projectMap['P-001'].id, code: 'A100', category: 'Civils', description: 'Foundations', amount: 100000 },
+      { tenantId: TENANT, projectId: projectMap['P-001'].id, code: 'B200', category: 'MEP', description: 'Electrical', amount: 80000 }
+    ]
+  });
+  await prisma.commitment.create({ data: { tenantId: TENANT, projectId: projectMap['P-001'].id, ref: 'PO-COM-1', supplier: 'SteelCo', description: 'Structural steel', amount: 50000, status: 'Open' } });
+  await prisma.actualCost.create({ data: { tenantId: TENANT, projectId: projectMap['P-001'].id, ref: 'INV-001', supplier: 'SteelCo', description: 'Steel delivery 1', amount: 20000 } });
+  await prisma.forecast.create({ data: { tenantId: TENANT, projectId: projectMap['P-001'].id, period: '2025-09', description: 'Baseline forecast', amount: 150000 } });
+
+  // Procurement: PO with lines and a delivery
+  const po = await prisma.purchaseOrder.create({
+    data: {
+      tenantId: TENANT,
+      projectId: projectMap['P-001'].id,
+      code: `PO-${Date.now()}`,
+      supplier: 'Doors Ltd',
+      status: 'Open',
+      orderDate: new Date(),
+      total: 12500,
+      lines: { create: [{ tenantId: TENANT, item: 'Fire doors', qty: 10, unit: 'ea', unitCost: 1250, lineTotal: 12500 }] }
+    }
+  });
+  await prisma.delivery.create({ data: { tenantId: TENANT, poId: po.id, expectedAt: new Date(Date.now() + 3*24*3600*1000), note: 'Awaiting supplier confirmation' } });
   await prisma.document.create({
     data:{
-      fileName:'spec.pdf',
+      tenantId: TENANT,
+      filename:'spec.pdf',
       storageKey:'uploads/spec.pdf',
-      storageProvider:'local',
-      size:50000n,
-      contentType:'application/pdf',
-      uploadedBy:'System'
+      size:50000,
+      mimeType:'application/pdf',
+      uploadedById:'system'
     }
   });
 

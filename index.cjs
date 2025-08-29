@@ -80,6 +80,17 @@ if (process.env.NODE_ENV !== 'production') {
           passwordSHA: '',
         },
       });
+      // Ensure membership to all tenant projects for easy dev
+      const projects = await prisma.project.findMany({ where: { tenantId: tId }, select: { id: true } });
+      await Promise.all(
+        projects.map((p) =>
+          prisma.projectMembership.upsert({
+            where: { tenantId_projectId_userId: { tenantId: tId, projectId: p.id, userId: user.id } },
+            update: {},
+            create: { tenantId: tId, projectId: p.id, userId: user.id, role: 'Member' },
+          })
+        )
+      );
       const token = sign(
         { sub: String(user.id), tenantId: tId },
         SECRET,

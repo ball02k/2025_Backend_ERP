@@ -1,30 +1,9 @@
 const express = require("express");
 const router = express.Router();
 const { prisma, Prisma, dec } = require("../utils/prisma.cjs");
-const { computeTotals } = require("../utils/variations.cjs");
-const { resolve: resolveLookup } = require("../utils/lookups.cjs");
 const { recomputeProjectSnapshot } = require("../services/projectSnapshot");
+const { requireProjectMember } = require("../middleware/membership.cjs");
 const DEV = process.env.NODE_ENV !== "production";
-
-// Allowed workflow transitions
-const ALLOWED = {
-  draft: ["submitted", "deleted"],
-  submitted: ["under_review", "draft"],
-  under_review: ["approved", "rejected"],
-  approved: ["instructed", "priced", "agreed", "vo_issued"],
-  rejected: [],
-  instructed: ["priced", "agreed", "vo_issued"],
-  priced: ["agreed", "vo_issued"],
-  agreed: ["vo_issued"],
-  vo_issued: ["vo_accepted"],
-  vo_accepted: [],
-};
-
-function canTransition(from, to) {
-  if (from === to) return true;
-  const next = ALLOWED[from] || [];
-  return next.includes(to);
-}
 
 function parseNumber(n, fallback = null) {
   if (n === undefined || n === null || n === "") return fallback;
@@ -32,31 +11,11 @@ function parseNumber(n, fallback = null) {
   return Number.isFinite(v) ? v : fallback;
 }
 
-function getTenantId(req) {
-  return req.headers["x-tenant-id"] || "demo";
-}
-
-async function applyLookupStrings(body) {
-  const pairs = [
-    ["typeLookupId", "type", "variation_type"],
-    ["statusLookupId", "status", "variation_status"],
-    ["reasonLookupId", "reason_code", "variation_reason"],
-  ];
-  for (const [lk, sk, kind] of pairs) {
-    if (!body[sk] && body[lk]) {
-      const val = await resolveLookup(body[lk], kind, prisma);
-      if (!val) throw Object.assign(new Error(`Unknown ${lk}`), { status: 400 });
-      body[sk] = val;
-    }
-    delete body[lk];
-  }
-  return body;
-}
-
 // LIST
-router.get("/", async (req, res) => {
+// LIST (project-scoped)
+router.get("/", requireProjectMember, async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const {
       projectId,
       status,
@@ -64,60 +23,48 @@ router.get("/", async (req, res) => {
       q,
       limit = 20,
       offset = 0,
-      totals,
-      includeTotals,
     } = req.query;
-    const where = { is_deleted: false, tenantId };
-    if (projectId) where.projectId = Number(projectId);
+    if (!projectId) return res.status(400).json({ error: "projectId required" });
+    const where = { tenantId, projectId: Number(projectId) };
     if (status) where.status = String(status);
     if (type) where.type = String(type);
     if (q) {
       where.OR = [
         { title: { contains: String(q), mode: "insensitive" } },
-        { referenceCode: { contains: String(q), mode: "insensitive" } },
+        { reference: { contains: String(q), mode: "insensitive" } },
+        { reason: { contains: String(q), mode: "insensitive" } },
+        { notes: { contains: String(q), mode: "insensitive" } },
       ];
     }
 
     const [rows, total] = await Promise.all([
       prisma.variation.findMany({
         where,
-        orderBy: { createdAt: "desc" },
+        orderBy: { updatedAt: "desc" },
         skip: Number(offset) || 0,
         take: Number(limit) || 20,
-        include: {
-          project: {
-            select: {
-              id: true,
-              code: true,
-              name: true,
-              statusId: true,
-              typeId: true,
-            },
-          },
+        select: {
+          id: true,
+          projectId: true,
+          tenantId: true,
+          title: true,
+          reference: true,
+          contractType: true,
+          status: true,
+          type: true,
+          reason: true,
+          submissionDate: true,
+          decisionDate: true,
+          value: true,
+          costImpact: true,
+          timeImpactDays: true,
+          notes: true,
+          createdAt: true,
+          updatedAt: true,
         },
       }),
       prisma.variation.count({ where }),
     ]);
-
-    const wantTotals =
-      totals === "1" ||
-      totals === "true" ||
-      includeTotals === "1" ||
-      includeTotals === "true";
-    if (wantTotals && rows.length) {
-      const ids = rows.map((r) => r.id);
-      // tenant-scoped bulk op
-      const lines = await prisma.variationLine.findMany({
-        where: { tenantId, variationId: { in: ids } },
-      });
-      const grouped = lines.reduce((m, l) => {
-        (m[l.variationId] ||= []).push(l);
-        return m;
-      }, {});
-      rows.forEach((r) => {
-        r.totals = computeTotals(r, grouped[r.id] || []);
-      });
-    }
 
     return res.json({
       data: rows,
@@ -135,28 +82,20 @@ router.get("/", async (req, res) => {
 // DETAIL
 router.get("/:id", async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
     const row = await prisma.variation.findFirst({
-      where: { id, tenantId, is_deleted: false },
-      include: {
-        project: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            statusId: true,
-            typeId: true,
-          },
-        },
-        lines: true,
-        statusHistory: { orderBy: { changedAt: "asc" } },
-      },
+      where: { id, tenantId },
+      include: { lines: { orderBy: { sort: "asc" } } },
     });
     if (!row) return res.status(404).json({ error: "Not found" });
-
-    const totals = computeTotals(row, row.lines || []);
-    res.json({ data: { ...row, totals } });
+    // Enforce membership: check project membership by projectId
+    const membership = await prisma.projectMembership.findFirst({
+      where: { tenantId, projectId: row.projectId, userId: Number(req.user.id) },
+      select: { id: true },
+    });
+    if (!membership) return res.status(403).json({ error: "Forbidden" });
+    res.json({ data: row });
   } catch (err) {
     console.error(err);
     res.status(500).json({
@@ -167,89 +106,65 @@ router.get("/:id", async (req, res) => {
 });
 
 // CREATE
-router.post("/", async (req, res) => {
+router.post("/", requireProjectMember, async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
-    const body = await applyLookupStrings({ ...req.body });
+    const tenantId = req.user.tenantId;
+    const body = { ...req.body };
     const {
       projectId,
-      referenceCode,
       title,
-      description,
+      reference,
+      contractType,
       type,
       status,
-      reason_code,
-      estimated_cost,
-      estimated_sell,
-      agreed_cost,
-      agreed_sell,
-      notifiedDate,
-      submittedDate,
-      reviewedDate,
-      approvedDate,
-      rejectedDate,
-      instructedDate,
-      pricedDate,
-      agreedDate,
-      voIssuedDate,
-      voAcceptedDate,
+      reason,
+      submissionDate,
+      decisionDate,
+      value,
+      costImpact,
+      timeImpactDays,
+      notes,
       lines = [],
     } = body || {};
 
-    if (!projectId || !title || !type) {
+    if (!projectId || !title || !type || !contractType || value == null || costImpact == null) {
       return res.status(400).json({
-        error: "projectId, title, and type are required",
+        error: "projectId, title, type, contractType, value, costImpact are required",
       });
     }
 
-    const resolvedStatus = status || "draft";
+    const resolvedStatus = status || "proposed";
 
     const created = await prisma.variation.create({
       data: {
         tenantId,
         projectId: Number(projectId),
-        referenceCode: referenceCode || null,
+        reference: reference || null,
         title,
-        description: description || null,
+        contractType: String(contractType),
         type: String(type),
         status: String(resolvedStatus),
-        reason_code: reason_code || null,
-        estimated_cost: estimated_cost ?? null,
-        estimated_sell: estimated_sell ?? null,
-        agreed_cost: agreed_cost ?? null,
-        agreed_sell: agreed_sell ?? null,
-        notifiedDate: notifiedDate ? new Date(notifiedDate) : null,
-        submittedDate: submittedDate ? new Date(submittedDate) : null,
-        reviewedDate: reviewedDate ? new Date(reviewedDate) : null,
-        approvedDate: approvedDate ? new Date(approvedDate) : null,
-        rejectedDate: rejectedDate ? new Date(rejectedDate) : null,
-        instructedDate: instructedDate ? new Date(instructedDate) : null,
-        pricedDate: pricedDate ? new Date(pricedDate) : null,
-        agreedDate: agreedDate ? new Date(agreedDate) : null,
-        voIssuedDate: voIssuedDate ? new Date(voIssuedDate) : null,
-        voAcceptedDate: voAcceptedDate ? new Date(voAcceptedDate) : null,
+        reason: reason || null,
+        submissionDate: submissionDate ? new Date(submissionDate) : null,
+        decisionDate: decisionDate ? new Date(decisionDate) : null,
+        value: dec(parseNumber(value, 0) ?? 0),
+        costImpact: dec(parseNumber(costImpact, 0) ?? 0),
+        timeImpactDays: parseNumber(timeImpactDays, null),
+        notes: notes || null,
         lines: lines?.length
           ? {
               create: lines.map((L) => ({
-                cost_code: L.cost_code || null,
+                tenantId,
                 description: L.description,
                 qty: dec(parseNumber(L.qty, 0) ?? 0),
-                unit: L.unit || null,
-                unit_cost: dec(parseNumber(L.unit_cost, 0) ?? 0),
-                unit_sell:
-                  L.unit_sell != null
-                    ? dec(parseNumber(L.unit_sell, 0) ?? 0)
-                    : null,
+                rate: dec(parseNumber(L.rate, 0) ?? 0),
+                value: dec(parseNumber(L.value, 0) ?? 0),
+                sort: Number(L.sort || 0),
               })),
             }
           : undefined,
-        statusHistory: {
-          create: [
-            { fromStatus: null, toStatus: String(resolvedStatus), note: "created" },
-          ],
-        },
       },
-      include: { lines: true, statusHistory: true },
+      include: { lines: true },
     });
 
     await recomputeProjectSnapshot(Number(created.projectId), tenantId);
@@ -266,84 +181,60 @@ router.post("/", async (req, res) => {
 // UPDATE
 router.put("/:id", async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
     const existing = await prisma.variation.findFirst({
-      where: { id, tenantId, is_deleted: false },
+      where: { id, tenantId },
     });
     if (!existing) return res.status(404).json({ error: "Not found" });
 
-    const body = await applyLookupStrings({ ...req.body });
+    const body = { ...req.body };
     const {
-      referenceCode,
       title,
-      description,
+      reference,
+      contractType,
       type,
       status,
-      reason_code,
-      estimated_cost,
-      estimated_sell,
-      agreed_cost,
-      agreed_sell,
-      notifiedDate,
-      submittedDate,
-      reviewedDate,
-      approvedDate,
-      rejectedDate,
-      instructedDate,
-      pricedDate,
-      agreedDate,
-      voIssuedDate,
-      voAcceptedDate,
+      reason,
+      submissionDate,
+      decisionDate,
+      value,
+      costImpact,
+      timeImpactDays,
+      notes,
       lines,
     } = body || {};
 
     const updated = await prisma.$transaction(async (tx) => {
       if (Array.isArray(lines)) {
-        // tenant-scoped bulk op
         await tx.variationLine.deleteMany({ where: { tenantId, variationId: id } });
       }
-
-      const resolvedType = type ?? existing.type;
-      const resolvedStatus = status ?? existing.status;
-      const resolvedReason = reason_code ?? existing.reason_code;
 
       const upd = await tx.variation.update({
         where: { id, tenantId },
         data: {
-          referenceCode: referenceCode ?? existing.referenceCode,
+          reference: reference ?? existing.reference,
           title: title ?? existing.title,
-          description: description ?? existing.description,
-          type: String(resolvedType),
-          status: String(resolvedStatus),
-          reason_code: resolvedReason,
-          estimated_cost: estimated_cost ?? existing.estimated_cost,
-          estimated_sell: estimated_sell ?? existing.estimated_sell,
-          agreed_cost: agreed_cost ?? existing.agreed_cost,
-          agreed_sell: agreed_sell ?? existing.agreed_sell,
-          notifiedDate: notifiedDate ? new Date(notifiedDate) : existing.notifiedDate,
-          submittedDate: submittedDate ? new Date(submittedDate) : existing.submittedDate,
-          reviewedDate: reviewedDate ? new Date(reviewedDate) : existing.reviewedDate,
-          approvedDate: approvedDate ? new Date(approvedDate) : existing.approvedDate,
-          rejectedDate: rejectedDate ? new Date(rejectedDate) : existing.rejectedDate,
-          instructedDate: instructedDate ? new Date(instructedDate) : existing.instructedDate,
-          pricedDate: pricedDate ? new Date(pricedDate) : existing.pricedDate,
-          agreedDate: agreedDate ? new Date(agreedDate) : existing.agreedDate,
-          voIssuedDate: voIssuedDate ? new Date(voIssuedDate) : existing.voIssuedDate,
-          voAcceptedDate: voAcceptedDate ? new Date(voAcceptedDate) : existing.voAcceptedDate,
+          contractType: contractType ?? existing.contractType,
+          type: type ?? existing.type,
+          status: status ?? existing.status,
+          reason: reason ?? existing.reason,
+          submissionDate: submissionDate ? new Date(submissionDate) : existing.submissionDate,
+          decisionDate: decisionDate ? new Date(decisionDate) : existing.decisionDate,
+          value: value != null ? dec(parseNumber(value, 0) ?? 0) : existing.value,
+          costImpact: costImpact != null ? dec(parseNumber(costImpact, 0) ?? 0) : existing.costImpact,
+          timeImpactDays: timeImpactDays != null ? Number(timeImpactDays) : existing.timeImpactDays,
+          notes: notes ?? existing.notes,
           ...(Array.isArray(lines) && lines.length
             ? {
                 lines: {
                   create: lines.map((L) => ({
-                    cost_code: L.cost_code || null,
+                    tenantId,
                     description: L.description,
                     qty: dec(parseNumber(L.qty, 0) ?? 0),
-                    unit: L.unit || null,
-                    unit_cost: dec(parseNumber(L.unit_cost, 0) ?? 0),
-                    unit_sell:
-                      L.unit_sell != null
-                        ? dec(parseNumber(L.unit_sell, 0) ?? 0)
-                        : null,
+                    rate: dec(parseNumber(L.rate, 0) ?? 0),
+                    value: dec(parseNumber(L.value, 0) ?? 0),
+                    sort: Number(L.sort || 0),
                   })),
                 },
               }
@@ -371,84 +262,36 @@ router.put("/:id", async (req, res) => {
 });
 
 // STATUS CHANGE
+// Simple status update (optional)
 router.patch("/:id/status", async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
-    const { toStatus, note } = req.body || {};
+    const { toStatus } = req.body || {};
     if (!toStatus) return res.status(400).json({ error: "toStatus is required" });
-
-    const existing = await prisma.variation.findFirst({
-      where: { id, tenantId, is_deleted: false },
-    });
+    const existing = await prisma.variation.findFirst({ where: { id, tenantId } });
     if (!existing) return res.status(404).json({ error: "Not found" });
 
-    if (!canTransition(existing.status, toStatus)) {
-      return res
-        .status(400)
-        .json({ error: `Invalid transition ${existing.status} -> ${toStatus}` });
-    }
-
-    const dateFieldByStatus = {
-      submitted: "submittedDate",
-      under_review: "reviewedDate",
-      approved: "approvedDate",
-      rejected: "rejectedDate",
-      instructed: "instructedDate",
-      priced: "pricedDate",
-      agreed: "agreedDate",
-      vo_issued: "voIssuedDate",
-      vo_accepted: "voAcceptedDate",
-    };
-
-    const dateField = dateFieldByStatus[toStatus] || null;
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const u = await tx.variation.update({
-        where: { id, tenantId },
-        data: {
-          status: toStatus,
-          ...(dateField ? { [dateField]: new Date() } : {}),
-        },
-      });
-
-      await tx.variationStatusHistory.create({
-        data: {
-          variationId: id,
-          fromStatus: existing.status,
-          toStatus,
-          note: note || null,
-        },
-      });
-
-      return u;
-    });
-
+    const updatedMany = await prisma.variation.updateMany({ where: { id, tenantId }, data: { status: String(toStatus) } });
+    const updated = updatedMany.count > 0 ? await prisma.variation.findFirst({ where: { id, tenantId } }) : null;
     await recomputeProjectSnapshot(Number(existing.projectId), tenantId);
     res.json({ data: updated });
   } catch (err) {
     console.error(err);
-    res.status(500).json({
-      error: "Failed to change status",
-      details: DEV ? String(err.message) : undefined,
-    });
+    res.status(500).json({ error: "Failed to change status", details: DEV ? String(err.message) : undefined });
   }
 });
 
 // SOFT DELETE
 router.delete("/:id", async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
-    const existing = await prisma.variation.findFirst({
-      where: { id, tenantId, is_deleted: false },
-    });
+    const existing = await prisma.variation.findFirst({ where: { id, tenantId } });
     if (!existing) return res.status(404).json({ error: "Not found" });
-
-    const deleted = await prisma.variation.update({
-      where: { id, tenantId },
-      data: { is_deleted: true },
-    });
+    // Use deleteMany to enforce tenant scoping in where
+    const result = await prisma.variation.deleteMany({ where: { id, tenantId } });
+    const deleted = result.count > 0 ? existing : null;
 
     await recomputeProjectSnapshot(Number(existing.projectId), tenantId);
     res.json({ data: deleted });

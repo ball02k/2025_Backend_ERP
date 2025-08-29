@@ -2,15 +2,18 @@ const { prisma } = require("../utils/prisma.cjs");
 
 async function recomputeProjectSnapshot(projectId, tenantId) {
   // Variations
-  const [varDraft, varSubmitted, varApproved, varApprovedValue] = await Promise.all([
-    prisma.variation.count({ where: { projectId, tenantId, status: "draft", is_deleted: false } }),
-    prisma.variation.count({ where: { projectId, tenantId, status: "submitted", is_deleted: false } }),
-    prisma.variation.count({ where: { projectId, tenantId, status: "approved", is_deleted: false } }),
+  const statusesApproved = ["approved", "implemented"];
+  const statusesPending = ["proposed", "in_review"];
+  const [totalAll, varApproved, varPending, varApprovedValue] = await Promise.all([
+    prisma.variation.count({ where: { projectId, tenantId } }),
+    prisma.variation.count({ where: { projectId, tenantId, status: { in: statusesApproved } } }),
+    prisma.variation.count({ where: { projectId, tenantId, status: { in: statusesPending } } }),
     prisma.variation.aggregate({
-      where: { projectId, tenantId, status: "approved", is_deleted: false },
-      _sum: { agreed_sell: true },
+      where: { projectId, tenantId, status: { in: statusesApproved } },
+      _sum: { value: true },
     }),
   ]);
+  const varDraft = Math.max(totalAll - varApproved - varPending, 0);
 
   // Tasks
   const now = new Date();
@@ -28,9 +31,9 @@ async function recomputeProjectSnapshot(projectId, tenantId) {
     update: {
       tenantId,
       variationsDraft: varDraft,
-      variationsSubmitted: varSubmitted,
+      variationsSubmitted: varPending,
       variationsApproved: varApproved,
-      variationsValueApproved: varApprovedValue._sum.agreed_sell || 0,
+      variationsValueApproved: varApprovedValue._sum.value || 0,
       tasksOverdue,
       tasksDueThisWeek,
       schedulePct,
@@ -40,9 +43,9 @@ async function recomputeProjectSnapshot(projectId, tenantId) {
       projectId,
       tenantId,
       variationsDraft: varDraft,
-      variationsSubmitted: varSubmitted,
+      variationsSubmitted: varPending,
       variationsApproved: varApproved,
-      variationsValueApproved: varApprovedValue._sum.agreed_sell || 0,
+      variationsValueApproved: varApprovedValue._sum.value || 0,
       tasksOverdue,
       tasksDueThisWeek,
       schedulePct,

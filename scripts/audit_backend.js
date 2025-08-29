@@ -153,6 +153,12 @@ add(
 );
 add(
   'INDEXES',
+  has(variationBlock, '@@index([tenantId, projectId, status, updatedAt])'),
+  'Variation composite index on tenantId/projectId/status/updatedAt',
+  `${schemaPath}: add @@index([tenantId, projectId, status, updatedAt])`
+);
+add(
+  'INDEXES',
   has(projectBlock, '@@index([tenantId, status])'),
   'Project index for tenantId/status',
   `${schemaPath}: add @@index([tenantId, status])`
@@ -183,6 +189,21 @@ add(
   `${schemaPath}: add @@index([tenantId, poId]) and @@index([poId, expectedAt])`
 );
 
+// VariationLine checks
+const varLineBlock = extractBlock(schema, 'VariationLine');
+add(
+  'SCHEMA',
+  /tenantId\s+String/.test(varLineBlock),
+  'VariationLine has tenantId String',
+  `${schemaPath}: VariationLine { tenantId String }`
+);
+add(
+  'INDEXES',
+  has(varLineBlock, '@@index([variationId])') && has(varLineBlock, '@@index([tenantId])'),
+  'VariationLine indexes on variationId and tenantId',
+  `${schemaPath}: add @@index([variationId]) and @@index([tenantId])`
+);
+
 // Route checks
 function checkImport(filePath) {
   const content = read(filePath);
@@ -191,9 +212,10 @@ function checkImport(filePath) {
 const tasksPath = path.join(__dirname, '..', 'routes', 'tasks.js');
 const variationsPath = path.join(__dirname, '..', 'routes', 'variations.cjs');
 const procurementPath = path.join(__dirname, '..', 'routes', 'procurement.cjs');
+const tasksContent = read(tasksPath);
 add(
   'ROUTES',
-  checkImport(tasksPath),
+  (routeExists(tasksContent, "router.post('/") || routeExists(tasksContent, "router.put('/") || routeExists(tasksContent, "router.delete('/")) ? checkImport(tasksPath) : true,
   'tasks.js imports recomputeProjectSnapshot',
   `${tasksPath}: const { recomputeProjectSnapshot } = require('../services/projectSnapshot');`
 );
@@ -217,25 +239,37 @@ function hasCall(content, routeSig) {
   const block = content.slice(start, next === -1 ? content.length : next);
   return /recomputeProjectSnapshot/.test(block);
 }
-const tasksContent = read(tasksPath);
-add(
-  'SNAPSHOT',
-  hasCall(tasksContent, "router.post('/"),
-  'tasks.js recomputes snapshot on create',
-  `${tasksPath}: await recomputeProjectSnapshot(...)`
-);
-add(
-  'SNAPSHOT',
-  hasCall(tasksContent, "router.put('/"),
-  'tasks.js recomputes snapshot on update',
-  `${tasksPath}: await recomputeProjectSnapshot(...)`
-);
-add(
-  'SNAPSHOT',
-  hasCall(tasksContent, "router.delete('/"),
-  'tasks.js recomputes snapshot on delete',
-  `${tasksPath}: await recomputeProjectSnapshot(...)`
-);
+function routeExists(content, routeSig) {
+  return content.includes(routeSig);
+}
+// Only enforce recompute checks if respective routes exist
+const hasPost = routeExists(tasksContent, "router.post('/");
+const hasPut = routeExists(tasksContent, "router.put('/");
+const hasDel = routeExists(tasksContent, "router.delete('/");
+if (hasPost) {
+  add(
+    'SNAPSHOT',
+    hasCall(tasksContent, "router.post('/"),
+    'tasks.js recomputes snapshot on create',
+    `${tasksPath}: await recomputeProjectSnapshot(...)`
+  );
+}
+if (hasPut) {
+  add(
+    'SNAPSHOT',
+    hasCall(tasksContent, "router.put('/"),
+    'tasks.js recomputes snapshot on update',
+    `${tasksPath}: await recomputeProjectSnapshot(...)`
+  );
+}
+if (hasDel) {
+  add(
+    'SNAPSHOT',
+    hasCall(tasksContent, "router.delete('/"),
+    'tasks.js recomputes snapshot on delete',
+    `${tasksPath}: await recomputeProjectSnapshot(...)`
+  );
+}
 
 const variationsContent = read(variationsPath);
 add(

@@ -57,6 +57,9 @@ router.get("/:id/overview", requireProjectMember, async (req, res) => {
         submitted: snap?.variationsSubmitted ?? 0,
         approved: snap?.variationsApproved ?? 0,
         valueApproved: snap?.variationsValueApproved ?? 0,
+        // Quick counts for new read model
+        total: (snap?.variationsDraft ?? 0) + (snap?.variationsSubmitted ?? 0) + (snap?.variationsApproved ?? 0),
+        pending: snap?.variationsSubmitted ?? 0,
       },
       tasks: { overdue: snap?.tasksOverdue ?? 0, dueThisWeek: snap?.tasksDueThisWeek ?? 0 },
       rfis: { open: snap?.rfisOpen ?? 0, avgAgeDays: snap?.rfisAvgAgeDays ?? 0 },

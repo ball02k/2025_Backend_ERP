@@ -56,6 +56,54 @@ async function run() {
     },
   });
 
+  // Ensure dev user is member of active project
+  await prisma.projectMembership.upsert({
+    where: { tenantId_projectId_userId: { tenantId: tId, projectId: activeProject.id, userId: user.id } },
+    update: {},
+    create: { tenantId: tId, projectId: activeProject.id, userId: user.id, role: 'Member' },
+  });
+
+  // Seed a variation (new schema)
+  await prisma.variation.upsert({
+    where: { id: 1 },
+    update: {},
+    create: {
+      tenantId: tId,
+      projectId: activeProject.id,
+      reference: 'CE-100',
+      title: 'Seeded change',
+      contractType: 'NEC4',
+      type: 'compensation_event',
+      status: 'proposed',
+      value: 10000,
+      costImpact: 8500,
+      notes: 'Seed generated',
+      lines: { create: [{ tenantId: tId, description: 'Seed line', qty: 1, rate: 10000, value: 10000, sort: 1 }] },
+    },
+  });
+
+  // Minimal financial/procurement data
+  await prisma.budgetLine.upsert({
+    where: { id: 1 },
+    update: {},
+    create: { tenantId: tId, projectId: activeProject.id, code: 'BL-001', category: 'General', description: 'Seed budget', amount: 50000 },
+  });
+  const po = await prisma.purchaseOrder.upsert({
+    where: { id: 1 },
+    update: {},
+    create: { tenantId: tId, projectId: activeProject.id, code: 'PO-SEED-1', supplier: 'Seed Supplier', status: 'Open', total: 2500 },
+  });
+  await prisma.pOLine.upsert({
+    where: { id: 1 },
+    update: {},
+    create: { tenantId: tId, poId: po.id, item: 'Seed item', qty: 10, unit: 'ea', unitCost: 250, lineTotal: 2500 },
+  });
+  await prisma.delivery.upsert({
+    where: { id: 1 },
+    update: {},
+    create: { tenantId: tId, poId: po.id, expectedAt: new Date() },
+  });
+
   await prisma.project.upsert({
     where: { code: 'DEMO-CLOSED' },
     update: {},
