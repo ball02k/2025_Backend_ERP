@@ -3,17 +3,18 @@ module.exports = (prisma) => {
   const router = express.Router();
   router.get('/', async (req, res) => {
     try {
-      const tenant = req.get('x-tenant-id') || process.env.TENANT_DEFAULT || 'demo';
+      const tenantId = req.user.tenantId;
       const clients = await prisma.client.findMany({
+        where: { projects: { some: { tenantId } } },
         orderBy: { name: 'asc' },
-        include: {
-          projects: {
-            where: { tenantId: tenant },
-            select: { id: true },
-          },
+        select: {
+          id: true,
+          name: true,
+          companyRegNo: true,
+          projects: { where: { tenantId }, select: { id: true } },
         },
       });
-      const result = clients.map(c => ({
+      const result = clients.map((c) => ({
         id: c.id,
         name: c.name,
         companyRegNo: c.companyRegNo,

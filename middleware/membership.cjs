@@ -3,7 +3,11 @@ const prisma = new PrismaClient();
 
 async function assertProjectMember({ userId, projectId, tenantId }) {
   return prisma.projectMembership.findFirst({
-    where: { tenantId, projectId, userId },
+    where: {
+      tenantId,
+      projectId: Number(projectId),
+      userId: Number(userId),
+    },
     select: { id: true, role: true },
   });
 }
@@ -11,13 +15,16 @@ async function assertProjectMember({ userId, projectId, tenantId }) {
 async function requireProjectMember(req, res, next) {
   try {
     const projectId = Number(
-      req.params.id || req.query.projectId || req.body.projectId
+      req.params.projectId ||
+        req.params.id ||
+        req.query.projectId ||
+        req.body.projectId
     );
     const tenantId = req.user?.tenantId;
     if (!tenantId) return res.status(401).json({ error: 'Unauthorized' });
     if (!projectId) return res.status(400).json({ error: 'projectId required' });
     const member = await assertProjectMember({
-      userId: req.user.id,
+      userId: Number(req.user.id),
       projectId,
       tenantId,
     });

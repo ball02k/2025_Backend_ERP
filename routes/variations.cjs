@@ -11,6 +11,20 @@ function parseNumber(n, fallback = null) {
   return Number.isFinite(v) ? v : fallback;
 }
 
+async function loadVariation(req, res, next) {
+  try {
+    const tenantId = req.user.tenantId;
+    const id = Number(req.params.id);
+    const variation = await prisma.variation.findFirst({ where: { id, tenantId } });
+    if (!variation) return res.status(404).json({ error: "Not found" });
+    req.variation = variation;
+    req.params.projectId = String(variation.projectId);
+    next();
+  } catch (e) {
+    next(e);
+  }
+}
+
 // LIST
 // LIST (project-scoped)
 router.get("/", requireProjectMember, async (req, res) => {
@@ -179,14 +193,11 @@ router.post("/", requireProjectMember, async (req, res) => {
 });
 
 // UPDATE
-router.put("/:id", async (req, res) => {
+router.put("/:id", loadVariation, requireProjectMember, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const id = Number(req.params.id);
-    const existing = await prisma.variation.findFirst({
-      where: { id, tenantId },
-    });
-    if (!existing) return res.status(404).json({ error: "Not found" });
+    const existing = req.variation;
+    const id = existing.id;
 
     const body = { ...req.body };
     const {
@@ -263,17 +274,22 @@ router.put("/:id", async (req, res) => {
 
 // STATUS CHANGE
 // Simple status update (optional)
-router.patch("/:id/status", async (req, res) => {
+router.patch("/:id/status", loadVariation, requireProjectMember, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const id = Number(req.params.id);
+    const id = req.variation.id;
+    const existing = req.variation;
     const { toStatus } = req.body || {};
     if (!toStatus) return res.status(400).json({ error: "toStatus is required" });
-    const existing = await prisma.variation.findFirst({ where: { id, tenantId } });
-    if (!existing) return res.status(404).json({ error: "Not found" });
 
-    const updatedMany = await prisma.variation.updateMany({ where: { id, tenantId }, data: { status: String(toStatus) } });
-    const updated = updatedMany.count > 0 ? await prisma.variation.findFirst({ where: { id, tenantId } }) : null;
+    const updatedMany = await prisma.variation.updateMany({
+      where: { id, tenantId },
+      data: { status: String(toStatus) },
+    });
+    const updated =
+      updatedMany.count > 0
+        ? await prisma.variation.findFirst({ where: { id, tenantId } })
+        : null;
     await recomputeProjectSnapshot(Number(existing.projectId), tenantId);
     res.json({ data: updated });
   } catch (err) {
@@ -283,12 +299,11 @@ router.patch("/:id/status", async (req, res) => {
 });
 
 // SOFT DELETE
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", loadVariation, requireProjectMember, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const id = Number(req.params.id);
-    const existing = await prisma.variation.findFirst({ where: { id, tenantId } });
-    if (!existing) return res.status(404).json({ error: "Not found" });
+    const existing = req.variation;
+    const id = existing.id;
     // Use deleteMany to enforce tenant scoping in where
     const result = await prisma.variation.deleteMany({ where: { id, tenantId } });
     const deleted = result.count > 0 ? existing : null;

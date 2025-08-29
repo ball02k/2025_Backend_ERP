@@ -146,6 +146,7 @@ model Task {
 
 model Contact {
   id       Int    @id @default(autoincrement())
+  tenantId String @default("demo")
   clientId Int
   client   Client @relation(fields: [clientId], references: [id])
 
@@ -159,10 +160,10 @@ model Contact {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([clientId, email])
-  @@index([clientId, isPrimary])
-  @@index([email])
-  @@index([role])
+  @@unique([tenantId, clientId, email])
+  @@index([tenantId, clientId, isPrimary])
+  @@index([tenantId, email])
+  @@index([tenantId, role])
 }
 
 model Variation {

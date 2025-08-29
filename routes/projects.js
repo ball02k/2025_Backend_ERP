@@ -3,7 +3,7 @@ module.exports = (prisma) => {
   const router = express.Router();
   router.get('/', async (req, res) => {
     try {
-      const tenant = req.get('x-tenant-id') || process.env.TENANT_DEFAULT || 'demo';
+      const tenant = req.user.tenantId;
       const take = Math.min(Number(req.query.limit) || 50, 100);
       const skip = Math.max(Number(req.query.offset) || 0, 0);
       const sortParam = String(req.query.sort || 'startDate:desc');

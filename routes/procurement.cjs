@@ -2,10 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { prisma, dec } = require('../utils/prisma.cjs');
 const { recomputeProcurement } = require('../services/projectSnapshot');
-
-function getTenantId(req) {
-  return req.headers['x-tenant-id'] || 'demo';
-}
+const { requireProjectMember } = require('../middleware/membership.cjs');
 
 async function adjustSnapshot(projectId, tenantId, field, delta) {
   const where = { projectId, tenantId };
@@ -20,10 +17,56 @@ async function adjustSnapshot(projectId, tenantId, field, delta) {
   }
 }
 
+async function loadPo(req, res, next) {
+  try {
+    const tenantId = req.user.tenantId;
+    const id = Number(req.params.id);
+    const po = await prisma.purchaseOrder.findFirst({
+      where: { id, tenantId },
+      include: { lines: true },
+    });
+    if (!po) return res.status(404).json({ error: 'Not found' });
+    req.po = po;
+    req.params.projectId = String(po.projectId);
+    next();
+  } catch (e) { next(e); }
+}
+
+async function attachPoFromBody(req, res, next) {
+  try {
+    const tenantId = req.user.tenantId;
+    const poId = Number(req.body.poId);
+    if (!poId) return res.status(400).json({ error: 'poId required' });
+    const po = await prisma.purchaseOrder.findFirst({
+      where: { id: poId, tenantId },
+      select: { id: true, projectId: true },
+    });
+    if (!po) return res.status(404).json({ error: 'PO not found' });
+    req.po = po;
+    req.params.projectId = String(po.projectId);
+    next();
+  } catch (e) { next(e); }
+}
+
+async function loadDelivery(req, res, next) {
+  try {
+    const tenantId = req.user.tenantId;
+    const id = Number(req.params.id);
+    const delivery = await prisma.delivery.findFirst({
+      where: { id, tenantId },
+      include: { po: true },
+    });
+    if (!delivery) return res.status(404).json({ error: 'Not found' });
+    req.delivery = delivery;
+    req.params.projectId = String(delivery.po.projectId);
+    next();
+  } catch (e) { next(e); }
+}
+
 // List POs
 router.get('/pos', async (req, res, next) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const { projectId } = req.query;
     const where = { tenantId, ...(projectId ? { projectId: Number(projectId) } : {}) };
     const rows = await prisma.purchaseOrder.findMany({
@@ -37,7 +80,7 @@ router.get('/pos', async (req, res, next) => {
 // Get PO by id
 router.get('/pos/:id', async (req, res, next) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
     const row = await prisma.purchaseOrder.findFirst({
       where: { id, tenantId },
@@ -49,9 +92,9 @@ router.get('/pos/:id', async (req, res, next) => {
 });
 
 // Create PO
-router.post('/pos', async (req, res, next) => {
+router.post('/pos', requireProjectMember, async (req, res, next) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const { lines = [], ...data } = req.body;
     const created = await prisma.purchaseOrder.create({
       data: {
@@ -80,15 +123,11 @@ router.post('/pos', async (req, res, next) => {
 });
 
 // Update PO
-router.put('/pos/:id', async (req, res, next) => {
+router.put('/pos/:id', loadPo, requireProjectMember, async (req, res, next) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
-    const existing = await prisma.purchaseOrder.findFirst({
-      where: { id, tenantId },
-      include: { lines: true },
-    });
-    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const existing = req.po;
 
     const { lines = [], ...data } = req.body;
     const updated = await prisma.$transaction(async (tx) => {
@@ -138,12 +177,11 @@ router.put('/pos/:id', async (req, res, next) => {
 });
 
 // Delete PO
-router.delete('/pos/:id', async (req, res, next) => {
+router.delete('/pos/:id', loadPo, requireProjectMember, async (req, res, next) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
-    const existing = await prisma.purchaseOrder.findFirst({ where: { id, tenantId }, select: { projectId: true } });
-    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const existing = req.po;
 
     await prisma.$transaction(async (tx) => {
       await tx.pOLine.deleteMany({ where: { poId: id, tenantId } });
@@ -156,9 +194,9 @@ router.delete('/pos/:id', async (req, res, next) => {
 });
 
 // Create Delivery
-router.post('/deliveries', async (req, res, next) => {
+router.post('/deliveries', attachPoFromBody, requireProjectMember, async (req, res, next) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const body = req.body;
     const created = await prisma.delivery.create({
       data: {
@@ -179,15 +217,11 @@ router.post('/deliveries', async (req, res, next) => {
 });
 
 // Update Delivery
-router.put('/deliveries/:id', async (req, res, next) => {
+router.put('/deliveries/:id', loadDelivery, requireProjectMember, async (req, res, next) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
-    const existing = await prisma.delivery.findFirst({
-      where: { id, tenantId },
-      include: { po: true },
-    });
-    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const existing = req.delivery;
     const wasOverdue = existing.expectedAt < new Date() && !existing.receivedAt;
 
     const { expectedAt, receivedAt, note } = req.body;
