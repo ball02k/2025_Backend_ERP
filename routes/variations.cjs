@@ -61,6 +61,8 @@ router.get("/", requireProjectMember, async (req, res) => {
           notes: true,
           createdAt: true,
           updatedAt: true,
+          // Minimal relation for FE linking
+          project: { select: { id: true, name: true } },
         },
       }),
       prisma.variation.count({ where }),
@@ -86,7 +88,11 @@ router.get("/:id", async (req, res) => {
     const id = Number(req.params.id);
     const row = await prisma.variation.findFirst({
       where: { id, tenantId },
-      include: { lines: { orderBy: { sort: "asc" } } },
+      include: {
+        lines: { orderBy: { sort: "asc" } },
+        // Minimal relation for FE linking
+        project: { select: { id: true, name: true } },
+      },
     });
     if (!row) return res.status(404).json({ error: "Not found" });
     // Enforce membership: check project membership by projectId
@@ -179,7 +185,17 @@ router.post("/", requireProjectMember, async (req, res) => {
 });
 
 // UPDATE
-router.put("/:id", async (req, res) => {
+router.put("/:id", async (req, res, next) => {
+  // Resolve projectId for membership and attach to req
+  try {
+    const tenantId = req.user.tenantId;
+    const id = Number(req.params.id);
+    const existing = await prisma.variation.findFirst({ where: { id, tenantId }, select: { projectId: true } });
+    if (!existing) return res.status(404).json({ error: "Not found" });
+    req.query.projectId = String(existing.projectId);
+    return requireProjectMember(req, res, next);
+  } catch (e) { return next(e); }
+}, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
@@ -263,7 +279,17 @@ router.put("/:id", async (req, res) => {
 
 // STATUS CHANGE
 // Simple status update (optional)
-router.patch("/:id/status", async (req, res) => {
+router.patch("/:id/status", async (req, res, next) => {
+  // Resolve projectId for membership and attach to req
+  try {
+    const tenantId = req.user.tenantId;
+    const id = Number(req.params.id);
+    const existing = await prisma.variation.findFirst({ where: { id, tenantId }, select: { projectId: true } });
+    if (!existing) return res.status(404).json({ error: "Not found" });
+    req.query.projectId = String(existing.projectId);
+    return requireProjectMember(req, res, next);
+  } catch (e) { return next(e); }
+}, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
@@ -283,7 +309,17 @@ router.patch("/:id/status", async (req, res) => {
 });
 
 // SOFT DELETE
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", async (req, res, next) => {
+  // Resolve projectId for membership and attach to req
+  try {
+    const tenantId = req.user.tenantId;
+    const id = Number(req.params.id);
+    const existing = await prisma.variation.findFirst({ where: { id, tenantId }, select: { projectId: true } });
+    if (!existing) return res.status(404).json({ error: "Not found" });
+    req.query.projectId = String(existing.projectId);
+    return requireProjectMember(req, res, next);
+  } catch (e) { return next(e); }
+}, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
     const id = Number(req.params.id);

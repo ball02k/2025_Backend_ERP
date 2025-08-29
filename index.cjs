@@ -18,23 +18,44 @@ const TENANT_DEFAULT = process.env.TENANT_DEFAULT || 'demo';
 const variationsRouter = require('./routes/variations.cjs');
 const documentsRouter = require('./routes/documents_v2.cjs');
 const projectsOverviewRouter = require('./routes/projects_overview.cjs');
+const healthRouter = require('./routes/health.cjs');
 const authRouter = require('./routes/auth.cjs');
 const meRouter = require('./routes/me.cjs');
 const usersRouter = require('./routes/users.cjs');
 const rolesRouter = require('./routes/roles.cjs');
 const financialsRouter = require('./routes/financials.cjs');
-const { attachUser, requireAuth } = require('./middleware/auth.cjs');
+const homeRoutes = require('./routes/home.cjs');
+const { attachUser } = require('./middleware/auth.cjs');
+const requireAuth = require('./middleware/requireAuth.cjs');
+const devAuth = require('./middleware/devAuth.cjs');
+const authDev = require('./routes/auth.dev.cjs');
 
+// CORS: allow Vite dev servers and handle preflight
+const allowedOrigins = ['http://localhost:5173', 'http://localhost:5174'];
 app.use(
   cors({
-    origin: 'http://localhost:5173',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    origin(origin, cb) {
+      if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error('Not allowed by CORS'));
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Tenant-Id',
+      'x-tenant-id',
+    ],
+    exposedHeaders: ['Content-Type'],
   })
 );
+// Respond quickly to OPTIONS preflight
+app.options('*', cors());
 app.use(express.json({ limit: '5mb' }));
 app.use(morgan('dev'));
 app.use(attachUser);
+// In dev, allow bypass to attach a demo user when no token is provided
+app.use(devAuth); // must be before routes that use requireAuth
 
 // Make BigInt values JSON-safe (Node can't stringify BigInt)
 // If you prefer string IDs, swap Number(value) for value.toString()
@@ -42,7 +63,10 @@ app.set('json replacer', (key, value) =>
   (typeof value === 'bigint' ? Number(value) : value)
 );
 
-const PORT = process.env.PORT || 3001;
+// Prefer explicit PORT; in dev we'll fall back to the next free port if the default is taken
+const DEFAULT_PORT = 3001;
+const EXPLICIT_PORT = process.env.PORT ? Number(process.env.PORT) : undefined;
+const INITIAL_PORT = EXPLICIT_PORT || DEFAULT_PORT;
 app.get(['/health', '/api/health'], (_req, res) =>
   res.json({ ok: true, version: pkg.version, time: new Date().toISOString() })
 );
@@ -57,16 +81,23 @@ app.use('/api/contacts', requireAuth, require('./routes/contacts')(prisma));
 app.use('/api/projects', requireAuth, require('./routes/projects')(prisma));
 // app.use('/api/projects', projectsOverviewRouter);
 app.use('/api/projects', requireAuth, projectsOverviewRouter);
+app.use('/api/health', requireAuth, healthRouter);
 app.use('/api/tasks', requireAuth, require('./routes/tasks')(prisma));
 app.use('/api/variations', requireAuth, variationsRouter);
 app.use('/api/documents', requireAuth, documentsRouter);
 app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
 app.use('/api/financials', requireAuth, financialsRouter);
+app.use('/api', homeRoutes(prisma, { requireAuth }));
 
-if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== 'production' || process.env.DEV_AUTH_BYPASS === 'true') {
   // Dev-only routes
   app.use('/api/dev', require('./routes/dev.cjs'));
   app.use('/api/dev/snapshot', requireAuth, require('./routes/dev_snapshot.cjs'));
+}
+
+// Dev-only: expose /api/dev-token when enabled
+if (process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_AUTH === '1') {
+  app.use('/api', authDev(prisma));
 }
 
 // serve local uploads in dev for quick previews
@@ -82,6 +113,62 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ error: message });
 });
 
-app.listen(PORT, () => console.log(`API on :${PORT}`));
+// Start server with friendly EADDRINUSE handling during development
+function startServer(port, allowRetry) {
+  const server = app
+    .listen(port, () => {
+      console.log(`API on :${port}`);
+    })
+    .on('error', (err) => {
+      if (err && err.code === 'EADDRINUSE') {
+        // If an explicit PORT is set (e.g., 3001 must be used), check if it's our API already running
+        if (EXPLICIT_PORT) {
+          const url = `http://127.0.0.1:${port}/health`;
+          // Use a short timeout to avoid hanging
+          const controller = new AbortController();
+          const t = setTimeout(() => controller.abort(), 500);
+          globalThis
+            .fetch(url, { signal: controller.signal })
+            .then((r) => (clearTimeout(t), r.ok ? r.json() : null))
+            .then((data) => {
+              if (data && data.ok) {
+                console.log(
+                  `Another instance is already running on :${port}. Leaving it running.`
+                );
+                process.exit(0);
+              } else {
+                console.error(
+                  `Port :${port} is already in use. Set a different PORT or stop the other process.`
+                );
+                process.exit(1);
+              }
+            })
+            .catch(() => {
+              console.error(
+                `Port :${port} is already in use. Set a different PORT or stop the other process.`
+              );
+              process.exit(1);
+            });
+          return;
+        }
+        if (allowRetry) {
+          const nextPort = port + 1;
+          console.warn(`Port :${port} in use. Trying :${nextPort}...`);
+          setTimeout(() => startServer(nextPort, true), 100);
+          return;
+        }
+        console.error(
+          `Port :${port} is already in use. Set a different PORT or stop the other process.`
+        );
+        process.exit(1);
+      }
+      throw err;
+    });
+  return server;
+}
+
+// Only auto-retry when no explicit PORT is set and not production
+const allowRetry = !EXPLICIT_PORT && process.env.NODE_ENV !== 'production';
+startServer(INITIAL_PORT, allowRetry);
 
 module.exports = app;

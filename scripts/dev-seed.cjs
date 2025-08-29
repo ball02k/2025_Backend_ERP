@@ -1,10 +1,14 @@
 /* eslint-disable no-console */
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const { cascadeDeleteProjects } = require('./dev-utils/cascade.cjs');
 
 (async () => {
-  const TENANT = process.env.TENANT_DEFAULT || 'demo';
-  const devEmail = 'dev@demo.local';
+  const TENANT = process.env.DEMO_TENANT_ID || process.env.TENANT_DEFAULT || 'demo';
+  const devEmail = process.env.DEMO_USER_EMAIL || 'admin@demo.local';
+  const devPassword = process.env.DEMO_USER_PASSWORD || 'demo1234';
+  const crypto = require('crypto');
+  const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
   const STATUS_TENANT_ID = 1; // integer for status tables
 
   // Demo values
@@ -24,14 +28,20 @@ const prisma = new PrismaClient();
     { title:'Planning consent', status:'done', due:'2025-07-30', projectCode:'P-003' },
   ];
 
-  // Clean up demo
+  // --- SAFER CLEANUP START ---
   const codes = DEMO_PROJECTS.map(p => p.code);
-  const names = DEMO_CLIENTS.map(c => c.name);
-  const existing = await prisma.project.findMany({ where: { code: { in: codes } }, select:{ id:true }});
-  const ids = existing.map(p => p.id);
-  if (ids.length) await prisma.task.deleteMany({ where:{ projectId:{ in: ids } }});
-  await prisma.project.deleteMany({ where:{ code:{ in: codes } }});
-  await prisma.client.deleteMany({ where:{ name:{ in: names } }});
+  const existing = await prisma.project.findMany({
+    where: { code: { in: codes }, tenantId: TENANT },
+    select: { id: true },
+  });
+  const projectIds = existing.map(p => p.id);
+  if (projectIds.length) {
+    console.log(`Cleaning existing demo projects: ${projectIds.join(', ')}`);
+    await cascadeDeleteProjects(prisma, TENANT, projectIds);
+  }
+  // Also clean demo clients by name (will fail if referenced; order below will recreate)
+  await prisma.client.deleteMany({ where: { name: { in: DEMO_CLIENTS.map(c => c.name) } } });
+  // --- SAFER CLEANUP END ---
 
   // Upsert statuses and types (compound unique on tenantId+key)
   const statusKeys = ['done','overdue','in_progress'];
@@ -68,11 +78,21 @@ const prisma = new PrismaClient();
     clientMap[c.name] = created;
   }
 
-  // Ensure a dev user exists
+  // Ensure admin role and demo user exist (with hashed password)
   const devUser = await prisma.user.upsert({
     where: { email: devEmail },
-    update: { tenantId: TENANT, name: 'Dev User' },
-    create: { email: devEmail, name: 'Dev User', tenantId: TENANT, passwordSHA: '' },
+    update: { tenantId: TENANT, name: 'Demo Admin', passwordSHA: sha256(devPassword) },
+    create: { email: devEmail, name: 'Demo Admin', tenantId: TENANT, passwordSHA: sha256(devPassword) },
+  });
+  const adminRole = await prisma.role.upsert({
+    where: { tenantId_name: { tenantId: TENANT, name: 'admin' } },
+    update: {},
+    create: { tenantId: TENANT, name: 'admin' },
+  });
+  await prisma.userRole.upsert({
+    where: { tenantId_userId_roleId: { tenantId: TENANT, userId: devUser.id, roleId: adminRole.id } },
+    update: {},
+    create: { tenantId: TENANT, userId: devUser.id, roleId: adminRole.id },
   });
 
   // Create projects with status/type by simple strings and tenantId
@@ -96,8 +116,18 @@ const prisma = new PrismaClient();
   for (const proj of Object.values(projectMap)) {
     await prisma.projectMembership.upsert({
       where: { tenantId_projectId_userId: { tenantId: TENANT, projectId: proj.id, userId: devUser.id } },
-      update: {},
+      update: { role: 'Member' },
       create: { tenantId: TENANT, projectId: proj.id, userId: devUser.id, role: 'Member' },
+    });
+  }
+
+  // Ensure demo membership for project id 1 (useful for quick /projects/1 checks)
+  const p1 = await prisma.project.findFirst({ where: { id: 1 } });
+  if (p1) {
+    await prisma.projectMembership.upsert({
+      where: { tenantId_projectId_userId: { tenantId: TENANT, projectId: p1.id, userId: devUser.id } },
+      update: { role: 'owner' },
+      create: { tenantId: TENANT, projectId: p1.id, userId: devUser.id, role: 'owner' },
     });
   }
 

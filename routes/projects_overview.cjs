@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { prisma } = require("../utils/prisma.cjs");
 const { requireProjectMember } = require("../middleware/membership.cjs");
+const { buildProjectOverview } = require("../services/projectOverview");
 
 router.get("/:id/overview", requireProjectMember, async (req, res) => {
   try {
@@ -9,83 +10,10 @@ router.get("/:id/overview", requireProjectMember, async (req, res) => {
     const projectId = Number(req.params.id);
     if (Number.isNaN(projectId)) return res.status(400).json({ error: "Invalid project id" });
 
-    const project = await prisma.project.findFirst({
-      where: { id: projectId, tenantId },
-      select: {
-        id: true,
-        code: true,
-        name: true,
-        status: true,
-        type: true,
-        clientId: true,
-        projectManagerId: true,
-        country: true,
-        currency: true,
-        unitSystem: true,
-        taxScheme: true,
-        contractForm: true,
-        startPlanned: true,
-        endPlanned: true,
-        startActual: true,
-        endActual: true,
-        client: { select: { id: true, name: true } },
-      },
-    });
-    if (!project) return res.status(404).json({ error: "Project not found" });
+    const data = await buildProjectOverview(prisma, { tenantId, projectId });
+    if (!data) return res.status(404).json({ error: "PROJECT_NOT_FOUND" });
 
-    const snap = await prisma.projectSnapshot.findUnique({ where: { projectId } });
-
-    // Next milestones (placeholder: if you have a Milestone table, query top 3 upcoming)
-    const nextMilestones = []; // populate when schedule module is ready
-
-    const widgets = {
-      financial: {
-        budget: snap?.budget ?? null,
-        committed: snap?.committed ?? null,
-        actual: snap?.actual ?? null,
-        retentionHeld: snap?.retentionHeld ?? null,
-        forecastAtComplete: snap?.forecastAtComplete ?? null,
-        variance: snap?.variance ?? null,
-      },
-      schedule: {
-        percentComplete: snap?.schedulePct ?? 0,
-        criticalActivitiesAtRisk: snap?.criticalAtRisk ?? 0,
-        nextMilestones,
-      },
-      variations: {
-        draft: snap?.variationsDraft ?? 0,
-        submitted: snap?.variationsSubmitted ?? 0,
-        approved: snap?.variationsApproved ?? 0,
-        valueApproved: snap?.variationsValueApproved ?? 0,
-        // Quick counts for new read model
-        total: (snap?.variationsDraft ?? 0) + (snap?.variationsSubmitted ?? 0) + (snap?.variationsApproved ?? 0),
-        pending: snap?.variationsSubmitted ?? 0,
-      },
-      tasks: { overdue: snap?.tasksOverdue ?? 0, dueThisWeek: snap?.tasksDueThisWeek ?? 0 },
-      rfis: { open: snap?.rfisOpen ?? 0, avgAgeDays: snap?.rfisAvgAgeDays ?? 0 },
-      qa: { openNCR: snap?.qaOpenNCR ?? 0, openPunch: snap?.qaOpenPunch ?? 0 },
-      hs: { incidentsThisMonth: snap?.hsIncidentsThisMonth ?? 0, openPermits: snap?.hsOpenPermits ?? 0 },
-      procurement: { criticalLate: snap?.procurementCriticalLate ?? 0, posOpen: snap?.procurementPOsOpen ?? 0 },
-      carbon: { target: snap?.carbonTarget ?? null, toDate: snap?.carbonToDate ?? null, unit: snap?.carbonUnit ?? null },
-    };
-
-    if (widgets?.schedule) {
-      widgets.schedule.pct = widgets.schedule.pct ?? widgets.schedule.percentComplete ?? 0;
-      widgets.schedule.criticalAtRisk =
-        widgets.schedule.criticalAtRisk ?? widgets.schedule.criticalActivitiesAtRisk ?? 0;
-    }
-
-    return res.json({
-      project,
-      widgets,
-      quickLinks: {
-        contracts: `/api/contracts?projectId=${projectId}`,
-        procurement: `/api/procurement?projectId=${projectId}`,
-        schedule: `/api/schedule?projectId=${projectId}`,
-        documents: `/api/documents?projectId=${projectId}`,
-      },
-      updatedAt: snap?.updatedAt ?? null,
-    });
+    return res.json({ project: data.project, widgets: data.widgets, quickLinks: data.quickLinks });
   } catch (err) {
     console.error("overview error", err);
     res.status(500).json({ error: "Failed to build project overview" });

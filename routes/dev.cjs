@@ -11,7 +11,7 @@ const TENANT_DEFAULT = process.env.TENANT_DEFAULT || 'demo';
 // POST /api/dev/login?tenant=demo
 router.post('/login', async (req, res) => {
   try {
-    const tId = (req.query.tenant || req.headers['x-tenant-id'] || TENANT_DEFAULT).toString();
+    const tId = (req.query.tenant || TENANT_DEFAULT).toString();
 
     // Ensure a dev user exists for this tenant (unique email per tenant via suffix)
     const email = `dev+${tId}@local`;
@@ -46,4 +46,3 @@ router.post('/login', async (req, res) => {
 });
 
 module.exports = router;
-

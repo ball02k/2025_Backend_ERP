@@ -56,6 +56,7 @@ model Client {
   city         String?
   county       String?
   postcode     String?
+  deletedAt    DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   projects     Project[]
@@ -103,6 +104,7 @@ model Project {
   startDate   DateTime?
   endDate     DateTime?
 
+  deletedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -136,6 +138,7 @@ model Task {
   statusId  Int
   statusRel TaskStatus @relation("TaskStatusRel", fields: [statusId], references: [id])
 
+  deletedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -149,6 +152,8 @@ model Contact {
   clientId Int
   client   Client @relation(fields: [clientId], references: [id])
 
+  tenantId String @default("demo")
+
   firstName String
   lastName  String?
   email     String?
@@ -159,6 +164,7 @@ model Contact {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([tenantId, clientId])
   @@unique([clientId, email])
   @@index([clientId, isPrimary])
   @@index([email])

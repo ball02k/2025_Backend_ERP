@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "nodemon index.cjs",
     "seed": "node prisma/seed.js",
+    "dev-seed": "node scripts/dev-seed.cjs",
     "seed:demo": "node scripts/dev-seed.cjs",
+    "seed:reset": "prisma migrate reset --force && node scripts/dev-seed.cjs",
     "postinstall": "prisma generate",
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",
@@ -14,7 +16,8 @@
     "db:migrate": "prisma migrate deploy",
     "health": "node -e \"fetch('http://localhost:'+ (process.env.PORT||3001) +'/health').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(x=>console.log(x.ok?'ok':'fail')).catch(()=>process.exit(1))\"",
     "smoke:docs": "node scripts/documents-smoke.mjs",
-    "smoke:variations": "node scripts/variations-smoke.mjs"
+    "smoke:variations": "node scripts/variations-smoke.mjs",
+    "test": "jest --runInBand"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.617.0",
@@ -29,7 +32,9 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.10",
-    "prisma": "6.14.0"
+    "prisma": "6.14.0",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
   },
   "engines": {
     "node": "20.16.x"

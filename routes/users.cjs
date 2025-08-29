@@ -1,6 +1,6 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
-const { requireAuth } = require('../middleware/auth.cjs');
+const requireAuth = require('../middleware/requireAuth.cjs');
 
 const prisma = new PrismaClient();
 const router = express.Router();
@@ -20,4 +20,3 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 module.exports = router;
-

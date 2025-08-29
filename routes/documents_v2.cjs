@@ -156,6 +156,19 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/documents/:id
+router.get('/:id', async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const id = BigInt(req.params.id);
+    const doc = await prisma.document.findFirst({ where: { id, tenantId }, include: { links: true } });
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+    res.json({ data: doc });
+  } catch (err) {
+    res.status(400).json({ error: 'Invalid id' });
+  }
+});
+
 // GET /api/documents/:id/download
 router.get('/:id/download', async (req, res) => {
   try {
@@ -250,4 +263,3 @@ router.post('/:id/unlink', async (req, res) => {
 });
 
 module.exports = router;
-

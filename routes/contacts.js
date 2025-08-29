@@ -28,10 +28,12 @@ module.exports = (prisma) => {
   // GET /api/contacts
   router.get('/', async (req, res, next) => {
     try {
+      const tenantId = req.user && req.user.tenantId;
       const { page, pageSize, sort, order, search, clientId, isPrimary } =
         contactsQuerySchema.parse(req.query);
 
       const where = {
+        tenantId,
         ...(clientId ? { clientId } : {}),
         ...(typeof isPrimary === 'boolean' ? { isPrimary } : {}),
         ...(search ? {
@@ -63,9 +65,10 @@ module.exports = (prisma) => {
   // GET /api/contacts/:id
   router.get('/:id', async (req, res, next) => {
     try {
+      const tenantId = req.user && req.user.tenantId;
       const id = Number(req.params.id);
-      const row = await prisma.contact.findUnique({
-        where: { id },
+      const row = await prisma.contact.findFirst({
+        where: { id, tenantId },
         include: { client: { select: { id: true, name: true } } },
       });
       if (!row) return res.status(404).json({ error: 'Contact not found' });
@@ -76,11 +79,12 @@ module.exports = (prisma) => {
   // POST /api/contacts
   router.post('/', async (req, res, next) => {
     try {
+      const tenantId = req.user && req.user.tenantId;
       const body = contactBodySchema.parse(req.body);
       if (body.isPrimary) {
-        await prisma.contact.updateMany({ where: { clientId: body.clientId, isPrimary: true }, data: { isPrimary: false } });
+        await prisma.contact.updateMany({ where: { tenantId, clientId: body.clientId, isPrimary: true }, data: { isPrimary: false } });
       }
-      const created = await prisma.contact.create({ data: body });
+      const created = await prisma.contact.create({ data: { ...body, tenantId } });
       res.status(201).json(created);
     } catch (e) { next(e); }
   });
@@ -88,15 +92,16 @@ module.exports = (prisma) => {
   // PUT /api/contacts/:id
   router.put('/:id', async (req, res, next) => {
     try {
+      const tenantId = req.user && req.user.tenantId;
       const id = Number(req.params.id);
       const body = contactBodySchema.partial().parse(req.body);
 
-      const current = await prisma.contact.findUnique({ where: { id } });
+      const current = await prisma.contact.findFirst({ where: { id, tenantId } });
       if (!current) return res.status(404).json({ error: 'Contact not found' });
 
       if (body.isPrimary === true) {
         const targetClientId = body.clientId ?? current.clientId;
-        await prisma.contact.updateMany({ where: { clientId: targetClientId, isPrimary: true }, data: { isPrimary: false } });
+        await prisma.contact.updateMany({ where: { tenantId, clientId: targetClientId, isPrimary: true }, data: { isPrimary: false } });
       }
 
       const updated = await prisma.contact.update({ where: { id }, data: body });
@@ -107,8 +112,12 @@ module.exports = (prisma) => {
   // DELETE /api/contacts/:id
   router.delete('/:id', async (req, res, next) => {
     try {
+      const tenantId = req.user && req.user.tenantId;
       const id = Number(req.params.id);
-      await prisma.contact.delete({ where: { id } });
+      // Enforce tenant scoping in delete
+      const existing = await prisma.contact.findFirst({ where: { id, tenantId } });
+      if (!existing) return res.status(404).json({ error: 'Contact not found' });
+      await prisma.contact.deleteMany({ where: { id, tenantId } });
       res.status(204).end();
     } catch (e) { next(e); }
   });

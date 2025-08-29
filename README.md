@@ -15,6 +15,26 @@ Check server health:
 npm run health
 ```
 
+### Environment
+- `DEV_AUTH_BYPASS`:
+  - When `true`, enables dev auth bypass so protected routes work without a real login when no Bearer token is sent.
+  - Ignored in production when `NODE_ENV=production`.
+  - Do not set in production environments.
+- See `.env.example` for other variables and defaults.
+
+### Dev Auth Bypass
+- When active: `NODE_ENV !== 'production'` or `DEV_AUTH_BYPASS=true`.
+- Behavior: if no `Authorization: Bearer` token is present, middleware attaches a dev user with `tenantId` from `X-Tenant-Id` or `demo`.
+- Headers: real tokens and `X-Tenant-Id` are honored; header can override tenant in dev.
+- Never enable in production.
+
+Quick test (no token):
+```
+export DEV_AUTH_BYPASS=true
+npm run dev
+curl -i http://localhost:3001/api/projects
+```
+
 ### Dev Login (JWT)
 - Endpoint: `POST /api/dev/login?tenant=demo` (dev only; mounted when `NODE_ENV !== 'production'`).
 - Returns: `{ token, tenant }`. Use headers `Authorization: Bearer <token>` and `X-Tenant-Id: <tenant>`.

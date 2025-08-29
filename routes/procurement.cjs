@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const { prisma, dec } = require('../utils/prisma.cjs');
+const { requireProjectMember } = require('../middleware/membership.cjs');
 const { recomputeProcurement } = require('../services/projectSnapshot');
 
 function getTenantId(req) {
-  return req.headers['x-tenant-id'] || 'demo';
+  return req.user && req.user.tenantId;
 }
 
 async function adjustSnapshot(projectId, tenantId, field, delta) {
@@ -28,7 +29,12 @@ router.get('/pos', async (req, res, next) => {
     const where = { tenantId, ...(projectId ? { projectId: Number(projectId) } : {}) };
     const rows = await prisma.purchaseOrder.findMany({
       where,
-      include: { lines: true, deliveries: true },
+      include: {
+        lines: true,
+        deliveries: true,
+        // Minimal relation for FE linking
+        project: { select: { id: true, name: true } },
+      },
     });
     res.json(rows);
   } catch (e) { next(e); }
@@ -41,7 +47,12 @@ router.get('/pos/:id', async (req, res, next) => {
     const id = Number(req.params.id);
     const row = await prisma.purchaseOrder.findFirst({
       where: { id, tenantId },
-      include: { lines: true, deliveries: true },
+      include: {
+        lines: true,
+        deliveries: true,
+        // Minimal relation for FE linking
+        project: { select: { id: true, name: true } },
+      },
     });
     if (!row) return res.status(404).json({ error: 'Not found' });
     res.json(row);
@@ -49,29 +60,34 @@ router.get('/pos/:id', async (req, res, next) => {
 });
 
 // Create PO
-router.post('/pos', async (req, res, next) => {
+router.post('/pos', requireProjectMember, async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const { lines = [], ...data } = req.body;
-    const created = await prisma.purchaseOrder.create({
-      data: {
-        ...data,
-        tenantId,
-        ...(data.orderDate ? { orderDate: new Date(data.orderDate) } : {}),
-        total: data.total !== undefined ? dec(data.total) : undefined,
-        lines: {
-          create: lines.map((l) => ({
-            tenantId,
-            item: l.item,
-            qty: dec(l.qty),
-            unit: l.unit,
-            unitCost: dec(l.unitCost),
-            lineTotal: dec(l.lineTotal),
-          })),
-        },
+  const created = await prisma.purchaseOrder.create({
+    data: {
+      ...data,
+      tenantId,
+      ...(data.orderDate ? { orderDate: new Date(data.orderDate) } : {}),
+      total: data.total !== undefined ? dec(data.total) : undefined,
+      lines: {
+        create: lines.map((l) => ({
+          tenantId,
+          item: l.item,
+          qty: dec(l.qty),
+          unit: l.unit,
+          unitCost: dec(l.unitCost),
+          lineTotal: dec(l.lineTotal),
+        })),
       },
-      include: { lines: true, deliveries: true },
-    });
+    },
+    include: {
+      lines: true,
+      deliveries: true,
+      // Minimal relation for FE linking
+      project: { select: { id: true, name: true } },
+    },
+  });
     if (created.status === 'Open') {
       await adjustSnapshot(created.projectId, tenantId, 'procurementPOsOpen', 1);
     }
@@ -89,6 +105,10 @@ router.put('/pos/:id', async (req, res, next) => {
       include: { lines: true },
     });
     if (!existing) return res.status(404).json({ error: 'Not found' });
+
+    // Membership check via middleware
+    req.query.projectId = String(existing.projectId);
+    await new Promise((resolve, reject) => requireProjectMember(req, res, (err) => err ? reject(err) : resolve()));
 
     const { lines = [], ...data } = req.body;
     const updated = await prisma.$transaction(async (tx) => {
@@ -116,7 +136,12 @@ router.put('/pos/:id', async (req, res, next) => {
       });
       return tx.purchaseOrder.findFirst({
         where: { id, tenantId },
-        include: { lines: true, deliveries: true },
+        include: {
+          lines: true,
+          deliveries: true,
+          // Minimal relation for FE linking
+          project: { select: { id: true, name: true } },
+        },
       });
     });
 
@@ -145,6 +170,10 @@ router.delete('/pos/:id', async (req, res, next) => {
     const existing = await prisma.purchaseOrder.findFirst({ where: { id, tenantId }, select: { projectId: true } });
     if (!existing) return res.status(404).json({ error: 'Not found' });
 
+    // Membership check via middleware
+    req.query.projectId = String(existing.projectId);
+    await new Promise((resolve, reject) => requireProjectMember(req, res, (err) => err ? reject(err) : resolve()));
+
     await prisma.$transaction(async (tx) => {
       await tx.pOLine.deleteMany({ where: { poId: id, tenantId } });
       await tx.delivery.deleteMany({ where: { poId: id, tenantId } });
@@ -160,6 +189,11 @@ router.post('/deliveries', async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const body = req.body;
+    // Resolve project via PO and check membership
+    const po = await prisma.purchaseOrder.findFirst({ where: { id: Number(body.poId), tenantId }, select: { projectId: true } });
+    if (!po) return res.status(400).json({ error: 'Invalid poId' });
+    req.query.projectId = String(po.projectId);
+    await new Promise((resolve, reject) => requireProjectMember(req, res, (err) => err ? reject(err) : resolve()));
     const created = await prisma.delivery.create({
       data: {
         tenantId,
@@ -188,6 +222,9 @@ router.put('/deliveries/:id', async (req, res, next) => {
       include: { po: true },
     });
     if (!existing) return res.status(404).json({ error: 'Not found' });
+    // Membership check via PO's project
+    req.query.projectId = String(existing.po.projectId);
+    await new Promise((resolve, reject) => requireProjectMember(req, res, (err) => err ? reject(err) : resolve()));
     const wasOverdue = existing.expectedAt < new Date() && !existing.receivedAt;
 
     const { expectedAt, receivedAt, note } = req.body;

@@ -27,7 +27,7 @@ paths:
       summary: List clients
       parameters:
         - in: query
-          name: q
+          name: search
           schema: { type: string }
         - in: query
           name: page
@@ -35,14 +35,26 @@ paths:
         - in: query
           name: pageSize
           schema: { type: integer, minimum: 1, maximum: 200 }
+        - in: query
+          name: sort
+          schema: { type: string, default: name }
+        - in: query
+          name: order
+          schema: { type: string, enum: [asc, desc], default: asc }
       responses:
         "200":
           description: Clients
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: "#/components/schemas/Client" }
+                type: object
+                properties:
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  total: { type: integer }
+                  rows:
+                    type: array
+                    items: { $ref: "#/components/schemas/ClientListItem" }
     post:
       summary: Create client
       requestBody:
@@ -73,18 +85,71 @@ paths:
               schema: { $ref: "#/components/schemas/ClientDetail" }
         "404":
           description: Not found
+    put:
+      summary: Update client
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateClient" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClientDetail" }
+        "404":
+          description: Not found
+    delete:
+      summary: Soft delete client
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "204": { description: No Content }
+        "404": { description: Not found }
 
   /api/projects:
     get:
       summary: List projects
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0 }
+        - in: query
+          name: sort
+          schema: { type: string, default: startDate:desc }
+        - in: query
+          name: clientId
+          schema: { type: integer }
+        - in: query
+          name: status
+          schema: { type: string }
+        - in: query
+          name: type
+          schema: { type: string }
       responses:
         "200":
           description: Projects
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: "#/components/schemas/Project" }
+                type: object
+                properties:
+                  total: { type: integer }
+                  projects:
+                    type: array
+                    items: { $ref: "#/components/schemas/Project" }
     post:
       summary: Create project
       requestBody:
@@ -115,6 +180,36 @@ paths:
               schema: { $ref: "#/components/schemas/ProjectDetail" }
         "404":
           description: Not found
+    put:
+      summary: Update project
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateProject" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "404":
+          description: Not found
+    delete:
+      summary: Soft delete project
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "204": { description: No Content }
+        "404": { description: Not found }
 
   /api/tasks:
     get:
@@ -122,18 +217,31 @@ paths:
       parameters:
         - in: query
           name: projectId
-          schema: { type: string }
+          schema: { type: integer }
         - in: query
-          name: overdue
-          schema: { type: string, enum: ["true", "false"] }
+          name: statusId
+          schema: { type: integer }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0 }
+        - in: query
+          name: sort
+          schema: { type: string, default: dueDate:desc }
       responses:
         "200":
           description: Tasks
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: "#/components/schemas/Task" }
+                type: object
+                properties:
+                  total: { type: integer }
+                  tasks:
+                    type: array
+                    items: { $ref: "#/components/schemas/Task" }
     post:
       summary: Create task
       requestBody:
@@ -150,16 +258,41 @@ paths:
 
 components:
   schemas:
+    ClientListItem:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        companyRegNo: { type: string }
+        projectsCount: { type: integer }
     Client:
       type: object
       properties:
-        id: { type: string }
+        id: { type: integer }
         name: { type: string }
     CreateClient:
       type: object
       required: [name]
       properties:
         name: { type: string }
+        companyRegNo: { type: string }
+        vatNo: { type: string }
+        address1: { type: string }
+        address2: { type: string }
+        city: { type: string }
+        county: { type: string }
+        postcode: { type: string }
+        primaryContact:
+          type: object
+          properties:
+            firstName: { type: string }
+            lastName: { type: string }
+            email: { type: string }
+            phone: { type: string }
+            role: { type: string }
+    UpdateClient:
+      allOf:
+        - $ref: "#/components/schemas/CreateClient"
     ClientDetail:
       allOf:
         - $ref: "#/components/schemas/Client"
@@ -170,7 +303,7 @@ components:
               items:
                 type: object
                 properties:
-                  id: { type: string }
+                  id: { type: integer }
                   name: { type: string }
                   email: { type: string }
                   phone: { type: string }
@@ -179,35 +312,83 @@ components:
               items:
                 type: object
                 properties:
-                  id: { type: string }
+                  id: { type: integer }
                   code: { type: string }
                   name: { type: string }
                   status: { type: string }
     Project:
       type: object
       properties:
-        id: { type: string }
+        id: { type: integer }
         code: { type: string }
         name: { type: string }
         status:
           type: string
-          enum: [DRAFT, ACTIVE, ON_HOLD, COMPLETED, CANCELLED]
         client:
           type: object
           properties:
-            id: { type: string }
+            id: { type: integer }
             name: { type: string }
     CreateProject:
       type: object
       required: [clientId, code, name]
       properties:
-        clientId: { type: string }
+        clientId: { type: integer }
         code: { type: string }
         name: { type: string }
-        status:
-          type: string
-          enum: [DRAFT, ACTIVE, ON_HOLD, COMPLETED, CANCELLED]
+        statusId: { type: integer }
+        typeId: { type: integer }
+        description: { type: string }
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+    UpdateProject:
+      allOf:
+        - $ref: "#/components/schemas/CreateProject"
     ProjectDetail:
+  /api/tasks/{id}:
+    get:
+      summary: Get task by id
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Task
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { description: Not found }
+    put:
+      summary: Update task
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateTask" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { description: Not found }
+    delete:
+      summary: Soft delete task
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "204": { description: No Content }
+        "404": { description: Not found }
       allOf:
         - $ref: "#/components/schemas/Project"
         - type: object
@@ -223,17 +404,22 @@ components:
     Task:
       type: object
       properties:
-        id: { type: string }
+        id: { type: integer }
         title: { type: string }
         description: { type: string }
-        projectId: { type: string }
+        projectId: { type: integer }
+        statusId: { type: integer }
         dueDate: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
     CreateTask:
       type: object
-      required: [title, projectId]
+      required: [title, projectId, statusId]
       properties:
         title: { type: string }
         description: { type: string }
-        projectId: { type: string }
+        projectId: { type: integer }
+        statusId: { type: integer }
         dueDate: { type: string, format: date-time }
+    UpdateTask:
+      allOf:
+        - $ref: "#/components/schemas/CreateTask"

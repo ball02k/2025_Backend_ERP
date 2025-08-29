@@ -4,7 +4,7 @@ const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 const { recomputeProjectSnapshot } = require("../services/projectSnapshot");
 
-function getTenantId(req) { return req.headers["x-tenant-id"] || "demo"; }
+function getTenantId(req) { return (req.user && req.user.tenantId) || "demo"; }
 
 router.post("/recompute/:projectId", async (req, res) => {
   try {

@@ -14,7 +14,7 @@ router.post('/login', async (req, res) => {
     const { email, password, tenantId } = req.body || {};
     if (!email || !password)
       return res.status(400).json({ error: 'Email and password required' });
-    const tId = tenantId || req.headers['x-tenant-id'] || 'demo';
+    const tId = tenantId || 'demo';
     const user = await prisma.user.findFirst({
       where: { tenantId: tId, email, isActive: true },
       include: { userRoles: { include: { role: true } } },
@@ -46,4 +46,3 @@ router.post('/login', async (req, res) => {
 });
 
 module.exports = router;
-
