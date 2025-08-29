@@ -4,6 +4,43 @@ const { requireProjectMember } = require('../middleware/membership.cjs');
 const { projectBodySchema } = require('../lib/validation');
 module.exports = (prisma) => {
   const router = express.Router();
+  // GET /api/projects/summary
+  // Endpoint Inventory: GET /api/projects/summary
+  router.get('/summary', async (req, res) => {
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const deleted = { deletedAt: null };
+      const statusesCompleted = ['Completed', 'completed', 'Closed', 'CLOSED', 'Done', 'DONE'];
+      const statusesOnHold = ['On Hold', 'ON HOLD', 'Hold', 'Paused', 'PAUSED'];
+
+      const [total, active, onHold, completed, budgetAgg, actualAgg] = await Promise.all([
+        prisma.project.count({ where: { tenantId, ...deleted } }),
+        prisma.project.count({ where: { tenantId, ...deleted, OR: [{ status: 'Active' }, { status: 'ACTIVE' }] } }),
+        prisma.project.count({ where: { tenantId, ...deleted, OR: statusesOnHold.map((s) => ({ status: s })) } }),
+        prisma.project.count({ where: { tenantId, ...deleted, OR: statusesCompleted.map((s) => ({ status: s })) } }),
+        prisma.project.aggregate({ where: { tenantId, ...deleted }, _sum: { budget: true } }),
+        prisma.project.aggregate({ where: { tenantId, ...deleted }, _sum: { actualSpend: true } }),
+      ]);
+
+      const sumBudget = Number(budgetAgg._sum.budget || 0);
+      const sumActual = Number(actualAgg._sum.actualSpend || 0);
+      const budgetRemaining = sumBudget - sumActual;
+      const marginPct = sumBudget > 0 ? ((sumBudget - sumActual) / sumBudget) * 100 : null;
+
+      res.json({
+        total,
+        active,
+        onHold,
+        completed,
+        budgetRemaining,
+        marginPct,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to compute project summary' });
+    }
+  });
   router.get('/', async (req, res) => {
     try {
       const tenant = req.user && req.user.tenantId;

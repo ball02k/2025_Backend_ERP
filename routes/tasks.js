@@ -7,6 +7,35 @@ const { recomputeProjectSnapshot } = require('../services/projectSnapshot');
 module.exports = (prisma) => {
   const router = express.Router();
 
+  // GET /api/tasks/summary
+  // Endpoint Inventory: GET /api/tasks/summary
+  router.get('/summary', async (req, res) => {
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const now = new Date();
+      const dow = now.getDay() || 7; // 1..7 (treat Sunday as 7)
+      const endOfWeek = new Date(now);
+      endOfWeek.setHours(23, 59, 59, 999);
+      endOfWeek.setDate(now.getDate() + (7 - dow));
+
+      const notCompleted = { notIn: ['Done', 'done', 'Completed', 'completed', 'Closed', 'closed'] };
+      const isCompleted = { in: ['Done', 'done', 'Completed', 'completed', 'Closed', 'closed'] };
+
+      const [total, overdue, dueThisWeek, open, completed] = await Promise.all([
+        prisma.task.count({ where: { tenantId, deletedAt: null } }),
+        prisma.task.count({ where: { tenantId, deletedAt: null, status: notCompleted, dueDate: { lt: now } } }),
+        prisma.task.count({ where: { tenantId, deletedAt: null, status: notCompleted, dueDate: { gte: now, lte: endOfWeek } } }),
+        prisma.task.count({ where: { tenantId, deletedAt: null, status: notCompleted } }),
+        prisma.task.count({ where: { tenantId, deletedAt: null, status: isCompleted } }),
+      ]);
+
+      res.json({ total, overdue, dueThisWeek, open, completed, updatedAt: new Date().toISOString() });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to compute task summary' });
+    }
+  });
+
   // GET /api/tasks
   router.get('/', async (req, res) => {
     try {
