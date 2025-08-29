@@ -68,6 +68,14 @@ Variations CRUD	/api/variations...	✔	✔	partial (missing on PUT/PATCH/DELETE)
 Documents v2	/api/documents...	✔	✔ (req.user.tenantId)	✖	Document/DocumentLink
 Procurement	/api/procurement/...	✔	✔ (header)	✖	PurchaseOrder, POLine, Delivery
 Financials	/api/financials/...	✔	✔ (req.user.tenantId)	✔ (assertProjectMember)	BudgetLine, Commitment, ActualCost, Forecast
+GET	/api/projects/summary	✔	✔ (req.user.tenantId)	✖	Project
+GET	/api/tasks/summary	✔	✔ (req.user.tenantId)	✖	Task
+GET	/api/projects/csv/export	✔	✔ (req.user.tenantId)	✖	Project
+POST	/api/projects/csv/import	✔	✔ (req.user.tenantId)	role admin|pm	Project
+GET	/api/clients/csv/export	✔	✔ (via tenant projects)	✖	Client
+POST	/api/clients/csv/import	✔	(n/a)	✖	Client
+GET	/api/tasks/csv/export	✔	✔ (req.user.tenantId)	✖	Task
+POST	/api/tasks/csv/import	✔	✔ (req.user.tenantId)	✔ (per-row membership)	Task
 *Variation detail uses a manual membership check; other write routes skip it.
 
 Contract Snapshots

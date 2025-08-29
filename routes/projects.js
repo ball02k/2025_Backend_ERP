@@ -190,6 +190,9 @@ module.exports = (prisma) => {
         const clientId = Number(r.clientId);
         if (!code || !name || !Number.isFinite(clientId)) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'INVALID_REQUIRED_FIELDS' }); continue; }
         try {
+          // Validate clientId exists
+          const clientOk = await prisma.client.findFirst({ where: { id: clientId, deletedAt: null } });
+          if (!clientOk) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'CLIENT_ID_NOT_FOUND' }); continue; }
           const existing = await prisma.project.findFirst({ where: { code } });
           if (existing && existing.tenantId !== tenantId) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'CODE_IN_USE_OTHER_TENANT' }); continue; }
           // Optional lookup validations when provided
