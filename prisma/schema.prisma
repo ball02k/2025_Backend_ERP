@@ -7,6 +7,61 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Supplier Onboarding
+model OnboardingProject {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  name      String
+  status    String   @default("draft")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status])
+}
+
+model OnboardingForm {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  title       String
+  version     String   @default("v1")
+  isPublished Boolean  @default(false)
+  sections    Json?
+
+  @@index([tenantId, projectId])
+}
+
+model OnboardingInvite {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  supplierId  Int
+  email       String
+  token       String
+  status      String   @default("invited")
+  invitedAt   DateTime @default(now())
+  respondedAt DateTime?
+
+  @@index([tenantId, projectId, status])
+}
+
+model OnboardingResponse {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  projectId  Int
+  supplierId Int
+  formId     Int
+  answers    Json
+  files      Json?
+  status     String   @default("in_progress")
+  submittedAt DateTime?
+  reviewedBy Int?
+  reviewedAt DateTime?
+  decision   String?
+
+  @@index([tenantId, projectId, supplierId, status])
+}
+
 model ProjectStatus {
   id        Int       @id @default(autoincrement())
   tenantId  Int?
@@ -265,6 +320,7 @@ model VariationStatusHistory {
   id          Int       @id @default(autoincrement())
   variationId Int
   variation   Variation @relation(fields: [variationId], references: [id])
+  tenantId    String
 
   fromStatus String?  @db.VarChar(24)
   toStatus   String   @db.VarChar(24)
@@ -272,6 +328,7 @@ model VariationStatusHistory {
   changedAt  DateTime @default(now())
 
   @@index([variationId])
+  @@index([tenantId, variationId, changedAt])
 }
 
 model ProjectSnapshot {
@@ -344,6 +401,7 @@ model Document {
   links        DocumentLink[]
 
   @@index([tenantId])
+  @@index([tenantId, uploadedAt])
 }
 
 model DocumentLink {
