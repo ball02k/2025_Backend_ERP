@@ -489,6 +489,24 @@ model RolePermission {
   @@index([tenantId, permissionId])
 }
 
+// Supplier Management
+model Supplier {
+  id               Int      @id @default(autoincrement())
+  tenantId         String
+  name             String
+  status           String   @default("active")
+  companyRegNo     String?
+  vatNo            String?
+  insuranceExpiry  DateTime?
+  hsAccreditations String?
+  performanceScore Decimal?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantId, name])
+  @@index([tenantId, status])
+}
+
 model ProjectMembership {
   id        Int      @id @default(autoincrement())
   tenantId  String   @default("demo")
@@ -510,6 +528,7 @@ model PurchaseOrder {
   projectId  Int
   code       String
   supplier   String
+  supplierId Int?
   status     String     @default("Open")
   orderDate  DateTime   @default(now())
   total      Decimal    @default(0)
@@ -521,6 +540,7 @@ model PurchaseOrder {
 
   @@unique([tenantId, code])
   @@index([tenantId, projectId, status])
+  @@index([tenantId, supplierId])
 }
 
 model POLine {
