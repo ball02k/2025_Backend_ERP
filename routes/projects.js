@@ -73,7 +73,11 @@ module.exports = (prisma) => {
           },
         }),
       ]);
-      res.json({ total, projects: rows });
+      const projects = rows.map((p) => ({
+        ...p,
+        clientName: p.client ? p.client.name : null,
+      }));
+      res.json({ total, projects });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: err.message || 'Failed to fetch projects' });
@@ -112,6 +116,8 @@ module.exports = (prisma) => {
         type: projectRow.type,
         startDate: projectRow.startDate,
         endDate: projectRow.endDate,
+        clientId: projectRow.client ? projectRow.client.id : null,
+        clientName: projectRow.client ? projectRow.client.name : null,
         client: projectRow.client
           ? {
               id: projectRow.client.id,
