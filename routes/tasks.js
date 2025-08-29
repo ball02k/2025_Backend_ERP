@@ -6,6 +6,47 @@ const { recomputeProjectSnapshot } = require('../services/projectSnapshot');
 
 module.exports = (prisma) => {
   const router = express.Router();
+  function toCsvRow(values) {
+    return values
+      .map((v) => {
+        if (v === null || v === undefined) return '';
+        const s = String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      })
+      .join(',') + '\n';
+  }
+  async function readRawBody(req) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+      req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      req.on('error', reject);
+    });
+  }
+  function parseCsv(text) {
+    const rows = [];
+    let i = 0, field = '', row = [], inQ = false;
+    const pushField = () => { row.push(field); field = ''; };
+    const pushRow = () => { rows.push(row); row = []; };
+    while (i < text.length) {
+      const ch = text[i++];
+      if (inQ) {
+        if (ch === '"') { if (text[i] === '"') { field += '"'; i++; } else { inQ = false; } }
+        else field += ch;
+      } else {
+        if (ch === '"') inQ = true;
+        else if (ch === ',') pushField();
+        else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i] === '\n') i++; pushField(); pushRow(); }
+        else field += ch;
+      }
+    }
+    if (field.length || row.length) { pushField(); pushRow(); }
+    const headers = (rows.shift() || []).map((h) => h.trim());
+    const data = rows.filter(r => r.length && r.some(v => v && v.trim().length)).map((r) => {
+      const obj = {}; headers.forEach((h, idx) => { obj[h] = r[idx] !== undefined ? r[idx] : ''; }); return obj;
+    });
+    return { headers, rows: data };
+  }
 
   // GET /api/tasks/summary
   // Endpoint Inventory: GET /api/tasks/summary
@@ -77,6 +118,80 @@ module.exports = (prisma) => {
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: err.message || 'Failed to fetch tasks' });
+    }
+  });
+
+  // GET /api/tasks/csv/export
+  router.get('/csv/export', async (req, res) => {
+    try {
+      const tenant = req.user && req.user.tenantId;
+      const rows = await prisma.task.findMany({
+        where: { tenantId: tenant, deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+      });
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="tasks.csv"');
+      res.write(toCsvRow(['id','projectId','title','description','assignee','statusId','status','dueDate']));
+      for (const t of rows) {
+        res.write(toCsvRow([t.id,t.projectId,t.title,t.description ?? '',t.assignee ?? '',t.statusId ?? '',t.status ?? '',t.dueDate ? new Date(t.dueDate).toISOString() : '']));
+      }
+      res.end();
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to export tasks CSV' });
+    }
+  });
+
+  // POST /api/tasks/csv/import (membership per row)
+  router.post('/csv/import', async (req, res) => {
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const userId = Number(req.user?.id);
+      const raw = await readRawBody(req);
+      const { headers, rows } = parseCsv(raw);
+      const required = ['projectId','title','statusId'];
+      for (const col of required) if (!headers.includes(col)) return res.status(400).json({ error: `Missing required column: ${col}` });
+
+      let imported = 0, updated = 0, skipped = 0; const skippedRows = [];
+      for (let idx = 0; idx < rows.length; idx++) {
+        const r = rows[idx];
+        const projectId = Number(r.projectId);
+        const title = (r.title || '').trim();
+        const statusId = Number(r.statusId);
+        if (!Number.isFinite(projectId) || !title || !Number.isFinite(statusId)) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'INVALID_REQUIRED_FIELDS' }); continue; }
+        // membership check per row
+        const mem = await prisma.projectMembership.findFirst({ where: { tenantId, projectId, userId }, select: { id: true } });
+        if (!mem && !(Array.isArray(req.user?.roles) && req.user.roles.includes('admin'))) {
+          skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'NOT_A_PROJECT_MEMBER' }); continue;
+        }
+        try {
+          const id = r.id ? Number(r.id) : null;
+          const data = {
+            tenantId,
+            projectId,
+            title,
+            description: r.description || null,
+            assignee: r.assignee || null,
+            statusId,
+            dueDate: r.dueDate ? new Date(r.dueDate) : null,
+          };
+          if (id && Number.isFinite(id)) {
+            const exists = await prisma.task.findFirst({ where: { id, tenantId } });
+            if (!exists) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'TASK_NOT_FOUND' }); continue; }
+            await prisma.task.update({ where: { id }, data });
+            updated++;
+          } else {
+            await prisma.task.create({ data });
+            imported++;
+          }
+        } catch (e) {
+          skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'ERROR:' + (e.code || e.message || 'UNKNOWN') });
+        }
+      }
+      res.json({ imported, updated, skipped, skippedRows });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to import tasks CSV' });
     }
   });
 

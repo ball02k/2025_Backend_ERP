@@ -4,6 +4,50 @@ const { requireProjectMember } = require('../middleware/membership.cjs');
 const { projectBodySchema } = require('../lib/validation');
 module.exports = (prisma) => {
   const router = express.Router();
+  function toCsvRow(values) {
+    return values
+      .map((v) => {
+        if (v === null || v === undefined) return '';
+        const s = String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      })
+      .join(',') + '\n';
+  }
+  async function readRawBody(req) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+      req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      req.on('error', reject);
+    });
+  }
+  function parseCsv(text) {
+    const rows = [];
+    let i = 0, field = '', row = [], inQ = false; // basic CSV parser
+    const pushField = () => { row.push(field); field = ''; };
+    const pushRow = () => { rows.push(row); row = []; };
+    while (i < text.length) {
+      const ch = text[i++];
+      if (inQ) {
+        if (ch === '"') {
+          if (text[i] === '"') { field += '"'; i++; } else { inQ = false; }
+        } else { field += ch; }
+      } else {
+        if (ch === '"') inQ = true;
+        else if (ch === ',') pushField();
+        else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i] === '\n') i++; pushField(); pushRow(); }
+        else field += ch;
+      }
+    }
+    if (field.length || row.length) { pushField(); pushRow(); }
+    const headers = (rows.shift() || []).map((h) => h.trim());
+    const data = rows.filter(r => r.length && r.some(v => v && v.trim().length)).map((r) => {
+      const obj = {};
+      headers.forEach((h, idx) => { obj[h] = r[idx] !== undefined ? r[idx] : ''; });
+      return obj;
+    });
+    return { headers, rows: data };
+  }
   // GET /api/projects/summary
   // Endpoint Inventory: GET /api/projects/summary
   router.get('/summary', async (req, res) => {
@@ -81,6 +125,101 @@ module.exports = (prisma) => {
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: err.message || 'Failed to fetch projects' });
+    }
+  });
+
+  // GET /api/projects/csv/export
+  router.get('/csv/export', async (req, res) => {
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const rows = await prisma.project.findMany({
+        where: { tenantId, deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        include: { client: { select: { id: true, name: true } } },
+      });
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="projects.csv"');
+      res.write(
+        toCsvRow([
+          'id','code','name','description','clientId','clientName','status','type','startDate','endDate','budget','actualSpend'
+        ])
+      );
+      for (const p of rows) {
+        res.write(
+          toCsvRow([
+            p.id,
+            p.code,
+            p.name,
+            p.description ?? '',
+            p.clientId ?? '',
+            p.client ? p.client.name : '',
+            p.status,
+            p.type,
+            p.startDate ? new Date(p.startDate).toISOString() : '',
+            p.endDate ? new Date(p.endDate).toISOString() : '',
+            p.budget ?? '',
+            p.actualSpend ?? '',
+          ])
+        );
+      }
+      res.end();
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to export projects CSV' });
+    }
+  });
+
+  // POST /api/projects/csv/import (role-gated: admin|pm)
+  router.post('/csv/import', async (req, res) => {
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const roles = Array.isArray(req.user?.roles) ? req.user.roles : (req.user?.role ? [req.user.role] : []);
+      const allowed = new Set(['admin','pm']);
+      if (!roles.some(r => allowed.has(String(r)))) return res.status(403).json({ error: 'FORBIDDEN' });
+
+      const raw = await readRawBody(req);
+      const { headers, rows } = parseCsv(raw);
+      const required = ['code','name','clientId'];
+      for (const col of required) if (!headers.includes(col)) return res.status(400).json({ error: `Missing required column: ${col}` });
+
+      let imported = 0, updated = 0, skipped = 0; const skippedRows = [];
+      for (let idx = 0; idx < rows.length; idx++) {
+        const r = rows[idx];
+        const code = (r.code || '').trim();
+        const name = (r.name || '').trim();
+        const clientId = Number(r.clientId);
+        if (!code || !name || !Number.isFinite(clientId)) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'INVALID_REQUIRED_FIELDS' }); continue; }
+        try {
+          const existing = await prisma.project.findFirst({ where: { code } });
+          if (existing && existing.tenantId !== tenantId) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'CODE_IN_USE_OTHER_TENANT' }); continue; }
+          const data = {
+            tenantId,
+            code,
+            name,
+            description: r.description || null,
+            clientId,
+            status: r.status || undefined,
+            type: r.type || undefined,
+            startDate: r.startDate ? new Date(r.startDate) : undefined,
+            endDate: r.endDate ? new Date(r.endDate) : undefined,
+            budget: r.budget ? Number(r.budget) : undefined,
+            actualSpend: r.actualSpend ? Number(r.actualSpend) : undefined,
+          };
+          if (!existing) {
+            await prisma.project.create({ data });
+            imported++;
+          } else {
+            await prisma.project.update({ where: { id: existing.id }, data });
+            updated++;
+          }
+        } catch (e) {
+          skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'ERROR:' + (e.code || e.message || 'UNKNOWN') });
+        }
+      }
+      res.json({ imported, updated, skipped, skippedRows });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to import projects CSV' });
     }
   });
 

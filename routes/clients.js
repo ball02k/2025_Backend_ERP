@@ -4,6 +4,47 @@ const { clientsQuerySchema, clientBodySchema, contactBodySchema } = require('../
 
 module.exports = (prisma) => {
   const router = express.Router();
+  function toCsvRow(values) {
+    return values
+      .map((v) => {
+        if (v === null || v === undefined) return '';
+        const s = String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      })
+      .join(',') + '\n';
+  }
+  async function readRawBody(req) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+      req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      req.on('error', reject);
+    });
+  }
+  function parseCsv(text) {
+    const rows = [];
+    let i = 0, field = '', row = [], inQ = false;
+    const pushField = () => { row.push(field); field = ''; };
+    const pushRow = () => { rows.push(row); row = []; };
+    while (i < text.length) {
+      const ch = text[i++];
+      if (inQ) {
+        if (ch === '"') { if (text[i] === '"') { field += '"'; i++; } else { inQ = false; } }
+        else field += ch;
+      } else {
+        if (ch === '"') inQ = true;
+        else if (ch === ',') pushField();
+        else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i] === '\n') i++; pushField(); pushRow(); }
+        else field += ch;
+      }
+    }
+    if (field.length || row.length) { pushField(); pushRow(); }
+    const headers = (rows.shift() || []).map((h) => h.trim());
+    const data = rows.filter(r => r.length && r.some(v => v && v.trim().length)).map((r) => {
+      const obj = {}; headers.forEach((h, idx) => { obj[h] = r[idx] !== undefined ? r[idx] : ''; }); return obj;
+    });
+    return { headers, rows: data };
+  }
 
   // GET /api/clients
   router.get('/', async (req, res) => {
@@ -50,6 +91,67 @@ module.exports = (prisma) => {
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: err.message || 'Failed to fetch clients' });
+    }
+  });
+
+  // GET /api/clients/csv/export
+  router.get('/csv/export', async (req, res) => {
+    try {
+      const tenant = req.user && req.user.tenantId;
+      const rows = await prisma.client.findMany({
+        where: { deletedAt: null, projects: { some: { tenantId: tenant, deletedAt: null } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="clients.csv"');
+      res.write(toCsvRow(['id','name','companyRegNo','vatNo','address1','address2','city','county','postcode']));
+      for (const c of rows) {
+        res.write(toCsvRow([c.id,c.name,c.companyRegNo ?? '',c.vatNo ?? '',c.address1 ?? '',c.address2 ?? '',c.city ?? '',c.county ?? '',c.postcode ?? '']));
+      }
+      res.end();
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to export clients CSV' });
+    }
+  });
+
+  // POST /api/clients/csv/import
+  router.post('/csv/import', async (req, res) => {
+    try {
+      const raw = await readRawBody(req);
+      const { headers, rows } = parseCsv(raw);
+      const required = ['name'];
+      for (const col of required) if (!headers.includes(col)) return res.status(400).json({ error: `Missing required column: ${col}` });
+      let imported = 0, updated = 0, skipped = 0; const skippedRows = [];
+      for (let idx = 0; idx < rows.length; idx++) {
+        const r = rows[idx];
+        const name = (r.name || '').trim();
+        if (!name) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'INVALID_REQUIRED_FIELDS' }); continue; }
+        try {
+          // Upsert by id if provided, else by (name, companyRegNo) heuristics
+          const id = r.id ? Number(r.id) : null;
+          const where = id && Number.isFinite(id) ? { id, deletedAt: null } : { name, deletedAt: null };
+          const existing = await prisma.client.findFirst({ where });
+          const data = {
+            name,
+            companyRegNo: r.companyRegNo || null,
+            vatNo: r.vatNo || null,
+            address1: r.address1 || null,
+            address2: r.address2 || null,
+            city: r.city || null,
+            county: r.county || null,
+            postcode: r.postcode || null,
+          };
+          if (!existing) { await prisma.client.create({ data }); imported++; }
+          else { await prisma.client.update({ where: { id: existing.id }, data }); updated++; }
+        } catch (e) {
+          skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'ERROR:' + (e.code || e.message || 'UNKNOWN') });
+        }
+      }
+      res.json({ imported, updated, skipped, skippedRows });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to import clients CSV' });
     }
   });
 
