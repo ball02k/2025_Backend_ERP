@@ -139,6 +139,14 @@ module.exports = (prisma) => {
   router.post('/', async (req, res) => {
     try {
       const tenantId = req.user && req.user.tenantId;
+      const roles = Array.isArray(req.user?.roles)
+        ? req.user.roles
+        : req.user?.role
+        ? [req.user.role]
+        : [];
+      const allowed = new Set(['admin', 'pm']);
+      const canCreate = roles.some((r) => allowed.has(String(r)));
+      if (!canCreate) return res.status(403).json({ error: 'FORBIDDEN' });
       const body = projectBodySchema.parse(req.body);
       if (!body.code) return res.status(400).json({ error: 'code is required' });
 
