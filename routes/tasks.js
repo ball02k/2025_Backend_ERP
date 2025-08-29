@@ -68,7 +68,12 @@ module.exports = (prisma) => {
         }),
       ]);
 
-      res.json({ total, tasks: rows });
+      const tasks = rows.map((t) => ({
+        ...t,
+        projectName: t.project ? t.project.name : null,
+      }));
+
+      res.json({ total, tasks });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: err.message || 'Failed to fetch tasks' });
@@ -89,7 +94,11 @@ module.exports = (prisma) => {
         }
       });
       if (!row) return res.status(404).json({ error: 'Task not found' });
-      res.json(row);
+      const task = {
+        ...row,
+        projectName: row.project ? row.project.name : null,
+      };
+      res.json(task);
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: err.message || 'Failed to fetch task' });
