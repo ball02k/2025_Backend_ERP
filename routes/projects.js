@@ -169,6 +169,15 @@ module.exports = (prisma) => {
     }
   });
 
+  // GET /api/projects/csv/template (downloadable example)
+  router.get('/csv/template', async (_req, res) => {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="projects_template.csv"');
+    res.write(toCsvRow(['code','name','clientId','description','status','type','statusId','typeId','startDate','endDate','budget','actualSpend']));
+    res.write(toCsvRow(['P-001','Example Project','1','Optional description','Active','General','','','2025-01-01T00:00:00Z','','1500000','250000']));
+    res.end();
+  });
+
   // POST /api/projects/csv/import (role-gated: admin|pm)
   router.post('/csv/import', async (req, res) => {
     try {

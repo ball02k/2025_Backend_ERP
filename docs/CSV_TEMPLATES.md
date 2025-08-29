@@ -6,6 +6,7 @@ This backend exposes CSV export/import for Projects, Clients, and Tasks. All imp
 
 - Export: `GET /api/projects/csv/export`
 - Import: `POST /api/projects/csv/import` (roles: admin or pm)
+- Template: `GET /api/projects/csv/template`
 
 Required columns:
 - `code` (string)
@@ -38,6 +39,7 @@ Notes:
 
 - Export: `GET /api/clients/csv/export`
 - Import: `POST /api/clients/csv/import`
+- Template: `GET /api/clients/csv/template`
 
 Required columns:
 - `name` (string)
@@ -60,6 +62,7 @@ Notes:
 
 - Export: `GET /api/tasks/csv/export`
 - Import: `POST /api/tasks/csv/import` (membership required per `projectId`)
+- Template: `GET /api/tasks/csv/template`
 
 Required columns:
 - `projectId` (Int)
@@ -82,4 +85,3 @@ projectId,title,statusId,description,assignee,dueDate
 Notes:
 - Each row requires project membership (admin bypass). Non-membership rows are skipped with reason `NOT_A_PROJECT_MEMBER`.
 - All created/updated tasks are scoped to your tenant.
-

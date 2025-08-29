@@ -115,6 +115,15 @@ module.exports = (prisma) => {
     }
   });
 
+  // GET /api/clients/csv/template (downloadable example)
+  router.get('/csv/template', async (_req, res) => {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="clients_template.csv"');
+    res.write(toCsvRow(['name','companyRegNo','vatNo','address1','address2','city','county','postcode']));
+    res.write(toCsvRow(['Acme Construction','01234567','GB123456789','1 High St','','London','','W1 1AA']));
+    res.end();
+  });
+
   // POST /api/clients/csv/import
   router.post('/csv/import', async (req, res) => {
     try {

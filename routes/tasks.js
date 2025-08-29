@@ -142,6 +142,15 @@ module.exports = (prisma) => {
     }
   });
 
+  // GET /api/tasks/csv/template (downloadable example)
+  router.get('/csv/template', async (_req, res) => {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="tasks_template.csv"');
+    res.write(toCsvRow(['projectId','title','statusId','description','assignee','dueDate']));
+    res.write(toCsvRow(['1','Example task','1','Optional description','John','2025-08-31T00:00:00Z']));
+    res.end();
+  });
+
   // POST /api/tasks/csv/import (membership per row)
   router.post('/csv/import', async (req, res) => {
     try {
