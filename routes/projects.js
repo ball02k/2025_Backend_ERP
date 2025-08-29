@@ -192,6 +192,20 @@ module.exports = (prisma) => {
         try {
           const existing = await prisma.project.findFirst({ where: { code } });
           if (existing && existing.tenantId !== tenantId) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'CODE_IN_USE_OTHER_TENANT' }); continue; }
+          // Optional lookup validations when provided
+          const tnum = Number(tenantId);
+          if (r.statusId) {
+            const sid = Number(r.statusId);
+            if (!Number.isFinite(sid)) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'INVALID_STATUS_ID' }); continue; }
+            const st = await prisma.projectStatus.findFirst({ where: { id: sid } });
+            if (!st) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'STATUS_ID_NOT_FOUND' }); continue; }
+          }
+          if (r.typeId) {
+            const tid = Number(r.typeId);
+            if (!Number.isFinite(tid)) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'INVALID_TYPE_ID' }); continue; }
+            const tp = await prisma.projectType.findFirst({ where: { id: tid } });
+            if (!tp) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'TYPE_ID_NOT_FOUND' }); continue; }
+          }
           const data = {
             tenantId,
             code,
@@ -200,6 +214,8 @@ module.exports = (prisma) => {
             clientId,
             status: r.status || undefined,
             type: r.type || undefined,
+            statusId: r.statusId ? Number(r.statusId) : undefined,
+            typeId: r.typeId ? Number(r.typeId) : undefined,
             startDate: r.startDate ? new Date(r.startDate) : undefined,
             endDate: r.endDate ? new Date(r.endDate) : undefined,
             budget: r.budget ? Number(r.budget) : undefined,
