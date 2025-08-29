@@ -315,6 +315,14 @@ add(
   `${overviewPath}: res.json({ project, widgets: ..., quickLinks: ... })`
 );
 
+// Dev login route should be dev-only
+add(
+  'ROUTES',
+  /NODE_ENV\s*!==\s*['"]production['"][\s\S]*app\.use\(["']\/api\/dev["']/.test(indexContent),
+  'dev login mounted only in non-production',
+  `${indexPath}: mount app.use('/api/dev', require('./routes/dev.cjs')) inside NODE_ENV !== 'production'`
+);
+
 // Tenant scoping
 function tenantWhereBlocks(content) {
   const blocks = [];

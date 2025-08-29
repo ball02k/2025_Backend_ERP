@@ -15,6 +15,22 @@ Check server health:
 npm run health
 ```
 
+### Dev Login (JWT)
+- Endpoint: `POST /api/dev/login?tenant=demo` (dev only; mounted when `NODE_ENV !== 'production'`).
+- Returns: `{ token, tenant }`. Use headers `Authorization: Bearer <token>` and `X-Tenant-Id: <tenant>`.
+- Default tenant: `TENANT_DEFAULT=demo`.
+
+Quick test:
+```
+curl -s -X POST "http://localhost:3001/api/dev/login?tenant=demo" | jq .
+```
+Then call a protected route:
+```
+TOKEN=$(curl -s -X POST "http://localhost:3001/api/dev/login?tenant=demo" | jq -r '.token')
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: demo" \
+  "http://localhost:3001/api/projects?limit=1" | jq .
+```
+
 ## Variations Smoke Test
 
 With the dev server running, exercise the variations API:

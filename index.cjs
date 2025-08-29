@@ -3,7 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
-const { sign } = require('./utils/jwt.cjs');
 const pkg = require('./package.json');
 const { logError } = require('./utils/errors.cjs');
 
@@ -65,44 +64,8 @@ app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
 app.use('/api/financials', requireAuth, financialsRouter);
 
 if (process.env.NODE_ENV !== 'production') {
-  const SECRET = process.env.JWT_SECRET || 'devsecret';
-
-  app.post('/api/dev/login', express.json(), async (req, res) => {
-    try {
-      const tId = req.user?.tenantId || TENANT_DEFAULT;
-      const user = await prisma.user.upsert({
-        where: { email: 'dev@demo.local' },
-        update: { tenantId: tId, name: 'Dev User' },
-        create: {
-          email: 'dev@demo.local',
-          name: 'Dev User',
-          tenantId: tId,
-          passwordSHA: '',
-        },
-      });
-      // Ensure membership to all tenant projects for easy dev
-      const projects = await prisma.project.findMany({ where: { tenantId: tId }, select: { id: true } });
-      await Promise.all(
-        projects.map((p) =>
-          prisma.projectMembership.upsert({
-            where: { tenantId_projectId_userId: { tenantId: tId, projectId: p.id, userId: user.id } },
-            update: {},
-            create: { tenantId: tId, projectId: p.id, userId: user.id, role: 'Member' },
-          })
-        )
-      );
-      const token = sign(
-        { sub: String(user.id), tenantId: tId },
-        SECRET,
-        { expiresIn: 60 * 60 * 12 }
-      );
-      return res.json({ token, user });
-    } catch (e) {
-      console.error(e);
-      return res.status(500).json({ error: 'Login failed' });
-    }
-  });
-
+  // Dev-only routes
+  app.use('/api/dev', require('./routes/dev.cjs'));
   app.use('/api/dev/snapshot', requireAuth, require('./routes/dev_snapshot.cjs'));
 }
 
