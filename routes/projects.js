@@ -48,6 +48,36 @@ module.exports = (prisma) => {
     });
     return { headers, rows: data };
   }
+
+  async function readRawBuffer(req) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+      req.on('end', () => resolve(Buffer.concat(chunks)));
+      req.on('error', reject);
+    });
+  }
+  async function getCsvTextFromRequest(req) {
+    const ct = String(req.headers['content-type'] || '').toLowerCase();
+    if (ct.startsWith('multipart/form-data')) {
+      const m = /boundary=([^;]+)\b/.exec(ct);
+      if (!m) return (await readRawBody(req));
+      const boundary = '--' + m[1];
+      const raw = await readRawBuffer(req);
+      const text = raw.toString('utf8');
+      const parts = text.split(boundary).filter((p) => p.trim() && p.indexOf('\r\n\r\n') !== -1);
+      if (!parts.length) return '';
+      const seg = parts[0];
+      const splitAt = seg.indexOf('\r\n\r\n');
+      if (splitAt === -1) return '';
+      let body = seg.slice(splitAt + 4);
+      // Trim trailing CRLF and boundary markers
+      body = body.replace(/\r?\n--$/,'').replace(/\r?\n$/,'');
+      return body;
+    }
+    // default: treat body as raw CSV text
+    return (await readRawBody(req));
+  }
   // GET /api/projects/summary
   // Endpoint Inventory: GET /api/projects/summary
   router.get('/summary', async (req, res) => {
@@ -186,7 +216,7 @@ module.exports = (prisma) => {
       const allowed = new Set(['admin','pm']);
       if (!roles.some(r => allowed.has(String(r)))) return res.status(403).json({ error: 'FORBIDDEN' });
 
-      const raw = await readRawBody(req);
+      const raw = await getCsvTextFromRequest(req);
       const { headers, rows } = parseCsv(raw);
       const required = ['code','name','clientId'];
       for (const col of required) if (!headers.includes(col)) return res.status(400).json({ error: `Missing required column: ${col}` });

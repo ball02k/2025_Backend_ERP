@@ -45,6 +45,33 @@ module.exports = (prisma) => {
     });
     return { headers, rows: data };
   }
+  async function readRawBuffer(req) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+      req.on('end', () => resolve(Buffer.concat(chunks)));
+      req.on('error', reject);
+    });
+  }
+  async function getCsvTextFromRequest(req) {
+    const ct = String(req.headers['content-type'] || '').toLowerCase();
+    if (ct.startsWith('multipart/form-data')) {
+      const m = /boundary=([^;]+)\b/.exec(ct);
+      if (!m) return (await readRawBody(req));
+      const boundary = '--' + m[1];
+      const raw = await readRawBuffer(req);
+      const text = raw.toString('utf8');
+      const parts = text.split(boundary).filter((p) => p.trim() && p.indexOf('\r\n\r\n') !== -1);
+      if (!parts.length) return '';
+      const seg = parts[0];
+      const splitAt = seg.indexOf('\r\n\r\n');
+      if (splitAt === -1) return '';
+      let body = seg.slice(splitAt + 4);
+      body = body.replace(/\r?\n--$/,'').replace(/\r?\n$/,'');
+      return body;
+    }
+    return (await readRawBody(req));
+  }
 
   // GET /api/clients
   router.get('/', async (req, res) => {
@@ -127,7 +154,7 @@ module.exports = (prisma) => {
   // POST /api/clients/csv/import
   router.post('/csv/import', async (req, res) => {
     try {
-      const raw = await readRawBody(req);
+      const raw = await getCsvTextFromRequest(req);
       const { headers, rows } = parseCsv(raw);
       const required = ['name'];
       for (const col of required) if (!headers.includes(col)) return res.status(400).json({ error: `Missing required column: ${col}` });
