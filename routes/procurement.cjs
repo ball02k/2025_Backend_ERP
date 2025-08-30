@@ -46,6 +46,55 @@ async function attachSupplierInfo(rows, tenantId) {
   return Array.isArray(rows) ? rows.map(decorate) : decorate(rows);
 }
 
+// --- Fuzzy matching utilities (no external deps) ---
+function normName(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[.,']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\b(ltd|limited|plc|inc|co|company|llc|l\.l\.c\.)\b/g, '')
+    .trim();
+}
+
+function levenshtein(a, b) {
+  a = a || ''; b = b || '';
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = i - 1;
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+function similarity(a, b) {
+  const na = normName(a); const nb = normName(b);
+  if (!na && !nb) return 1;
+  const d = levenshtein(na, nb);
+  const maxLen = Math.max(na.length, nb.length) || 1;
+  return 1 - d / maxLen;
+}
+
+function topSuggestions(targetName, suppliers, topN = 5) {
+  const results = suppliers.map((s) => ({
+    supplierId: s.id,
+    name: s.name,
+    distance: levenshtein(normName(targetName), normName(s.name)),
+    score: similarity(targetName, s.name),
+  }));
+  results.sort((a, b) => b.score - a.score || a.distance - b.distance);
+  return results.slice(0, topN);
+}
+
 // List POs
 router.get('/pos', async (req, res, next) => {
   try {
@@ -371,6 +420,57 @@ router.post('/pos/bulk-map-suppliers', async (req, res, next) => {
 });
 
 module.exports = router;
+// Preview mapping suggestions for a specific project (read-only)
+router.get('/pos/bulk-map-suppliers-preview', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const projectId = Number(req.query.projectId);
+    const topN = Number(req.query.topN) || 5;
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'projectId is required' });
+
+    // Membership enforcement
+    req.query.projectId = String(projectId);
+    await new Promise((resolve, reject) => requireProjectMember(req, res, (err) => err ? reject(err) : resolve()));
+
+    const [suppliers, pos] = await Promise.all([
+      prisma.supplier.findMany({ where: { tenantId }, select: { id: true, name: true } }),
+      prisma.purchaseOrder.findMany({
+        where: { tenantId, projectId, supplierId: null },
+        select: { id: true, supplier: true },
+      }),
+    ]);
+
+    const uniques = Array.from(new Set(pos.map((p) => String(p.supplier || '').trim()).filter(Boolean)));
+    const suggestions = uniques.map((name) => ({
+      name,
+      normalized: normName(name),
+      suggestions: topSuggestions(name, suppliers, topN),
+    }));
+    res.json({ projectId, totalUnmappedPOs: pos.length, uniques: uniques.length, suggestions });
+  } catch (e) { next(e); }
+});
+
+// Admin-only: tenant-wide preview of mapping suggestions (read-only)
+router.get('/pos/bulk-map-suppliers-preview-tenant', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const roles = Array.isArray(req.user?.roles) ? req.user.roles.map((r) => String(r).toLowerCase()) : [];
+    if (!roles.includes('admin')) return res.status(403).json({ error: 'ADMIN_ONLY' });
+    const topN = Number(req.query.topN) || 5;
+
+    const [suppliers, pos] = await Promise.all([
+      prisma.supplier.findMany({ where: { tenantId }, select: { id: true, name: true } }),
+      prisma.purchaseOrder.findMany({ where: { tenantId, supplierId: null }, select: { id: true, supplier: true } }),
+    ]);
+    const uniques = Array.from(new Set(pos.map((p) => String(p.supplier || '').trim()).filter(Boolean)));
+    const suggestions = uniques.map((name) => ({
+      name,
+      normalized: normName(name),
+      suggestions: topSuggestions(name, suppliers, topN),
+    }));
+    res.json({ totalUnmappedPOs: pos.length, uniques: uniques.length, suggestions });
+  } catch (e) { next(e); }
+});
 // Admin-only: bulk map supplier names to supplierId across the tenant
 router.post('/pos/bulk-map-suppliers-tenant', async (req, res, next) => {
   try {
