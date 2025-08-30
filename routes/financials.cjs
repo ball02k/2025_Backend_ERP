@@ -603,6 +603,7 @@ router.get('/:projectId/cvr/:period', async (req, res) => {
         trend,
         updatedAt,
       },
+      meta: { includeVarInValue, limit },
     });
   } catch (e) {
     console.error(e);
