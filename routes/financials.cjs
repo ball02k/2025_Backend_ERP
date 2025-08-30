@@ -469,6 +469,7 @@ router.get('/:projectId/cvr/:period', async (req, res) => {
     // await ensureMember(req, projectId);
 
     const wherePeriod = { tenantId, projectId, periodMonth: period };
+    const includeVarInValue = String(req.query.includeVarInValue ?? 'true').toLowerCase() !== 'false';
     // Variation impact window
     const [year, month] = period.split('-').map((x) => Number(x));
     const periodStart = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
@@ -500,7 +501,7 @@ router.get('/:projectId/cvr/:period', async (req, res) => {
     const forecastsTotal = sum(forecasts, (r) => r.amount || 0);
 
     const variationsImpactTotal = Number(varAgg._sum.value || 0);
-    const value = budgetsTotal + variationsImpactTotal; // include approved variation impact in value baseline
+    const value = budgetsTotal + (includeVarInValue ? variationsImpactTotal : 0);
     const cost = commitmentsTotal + actualsTotal; // committed + spent
     const marginPct = value > 0 ? Number((((value - cost) / value) * 100).toFixed(2)) : null;
     const erosionPct = budgetsTotal > 0 ? Number(((((commitmentsTotal + actualsTotal) - budgetsTotal) / budgetsTotal) * 100).toFixed(2)) : null;
@@ -568,7 +569,7 @@ router.get('/:projectId/cvr/:period', async (req, res) => {
       const a = Number(at._sum.amount || 0);
       const f = Number(ft._sum.amount || 0);
       const vImp = Number(vt._sum.value || 0);
-      const v = b + vImp;
+      const v = b + (includeVarInValue ? vImp : 0);
       const costP = c + a;
       trend.push({ period: p, budgets: b, commitments: c, actuals: a, forecasts: f, variationsImpact: vImp, value: v, cost: costP, marginPct: safePct(v - costP, v) });
     }
