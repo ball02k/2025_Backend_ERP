@@ -21,13 +21,38 @@ async function adjustSnapshot(projectId, tenantId, field, delta) {
   }
 }
 
+async function resolveSupplierIdByName(tenantId, maybeName) {
+  const name = (maybeName || '').trim();
+  if (!name) return null;
+  const s = await prisma.supplier.findFirst({
+    where: { tenantId, name: { equals: name, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  return s?.id || null;
+}
+
+async function attachSupplierInfo(rows, tenantId) {
+  const list = Array.isArray(rows) ? rows : rows ? [rows] : [];
+  const ids = Array.from(
+    new Set(list.map((r) => r.supplierId).filter((v) => Number.isFinite(Number(v))))
+  );
+  if (!ids.length) return rows;
+  const suppliers = await prisma.supplier.findMany({
+    where: { tenantId, id: { in: ids } },
+    select: { id: true, name: true, status: true, performanceScore: true },
+  });
+  const map = new Map(suppliers.map((s) => [s.id, s]));
+  const decorate = (r) => ({ ...r, supplierInfo: r.supplierId ? map.get(r.supplierId) || null : null });
+  return Array.isArray(rows) ? rows.map(decorate) : decorate(rows);
+}
+
 // List POs
 router.get('/pos', async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const { projectId } = req.query;
     const where = { tenantId, ...(projectId ? { projectId: Number(projectId) } : {}) };
-    const rows = await prisma.purchaseOrder.findMany({
+    const rowsRaw = await prisma.purchaseOrder.findMany({
       where,
       include: {
         lines: true,
@@ -36,6 +61,7 @@ router.get('/pos', async (req, res, next) => {
         project: { select: { id: true, name: true } },
       },
     });
+    const rows = await attachSupplierInfo(rowsRaw, tenantId);
     res.json(rows);
   } catch (e) { next(e); }
 });
@@ -45,7 +71,7 @@ router.get('/pos/:id', async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const id = Number(req.params.id);
-    const row = await prisma.purchaseOrder.findFirst({
+    const rowRaw = await prisma.purchaseOrder.findFirst({
       where: { id, tenantId },
       include: {
         lines: true,
@@ -54,7 +80,8 @@ router.get('/pos/:id', async (req, res, next) => {
         project: { select: { id: true, name: true } },
       },
     });
-    if (!row) return res.status(404).json({ error: 'Not found' });
+    if (!rowRaw) return res.status(404).json({ error: 'Not found' });
+    const row = await attachSupplierInfo(rowRaw, tenantId);
     res.json(row);
   } catch (e) { next(e); }
 });
@@ -64,10 +91,16 @@ router.post('/pos', requireProjectMember, async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const { lines = [], ...data } = req.body;
-  const created = await prisma.purchaseOrder.create({
+  // Supplier resolution: prefer supplierId; fallback to supplierName/supplier string
+  let supplierId = data.supplierId;
+  if (!supplierId && data.supplierName) supplierId = await resolveSupplierIdByName(tenantId, data.supplierName);
+  if (!supplierId && data.supplier) supplierId = await resolveSupplierIdByName(tenantId, data.supplier);
+
+  const createdRaw = await prisma.purchaseOrder.create({
     data: {
       ...data,
       tenantId,
+      ...(supplierId ? { supplierId: Number(supplierId) } : {}),
       ...(data.orderDate ? { orderDate: new Date(data.orderDate) } : {}),
       total: data.total !== undefined ? dec(data.total) : undefined,
       lines: {
@@ -88,6 +121,7 @@ router.post('/pos', requireProjectMember, async (req, res, next) => {
       project: { select: { id: true, name: true } },
     },
   });
+    const created = await attachSupplierInfo(createdRaw, tenantId);
     if (created.status === 'Open') {
       await adjustSnapshot(created.projectId, tenantId, 'procurementPOsOpen', 1);
     }
@@ -126,10 +160,16 @@ router.put('/pos/:id', async (req, res, next) => {
           })),
         });
       }
+      // Supplier resolution on update
+      let supplierId = data.supplierId;
+      if (!supplierId && data.supplierName) supplierId = await resolveSupplierIdByName(tenantId, data.supplierName);
+      if (!supplierId && data.supplier) supplierId = await resolveSupplierIdByName(tenantId, data.supplier);
+
       await tx.purchaseOrder.updateMany({
         where: { id, tenantId },
         data: {
           ...data,
+          ...(supplierId ? { supplierId: Number(supplierId) } : {}),
           ...(data.orderDate ? { orderDate: new Date(data.orderDate) } : {}),
           ...(data.total !== undefined ? { total: dec(data.total) } : {}),
         },
@@ -144,6 +184,7 @@ router.put('/pos/:id', async (req, res, next) => {
         },
       });
     });
+    const updatedWithSupplier = await attachSupplierInfo(updated, tenantId);
 
     if (existing.status === 'Open' && updated.status !== 'Open') {
       await adjustSnapshot(existing.projectId, tenantId, 'procurementPOsOpen', -1);
@@ -158,7 +199,7 @@ router.put('/pos/:id', async (req, res, next) => {
       await adjustSnapshot(updated.projectId, tenantId, 'procurementPOsOpen', 1);
     }
 
-    res.json(updated);
+    res.json(updatedWithSupplier);
   } catch (e) { next(e); }
 });
 
