@@ -175,6 +175,7 @@ model Project {
   forecasts   Forecast[]
 
   @@index([tenantId, status])
+  @@index([tenantId, name])
 }
 
 model Task {
@@ -200,6 +201,7 @@ model Task {
   @@index([tenantId, projectId])
   @@index([tenantId, projectId, status])
   @@index([projectId, dueDate])
+  @@index([tenantId, title])
 }
 
 model Contact {
@@ -291,6 +293,8 @@ model Variation {
   @@index([tenantId, projectId, status, updatedAt])
   @@index([createdAt])
   @@index([updatedAt])
+  @@index([tenantId, title])
+  @@index([tenantId, reference])
 }
 
 model VariationLine {

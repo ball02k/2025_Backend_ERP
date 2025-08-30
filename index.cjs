@@ -26,6 +26,7 @@ const rolesRouter = require('./routes/roles.cjs');
 const financialsRouter = require('./routes/financials.cjs');
 const onboardingRouter = require('./routes/onboarding.cjs');
 const suppliersRouter = require('./routes/suppliers.cjs');
+const searchRouter = require('./routes/search.cjs');
 const homeRoutes = require('./routes/home.cjs');
 const { attachUser } = require('./middleware/auth.cjs');
 const requireAuth = require('./middleware/requireAuth.cjs');
@@ -91,6 +92,7 @@ app.use('/api/onboarding', requireAuth, onboardingRouter);
 app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
 app.use('/api/financials', requireAuth, financialsRouter);
 app.use('/api/suppliers', requireAuth, suppliersRouter);
+app.use('/api/search', requireAuth, searchRouter);
 app.use('/api', homeRoutes(prisma, { requireAuth }));
 
 if (process.env.NODE_ENV !== 'production' || process.env.DEV_AUTH_BYPASS === 'true') {
