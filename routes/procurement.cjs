@@ -371,3 +371,74 @@ router.post('/pos/bulk-map-suppliers', async (req, res, next) => {
 });
 
 module.exports = router;
+// Admin-only: bulk map supplier names to supplierId across the tenant
+router.post('/pos/bulk-map-suppliers-tenant', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const roles = Array.isArray(req.user?.roles) ? req.user.roles.map((r) => String(r).toLowerCase()) : [];
+    if (!roles.includes('admin')) return res.status(403).json({ error: 'ADMIN_ONLY' });
+
+    const { dryRun = false, supplierMap } = req.body || {};
+
+    // Build explicit overrides map
+    const explicitMap = new Map();
+    if (supplierMap && typeof supplierMap === 'object') {
+      for (const [k, v] of Object.entries(supplierMap)) {
+        if (k && Number.isFinite(Number(v))) explicitMap.set(String(k).toLowerCase(), Number(v));
+      }
+    }
+
+    const [suppliers, pos] = await Promise.all([
+      prisma.supplier.findMany({ where: { tenantId }, select: { id: true, name: true } }),
+      prisma.purchaseOrder.findMany({
+        where: { tenantId, supplierId: null },
+        select: { id: true, supplier: true },
+      }),
+    ]);
+
+    const supplierMapCI = new Map(
+      suppliers.map((s) => [String(s.name || '').trim().toLowerCase(), s.id])
+    );
+
+    const groups = new Map(); // supplierId -> names matched
+    const unmatchedNames = new Set();
+    for (const po of pos) {
+      const nameKey = String(po.supplier || '').trim().toLowerCase();
+      if (!nameKey) { unmatchedNames.add(''); continue; }
+      const sid = explicitMap.get(nameKey) ?? supplierMapCI.get(nameKey) ?? null;
+      if (sid) {
+        if (!groups.has(sid)) groups.set(sid, new Set());
+        groups.get(sid).add(nameKey);
+      } else {
+        unmatchedNames.add(nameKey);
+      }
+    }
+
+    const updates = [];
+    let updatedCount = 0;
+    if (!dryRun) {
+      for (const [sid, namesSet] of groups.entries()) {
+        const names = Array.from(namesSet);
+        const result = await prisma.purchaseOrder.updateMany({
+          where: {
+            tenantId,
+            supplierId: null,
+            supplier: { in: names, mode: 'insensitive' },
+          },
+          data: { supplierId: Number(sid) },
+        });
+        updatedCount += result.count;
+        updates.push({ supplierId: sid, names, count: result.count });
+      }
+    }
+
+    res.json({
+      totalUnmappedPOs: pos.length,
+      matchedGroups: Array.from(groups.entries()).map(([sid, s]) => ({ supplierId: sid, names: Array.from(s) })),
+      unmatchedNames: Array.from(unmatchedNames).filter(Boolean).sort(),
+      updatedCount,
+      updates,
+      dryRun: !!dryRun,
+    });
+  } catch (e) { next(e); }
+});
