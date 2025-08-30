@@ -515,6 +515,7 @@ router.get('/:projectId/cvr/:period', async (req, res) => {
       prelims: { total: prelimsTotal },
       programmeSpend: { total: actualsTotal },
       retentions,
+      variationsImpact,
     };
     const qsView = {
       budgets: { total: budgetsTotal },
