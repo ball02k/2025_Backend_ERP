@@ -27,6 +27,8 @@ const financialsRouter = require('./routes/financials.cjs');
 const onboardingRouter = require('./routes/onboarding.cjs');
 const suppliersRouter = require('./routes/suppliers.cjs');
 const searchRouter = require('./routes/search.cjs');
+const requestsRouter = require('./routes/requests.cjs');
+const spmRouter = require('./routes/spm.cjs');
 const homeRoutes = require('./routes/home.cjs');
 const { attachUser } = require('./middleware/auth.cjs');
 const requireAuth = require('./middleware/requireAuth.cjs');
@@ -92,6 +94,8 @@ app.use('/api/onboarding', requireAuth, onboardingRouter);
 app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
 app.use('/api/financials', requireAuth, financialsRouter);
 app.use('/api/suppliers', requireAuth, suppliersRouter);
+app.use('/api/requests', requireAuth, requestsRouter);
+app.use('/api/spm', requireAuth, spmRouter);
 app.use('/api/search', requireAuth, searchRouter);
 app.use('/api', homeRoutes(prisma, { requireAuth }));
 
@@ -175,6 +179,9 @@ function startServer(port, allowRetry) {
 
 // Only auto-retry when no explicit PORT is set and not production
 const allowRetry = !EXPLICIT_PORT && process.env.NODE_ENV !== 'production';
-startServer(INITIAL_PORT, allowRetry);
+// Avoid binding to a port during Jest tests
+if (process.env.JEST_WORKER_ID == null) {
+  startServer(INITIAL_PORT, allowRetry);
+}
 
 module.exports = app;

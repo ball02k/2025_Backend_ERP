@@ -46,18 +46,18 @@ model OnboardingInvite {
 }
 
 model OnboardingResponse {
-  id         Int      @id @default(autoincrement())
-  tenantId   String
-  projectId  Int
-  supplierId Int
-  formId     Int
-  answers    Json
-  files      Json?
-  status     String   @default("in_progress")
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  supplierId  Int?      // link to Supplier when approved
+  formId      Int
+  answers     Json
+  files       Json?
+  status      String     @default("in_progress")
   submittedAt DateTime?
-  reviewedBy Int?
-  reviewedAt DateTime?
-  decision   String?
+  reviewedBy  Int?
+  reviewedAt  DateTime?
+  decision    String?
 
   @@index([tenantId, projectId, supplierId, status])
 }
@@ -572,6 +572,136 @@ model Delivery {
 
   @@index([tenantId, poId])
   @@index([poId, expectedAt])
+}
+
+// RFx / Tendering
+model Request {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  title       String
+  type        String    @default("RFP")
+  status      String    @default("draft")
+  deadline    DateTime?
+  stage       Int       @default(1)
+  totalStages Int       @default(1)
+  weighting   Json?
+  addenda     String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([tenantId, status, deadline])
+}
+
+model RequestSection {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  requestId Int
+  title     String
+  weight    Decimal?
+  order     Int
+
+  @@index([tenantId, requestId])
+}
+
+model RequestQuestion {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  requestId Int
+  sectionId Int
+  qType     String
+  prompt    String
+  required  Boolean  @default(false)
+  options   Json?
+  weight    Decimal?
+  calc      Json?
+  order     Int
+}
+
+model RequestInvite {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  requestId  Int
+  supplierId Int
+  email      String
+  status     String   @default("invited")
+  respondedAt DateTime?
+
+  @@index([tenantId, requestId, status])
+}
+
+model RequestResponse {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  requestId  Int
+  supplierId Int
+  stage      Int
+  answers    Json
+  files      Json?
+  submittedAt DateTime?
+  score      Decimal?
+  status     String   @default("in_progress")
+
+  @@index([tenantId, requestId, supplierId, stage])
+}
+
+model RequestQna {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  requestId  Int
+  supplierId Int?
+  question   String
+  answer     String?
+  attachments Json?
+  createdAt  DateTime @default(now())
+  answeredAt DateTime?
+}
+
+model AwardDecision {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  requestId  Int
+  supplierId Int
+  decision   String   @default("pending")
+  reason     String?
+  decidedBy  Int?
+  decidedAt  DateTime?
+
+  @@index([tenantId, requestId, decision])
+}
+
+// Supplier Performance Management (SPM)
+model SpmTemplate {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  name       String
+  categories Json?
+  kpis       Json?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
+model SpmScorecard {
+  id           Int      @id @default(autoincrement())
+  tenantId     String
+  supplierId   Int
+  templateId   Int
+  periodMonth  String
+  status       String   @default("open")
+  totalScore   Decimal?
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId, supplierId, periodMonth])
+}
+
+model SpmScore {
+  id          Int     @id @default(autoincrement())
+  tenantId    String
+  scorecardId Int
+  category    String
+  kpi         String
+  weight      Decimal
+  value       Decimal?
+  comment     String?
 }
 
 model BudgetLine {

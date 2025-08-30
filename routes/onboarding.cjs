@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireProjectMember } = require('../middleware/membership.cjs');
 const { prisma } = require('../utils/prisma.cjs');
+const { upsertSupplierForOnboarding } = require('../services/suppliers.cjs');
 const crypto = require('crypto');
 
 function isPMorQS(req) {
@@ -239,10 +240,39 @@ router.patch('/responses/:id/review', requireProjectMember, async (req, res) => 
     const existing = await prisma.onboardingResponse.findFirst({ where: { id, tenantId } });
     if (!existing) return res.status(404).json({ error: 'Response not found' });
 
+    // If approved and no supplier linked yet, upsert and link a Supplier
+    let supplierId = existing.supplierId || null;
+    if (String(decision) === 'approved' && !supplierId) {
+      const answers = existing.answers || {};
+      const profile = {
+        name: answers.companyName || answers.supplierName || 'Unnamed Supplier',
+        companyRegNo: answers.companyRegNo || answers.companyNumber || null,
+        vatNo: answers.vatNo || answers.vatNumber || null,
+      };
+      const emails = Array.isArray(answers.emails)
+        ? answers.emails
+        : answers.primaryEmail
+        ? [answers.primaryEmail]
+        : [];
+      try {
+        const sup = await upsertSupplierForOnboarding({ tenantId, profile, emails });
+        supplierId = sup.id;
+      } catch (e) {
+        // Fail the review if we cannot link/create a supplier
+        return res.status(500).json({ error: 'SUPPLIER_LINK_FAILED' });
+      }
+    }
+
     const updated = await prisma.onboardingResponse.update({
       where: { id },
       data: {
-        status: decision === 'approved' ? 'approved' : (decision === 'declined' ? 'declined' : existing.status),
+        supplierId: supplierId,
+        status:
+          decision === 'approved'
+            ? 'approved'
+            : decision === 'declined'
+            ? 'declined'
+            : existing.status,
         decision: String(decision),
         reviewedBy: Number(req.user.id),
         reviewedAt: new Date(),
@@ -250,7 +280,7 @@ router.patch('/responses/:id/review', requireProjectMember, async (req, res) => 
         ...(notes ? { answers: { ...(existing.answers || {}), _reviewNotes: String(notes) } } : {}),
       },
     });
-    res.json(updated);
+    res.json({ data: updated, linkedSupplierId: supplierId || null, note: notes ? String(notes) : null });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to review response' });

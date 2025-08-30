@@ -15,6 +15,9 @@ describe('Clients CRUD', () => {
       .expect(201);
     expect(res.body).toMatchObject({ name: 'Test Client Ltd', companyRegNo: 'TC123' });
     clientId = res.body.id;
+    // Link a project to satisfy tenant-scoped update/delete guards in routes/clients.js
+    const code = 'C-' + Math.floor(Math.random() * 1e9);
+    await prisma.project.create({ data: { code, name: 'Client Link', clientId } });
   });
 
   test('GET /api/clients lists clients', async () => {
