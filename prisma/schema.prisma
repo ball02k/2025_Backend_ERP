@@ -576,6 +576,7 @@ model BudgetLine {
   projectId   Int
   code        String?
   category    String?
+  periodMonth String?
   description String?
   amount      Decimal  @default(0)
   createdAt   DateTime @default(now())
@@ -584,6 +585,7 @@ model BudgetLine {
   project Project @relation(fields: [projectId], references: [id])
 
   @@index([tenantId, projectId])
+  @@index([tenantId, projectId, periodMonth])
 }
 
 model Commitment {
@@ -594,6 +596,8 @@ model Commitment {
   ref         String?
   supplier    String?
   description String?
+  category    String?
+  periodMonth String?
   amount      Decimal  @default(0)
   status      String   @default("Open")
   createdAt   DateTime @default(now())
@@ -602,6 +606,7 @@ model Commitment {
   project Project @relation(fields: [projectId], references: [id])
 
   @@index([tenantId, projectId, status])
+  @@index([tenantId, projectId, periodMonth])
 }
 
 model ActualCost {
@@ -611,14 +616,17 @@ model ActualCost {
   ref         String?
   supplier    String?
   description String?
+  category    String?
   amount      Decimal  @default(0)
   incurredAt  DateTime @default(now())
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  periodMonth String?
 
   project Project @relation(fields: [projectId], references: [id])
 
   @@index([tenantId, projectId, incurredAt])
+  @@index([tenantId, projectId, periodMonth])
 }
 
 model Forecast {
@@ -626,6 +634,7 @@ model Forecast {
   tenantId    String   @default("demo")
   projectId   Int
   period      String
+  periodMonth String?
   description String?
   amount      Decimal  @default(0)
   createdAt   DateTime @default(now())
@@ -635,4 +644,5 @@ model Forecast {
 
   @@unique([tenantId, projectId, period])
   @@index([tenantId, projectId])
+  @@index([tenantId, projectId, periodMonth])
 }

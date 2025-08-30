@@ -421,3 +421,153 @@ router.delete('/forecasts/:id', async (req, res) => {
 });
 
 module.exports = router;
+// ---------- Periods & CVR ----------
+function safePct(n, d) { if (!d || Number(d) === 0) return null; return Number(((Number(n) / Number(d)) * 100).toFixed(2)); }
+function sum(arr, f) { return (arr || []).reduce((t, x) => t + Number(f ? f(x) : x), 0); }
+function toYYYYMM(d) {
+  const dt = d instanceof Date ? d : (d ? new Date(d) : null);
+  if (!dt || isNaN(dt)) return null;
+  const y = dt.getUTCFullYear();
+  const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+router.get('/:projectId/periods', async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'projectId required' });
+    // Optional membership on read by policy; enforce if needed
+    // await ensureMember(req, projectId);
+
+    const [bl, cm, ac, fc] = await Promise.all([
+      prisma.budgetLine.findMany({ where: { tenantId, projectId }, select: { periodMonth: true } }),
+      prisma.commitment.findMany({ where: { tenantId, projectId }, select: { periodMonth: true } }),
+      prisma.actualCost.findMany({ where: { tenantId, projectId }, select: { periodMonth: true, incurredAt: true } }),
+      prisma.forecast.findMany({ where: { tenantId, projectId }, select: { periodMonth: true, period: true } }),
+    ]);
+    const set = new Set();
+    for (const r of bl) if (r.periodMonth) set.add(r.periodMonth);
+    for (const r of cm) if (r.periodMonth) set.add(r.periodMonth);
+    for (const r of ac) set.add(r.periodMonth || toYYYYMM(r.incurredAt));
+    for (const r of fc) set.add(r.periodMonth || r.period);
+    const periods = Array.from(set).filter(Boolean).sort();
+    res.json({ data: { periods, latest: periods[periods.length - 1] || null } });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to list periods' });
+  }
+});
+
+router.get('/:projectId/cvr/:period', async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+    const period = String(req.params.period);
+    if (!Number.isFinite(projectId) || !period) return res.status(400).json({ error: 'projectId and period required' });
+    // Optional membership on read by policy; enforce if needed
+    // await ensureMember(req, projectId);
+
+    const wherePeriod = { tenantId, projectId, periodMonth: period };
+    const [budgets, commitments, actuals, forecasts] = await Promise.all([
+      prisma.budgetLine.findMany({ where: wherePeriod, select: { id: true, category: true, amount: true } }),
+      prisma.commitment.findMany({ where: wherePeriod, select: { id: true, category: true, amount: true, status: true } }),
+      prisma.actualCost.findMany({ where: wherePeriod, select: { id: true, category: true, amount: true } }),
+      prisma.forecast.findMany({ where: wherePeriod, select: { id: true, description: true, amount: true } }),
+    ]);
+
+    const budgetsTotal = sum(budgets, (r) => r.amount || 0);
+    const commitmentsTotal = sum(commitments, (r) => r.amount || 0);
+    const actualsTotal = sum(actuals, (r) => r.amount || 0);
+    const forecastsTotal = sum(forecasts, (r) => r.amount || 0);
+
+    const value = budgetsTotal; // treating budgets as value baseline for the period
+    const cost = commitmentsTotal + actualsTotal; // committed + spent
+    const marginPct = value > 0 ? Number((((value - cost) / value) * 100).toFixed(2)) : null;
+    const erosionPct = budgetsTotal > 0 ? Number(((((commitmentsTotal + actualsTotal) - budgetsTotal) / budgetsTotal) * 100).toFixed(2)) : null;
+
+    // PM/QS specific views (placeholders where data not modeled yet)
+    const prelims = budgets.filter((r) => (r.category || '').toLowerCase().includes('prelim'));
+    const prelimsTotal = sum(prelims, (r) => r.amount || 0);
+    const retentions = null; // not modeled yet
+    const variationsImpact = null; // placeholder until variation-to-financial mapping added
+
+    const pmView = {
+      prelims: { total: prelimsTotal },
+      programmeSpend: { total: actualsTotal },
+      retentions,
+    };
+    const qsView = {
+      budgets: { total: budgetsTotal },
+      commitments: { total: commitmentsTotal },
+      actuals: { total: actualsTotal },
+      forecasts: { total: forecastsTotal },
+      variationsImpact,
+    };
+
+    // Trend: build over all known periods for this project
+    const [allPeriodsRes] = await Promise.all([
+      prisma.$queryRaw`SELECT DISTINCT period FROM (
+        SELECT COALESCE("periodMonth", to_char("createdAt", 'YYYY-MM')) AS period FROM "public"."BudgetLine" WHERE "tenantId" = ${tenantId} AND "projectId" = ${projectId}
+        UNION
+        SELECT COALESCE("periodMonth", to_char("createdAt", 'YYYY-MM')) AS period FROM "public"."Commitment" WHERE "tenantId" = ${tenantId} AND "projectId" = ${projectId}
+        UNION
+        SELECT COALESCE("periodMonth", to_char("incurredAt", 'YYYY-MM')) AS period FROM "public"."ActualCost" WHERE "tenantId" = ${tenantId} AND "projectId" = ${projectId}
+        UNION
+        SELECT COALESCE("periodMonth", "period") AS period FROM "public"."Forecast" WHERE "tenantId" = ${tenantId} AND "projectId" = ${projectId}
+      ) t WHERE period IS NOT NULL ORDER BY period ASC;`
+    ]);
+    const allPeriods = (allPeriodsRes || []).map((r) => r.period);
+
+    // Aggregate per period
+    const trend = [];
+    for (const p of allPeriods) {
+      const [bt, ct, at, ft] = await Promise.all([
+        prisma.budgetLine.aggregate({ _sum: { amount: true }, where: { tenantId, projectId, periodMonth: p } }),
+        prisma.commitment.aggregate({ _sum: { amount: true }, where: { tenantId, projectId, periodMonth: p } }),
+        prisma.actualCost.aggregate({ _sum: { amount: true }, where: { tenantId, projectId, periodMonth: p } }),
+        prisma.forecast.aggregate({ _sum: { amount: true }, where: { tenantId, projectId, periodMonth: p } }),
+      ]);
+      const b = Number(bt._sum.amount || 0);
+      const c = Number(ct._sum.amount || 0);
+      const a = Number(at._sum.amount || 0);
+      const f = Number(ft._sum.amount || 0);
+      const v = b;
+      const costP = c + a;
+      trend.push({ period: p, budgets: b, commitments: c, actuals: a, forecasts: f, value: v, cost: costP, marginPct: safePct(v - costP, v) });
+    }
+
+    // updatedAt from latest among sources for this period
+    const [u1, u2, u3, u4] = await Promise.all([
+      prisma.budgetLine.findFirst({ where: wherePeriod, orderBy: { updatedAt: 'desc' }, select: { updatedAt: true } }),
+      prisma.commitment.findFirst({ where: wherePeriod, orderBy: { updatedAt: 'desc' }, select: { updatedAt: true } }),
+      prisma.actualCost.findFirst({ where: wherePeriod, orderBy: { updatedAt: 'desc' }, select: { updatedAt: true } }),
+      prisma.forecast.findFirst({ where: wherePeriod, orderBy: { updatedAt: 'desc' }, select: { updatedAt: true } }),
+    ]);
+    const updatedAt = [u1?.updatedAt, u2?.updatedAt, u3?.updatedAt, u4?.updatedAt].filter(Boolean).sort().pop() || null;
+
+    res.json({
+      data: {
+        value,
+        cost,
+        marginPct,
+        erosionPct,
+        breakdown: {
+          budgets: { total: budgetsTotal, items: budgets },
+          commitments: { total: commitmentsTotal, items: commitments },
+          actuals: { total: actualsTotal, items: actuals },
+          forecasts: { total: forecastsTotal, items: forecasts },
+          prelims: { total: prelimsTotal },
+          retentions,
+          variationsImpact,
+        },
+        pmView,
+        qsView,
+        trend,
+        updatedAt,
+      },
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to compute CVR' });
+  }
+});
