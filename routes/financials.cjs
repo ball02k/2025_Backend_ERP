@@ -463,16 +463,35 @@ router.get('/:projectId/cvr/:period', async (req, res) => {
     const tenantId = req.user.tenantId;
     const projectId = Number(req.params.projectId);
     const period = String(req.params.period);
+    const limit = Number.isFinite(Number(req.query.limit)) ? Number(req.query.limit) : 12;
     if (!Number.isFinite(projectId) || !period) return res.status(400).json({ error: 'projectId and period required' });
     // Optional membership on read by policy; enforce if needed
     // await ensureMember(req, projectId);
 
     const wherePeriod = { tenantId, projectId, periodMonth: period };
-    const [budgets, commitments, actuals, forecasts] = await Promise.all([
+    // Variation impact window
+    const [year, month] = period.split('-').map((x) => Number(x));
+    const periodStart = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+    const periodEnd = new Date(Date.UTC(year, month, 1, 0, 0, 0));
+    const statusesApproved = ['approved', 'implemented'];
+
+    const [budgets, commitments, actuals, forecasts, varAgg] = await Promise.all([
       prisma.budgetLine.findMany({ where: wherePeriod, select: { id: true, category: true, amount: true } }),
       prisma.commitment.findMany({ where: wherePeriod, select: { id: true, category: true, amount: true, status: true } }),
       prisma.actualCost.findMany({ where: wherePeriod, select: { id: true, category: true, amount: true } }),
       prisma.forecast.findMany({ where: wherePeriod, select: { id: true, description: true, amount: true } }),
+      prisma.variation.aggregate({
+        _sum: { value: true },
+        where: {
+          tenantId,
+          projectId,
+          status: { in: statusesApproved },
+          OR: [
+            { approvedDate: { gte: periodStart, lt: periodEnd } },
+            { decisionDate: { gte: periodStart, lt: periodEnd } },
+          ],
+        },
+      }),
     ]);
 
     const budgetsTotal = sum(budgets, (r) => r.amount || 0);
@@ -480,7 +499,8 @@ router.get('/:projectId/cvr/:period', async (req, res) => {
     const actualsTotal = sum(actuals, (r) => r.amount || 0);
     const forecastsTotal = sum(forecasts, (r) => r.amount || 0);
 
-    const value = budgetsTotal; // treating budgets as value baseline for the period
+    const variationsImpactTotal = Number(varAgg._sum.value || 0);
+    const value = budgetsTotal + variationsImpactTotal; // include approved variation impact in value baseline
     const cost = commitmentsTotal + actualsTotal; // committed + spent
     const marginPct = value > 0 ? Number((((value - cost) / value) * 100).toFixed(2)) : null;
     const erosionPct = budgetsTotal > 0 ? Number(((((commitmentsTotal + actualsTotal) - budgetsTotal) / budgetsTotal) * 100).toFixed(2)) : null;
@@ -489,7 +509,7 @@ router.get('/:projectId/cvr/:period', async (req, res) => {
     const prelims = budgets.filter((r) => (r.category || '').toLowerCase().includes('prelim'));
     const prelimsTotal = sum(prelims, (r) => r.amount || 0);
     const retentions = null; // not modeled yet
-    const variationsImpact = null; // placeholder until variation-to-financial mapping added
+    const variationsImpact = { total: variationsImpactTotal };
 
     const pmView = {
       prelims: { total: prelimsTotal },
@@ -517,23 +537,39 @@ router.get('/:projectId/cvr/:period', async (req, res) => {
       ) t WHERE period IS NOT NULL ORDER BY period ASC;`
     ]);
     const allPeriods = (allPeriodsRes || []).map((r) => r.period);
+    const periodsLimited = (Number.isFinite(limit) && limit > 0) ? allPeriods.slice(-limit) : allPeriods;
 
     // Aggregate per period
     const trend = [];
-    for (const p of allPeriods) {
-      const [bt, ct, at, ft] = await Promise.all([
+    for (const p of periodsLimited) {
+      const ps = new Date(p + '-01T00:00:00Z');
+      const pe = new Date(Date.UTC(ps.getUTCFullYear(), ps.getUTCMonth() + 1, 1));
+      const [bt, ct, at, ft, vt] = await Promise.all([
         prisma.budgetLine.aggregate({ _sum: { amount: true }, where: { tenantId, projectId, periodMonth: p } }),
         prisma.commitment.aggregate({ _sum: { amount: true }, where: { tenantId, projectId, periodMonth: p } }),
         prisma.actualCost.aggregate({ _sum: { amount: true }, where: { tenantId, projectId, periodMonth: p } }),
         prisma.forecast.aggregate({ _sum: { amount: true }, where: { tenantId, projectId, periodMonth: p } }),
+        prisma.variation.aggregate({
+          _sum: { value: true },
+          where: {
+            tenantId,
+            projectId,
+            status: { in: statusesApproved },
+            OR: [
+              { approvedDate: { gte: ps, lt: pe } },
+              { decisionDate: { gte: ps, lt: pe } },
+            ],
+          },
+        }),
       ]);
       const b = Number(bt._sum.amount || 0);
       const c = Number(ct._sum.amount || 0);
       const a = Number(at._sum.amount || 0);
       const f = Number(ft._sum.amount || 0);
-      const v = b;
+      const vImp = Number(vt._sum.value || 0);
+      const v = b + vImp;
       const costP = c + a;
-      trend.push({ period: p, budgets: b, commitments: c, actuals: a, forecasts: f, value: v, cost: costP, marginPct: safePct(v - costP, v) });
+      trend.push({ period: p, budgets: b, commitments: c, actuals: a, forecasts: f, variationsImpact: vImp, value: v, cost: costP, marginPct: safePct(v - costP, v) });
     }
 
     // updatedAt from latest among sources for this period
