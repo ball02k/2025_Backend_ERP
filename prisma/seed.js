@@ -47,6 +47,7 @@ async function run() {
     where: { code: 'DEMO-ACTIVE' },
     update: {},
     create: {
+      id: 1,
       code: 'DEMO-ACTIVE',
       name: 'Active Demo Project',
       tenantId: tId,
@@ -59,8 +60,8 @@ async function run() {
   // Ensure dev user is member of active project
   await prisma.projectMembership.upsert({
     where: { tenantId_projectId_userId: { tenantId: tId, projectId: activeProject.id, userId: user.id } },
-    update: {},
-    create: { tenantId: tId, projectId: activeProject.id, userId: user.id, role: 'Member' },
+    update: { role: 'PM' },
+    create: { tenantId: tId, projectId: activeProject.id, userId: user.id, role: 'PM' },
   });
 
   // Seed a variation (new schema)
