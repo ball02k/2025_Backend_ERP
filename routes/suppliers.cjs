@@ -8,7 +8,7 @@ const { prisma } = require('../utils/prisma.cjs');
 router.get('/', async (req, res, next) => {
   try {
     const tenantId = req.user.tenantId;
-    const { q, status, limit = 20, offset = 0, approved, capability } = req.query;
+    const { q, status, approved, capability } = req.query;
     const where = { tenantId };
 
     if (status) where.status = String(status);
@@ -20,10 +20,7 @@ router.get('/', async (req, res, next) => {
         .map((s) => s.trim())
         .filter(Boolean);
       if (tags.length) {
-        where.AND = where.AND || [];
-        for (const tag of tags) {
-          where.AND.push({ capabilities: { some: { tag } } });
-        }
+        where.capabilities = { some: { tag: { in: tags } } };
       }
     }
 
@@ -36,18 +33,26 @@ router.get('/', async (req, res, next) => {
       ];
     }
 
-    const [total, rows] = await Promise.all([
-      prisma.supplier.count({ where }),
-      prisma.supplier.findMany({
-        where,
-        take: Number(limit),
-        skip: Number(offset),
-        orderBy: [{ name: 'asc' }],
-        include: { capabilities: true },
-      }),
-    ]);
+    const rows = await prisma.supplier.findMany({
+      where,
+      orderBy: [{ name: 'asc' }],
+      include: { capabilities: true },
+    });
 
-    res.json({ total, rows });
+    const data = rows.map((s) => ({
+      id: s.id,
+      name: s.name,
+      capabilityTags: s.capabilities.map((c) => c.tag),
+      insuranceValid: s.insuranceExpiry ? new Date(s.insuranceExpiry) > new Date() : false,
+      accreditations: s.hsAccreditations
+        ? String(s.hsAccreditations)
+            .split(',')
+            .map((a) => a.trim())
+            .filter(Boolean)
+        : [],
+    }));
+
+    res.json({ data });
   } catch (err) {
     next(err);
   }
