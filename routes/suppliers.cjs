@@ -8,10 +8,25 @@ const { prisma } = require('../utils/prisma.cjs');
 router.get('/', async (req, res, next) => {
   try {
     const tenantId = req.user.tenantId;
-    const { q, status, limit = 20, offset = 0 } = req.query;
+    const { q, status, limit = 20, offset = 0, approved, capability } = req.query;
     const where = { tenantId };
 
     if (status) where.status = String(status);
+    if (approved === 'true') where.status = 'approved';
+
+    if (capability) {
+      const tags = String(capability)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (tags.length) {
+        where.AND = where.AND || [];
+        for (const tag of tags) {
+          where.AND.push({ capabilities: { some: { tag } } });
+        }
+      }
+    }
+
     if (q) {
       const term = String(q);
       where.OR = [
@@ -28,6 +43,7 @@ router.get('/', async (req, res, next) => {
         take: Number(limit),
         skip: Number(offset),
         orderBy: [{ name: 'asc' }],
+        include: { capabilities: true },
       }),
     ]);
 
