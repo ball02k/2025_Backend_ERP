@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "b4ce734"
+    "version": "bb2b78d"
   },
   "paths": {
     "*": {
@@ -19,6 +19,28 @@
     "/health,/api/health": {
       "get": {
         "summary": "GET /health,/api/health",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//?/i/api/__catalog/hash": {
+      "get": {
+        "summary": "GET //?/i/api/__catalog/hash",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//?/i/api/__delta": {
+      "get": {
+        "summary": "GET //?/i/api/__delta",
         "parameters": [],
         "responses": {
           "200": {
