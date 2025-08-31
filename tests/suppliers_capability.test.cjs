@@ -36,8 +36,9 @@ describe('Supplier capability filter', () => {
     const res = await request(app)
       .get('/api/suppliers?approved=true&capability=Civils,Rail')
       .expect(200);
-    expect(res.body.rows).toHaveLength(1);
-    expect(res.body.rows[0].name).toBe('Sup1');
+    expect(res.body.data).toHaveLength(2);
+    const names = res.body.data.map((s) => s.name).sort();
+    expect(names).toEqual(['Sup1', 'Sup2']);
   });
 });
 

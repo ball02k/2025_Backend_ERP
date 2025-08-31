@@ -1,8 +1,8 @@
 # API Catalog
 
-Generated: 2025-08-31T16:10:47.383Z (UTC) / Sunday, 31 August 2025 at 17:10:47 BST (Europe/London)
+Generated: 2025-08-31T17:20:20.991Z (UTC) / Sunday, 31 August 2025 at 18:20:21 BST (Europe/London)
 
-Commit: ad473af
+Commit: 4f7cda6
 
 ## Reminders
 
@@ -32,21 +32,21 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Path params: none
 - Lint: Missing requireAuth; Missing tenant scoping
 
-### GET /api/__catalog/hash
+### GET //?/i/api/__catalog/hash
 
-- Middlewares: requireAuth, <anonymous>
+- Middlewares: <anonymous>
 - Controller: anonymous
-- Auth/Guards: requireAuth
+- Auth/Guards: none
 - Path params: none
-- Lint: Missing tenant scoping
+- Lint: Missing requireAuth; Missing tenant scoping
 
-### GET /api/__delta
+### GET //?/i/api/__delta
 
-- Middlewares: requireAuth, <anonymous>
+- Middlewares: <anonymous>
 - Controller: anonymous
-- Auth/Guards: requireAuth
+- Auth/Guards: none
 - Path params: none
-- Lint: Missing tenant scoping
+- Lint: Missing requireAuth; Missing tenant scoping
 
 ### POST //auth/login
 
