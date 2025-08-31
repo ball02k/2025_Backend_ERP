@@ -1,8 +1,8 @@
 # API Catalog
 
-Generated: 2025-08-31T19:53:23.544Z (UTC) / Sunday, 31 August 2025 at 20:53:23 BST (Europe/London)
+Generated: 2025-08-31T20:41:39.326Z (UTC) / Sunday, 31 August 2025 at 21:41:39 BST (Europe/London)
 
-Commit: cfbb6e7
+Commit: 76f39dd
 
 ## Reminders
 
@@ -280,9 +280,17 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Path params: id
 - Lint: Missing requireAuth
 
-### GET //api/projects/:id/members
+### DELETE //api/projects/:id
 
 - Middlewares: requireProjectMember, <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/projects/:id/members
+
+- Middlewares: <anonymous>
 - Controller: anonymous
 - Auth/Guards: none
 - Path params: id
@@ -290,21 +298,21 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 
 ### POST //api/projects/:id/members
 
-- Middlewares: requireProjectMember, <anonymous>
+- Middlewares: <anonymous>
 - Controller: anonymous
 - Auth/Guards: none
 - Path params: id
 - Lint: Missing requireAuth
 
-### DELETE //api/projects/:id/members/:userId
+### DELETE //api/projects/:id/members/:memberId
 
-- Middlewares: requireProjectMember, <anonymous>
+- Middlewares: <anonymous>
 - Controller: anonymous
 - Auth/Guards: none
-- Path params: id, userId
+- Path params: id, memberId
 - Lint: Missing requireAuth
 
-### DELETE //api/projects/:id
+### GET //api/projects/:id/alerts
 
 - Middlewares: requireProjectMember, <anonymous>
 - Controller: anonymous
@@ -742,6 +750,14 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Controller: anonymous
 - Auth/Guards: none
 - Path params: none
+- Lint: Missing requireAuth
+
+### POST //api/financials/:projectId/adjustments
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: projectId
 - Lint: Missing requireAuth
 
 ### GET //api/financials/budgets
@@ -1358,7 +1374,7 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Controller: anonymous
 - Auth/Guards: none
 - Path params: projectId
-- Lint: Missing requireAuth
+- Lint: Missing requireAuth; Missing tenant scoping
 
 ### GET //api/dev-token
 

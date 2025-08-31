@@ -188,7 +188,7 @@ module.exports = (prisma) => {
       const required = ['projectId','title','statusId'];
       for (const col of required) if (!headers.includes(col)) return res.status(400).json({ error: `Missing required column: ${col}` });
 
-      let imported = 0, updated = 0, skipped = 0; const skippedRows = [];
+      let imported = 0, updated = 0, skipped = 0; const skippedRows = []; const projectIds = new Set();
       for (let idx = 0; idx < rows.length; idx++) {
         const r = rows[idx];
         const projectId = Number(r.projectId);
@@ -220,9 +220,13 @@ module.exports = (prisma) => {
             await prisma.task.create({ data });
             imported++;
           }
+          projectIds.add(projectId);
         } catch (e) {
           skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'ERROR:' + (e.code || e.message || 'UNKNOWN') });
         }
+      }
+      for (const pid of projectIds) {
+        try { await recomputeProjectSnapshot(prisma, { projectId: pid }); } catch (e) { console.warn('snapshot import failed', e?.message || e); }
       }
       res.json({ imported, updated, skipped, skippedRows });
     } catch (err) {
@@ -285,7 +289,11 @@ module.exports = (prisma) => {
           statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
         },
       });
-      try { await recomputeProjectSnapshot(Number(created.projectId), tenantId); } catch (e) { console.warn('snapshot create failed', e?.message || e); }
+      try {
+        await recomputeProjectSnapshot(prisma, { projectId: created.projectId });
+      } catch (e) {
+        console.warn('snapshot create failed', e?.message || e);
+      }
       res.status(201).json(created);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed', details: err.errors });
@@ -339,7 +347,11 @@ module.exports = (prisma) => {
           statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
         },
       });
-      try { await recomputeProjectSnapshot(Number(updated.projectId), tenantId); } catch (e) { console.warn('snapshot update failed', e?.message || e); }
+      try {
+        await recomputeProjectSnapshot(prisma, { projectId: updated.projectId });
+      } catch (e) {
+        console.warn('snapshot update failed', e?.message || e);
+      }
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed', details: err.errors });
@@ -362,7 +374,11 @@ module.exports = (prisma) => {
         return res.status(403).json({ error: 'NOT_A_PROJECT_MEMBER' });
       }
       await prisma.task.updateMany({ where: { id, tenantId }, data: { deletedAt: new Date() } });
-      try { await recomputeProjectSnapshot(Number(existing.projectId), tenantId); } catch (e) { console.warn('snapshot delete failed', e?.message || e); }
+      try {
+        await recomputeProjectSnapshot(prisma, { projectId: existing.projectId });
+      } catch (e) {
+        console.warn('snapshot delete failed', e?.message || e);
+      }
       res.status(204).end();
     } catch (err) {
       console.error(err);

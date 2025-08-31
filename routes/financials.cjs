@@ -44,6 +44,23 @@ router.get('/', async (req, res) => {
   }
 });
 
+// POST /api/financials/:projectId/adjustments
+router.post('/:projectId/adjustments', async (req, res) => {
+  const tenantId = req.user?.tenantId;
+  const roles = Array.isArray(req.user?.roles) ? req.user.roles : (req.user?.role ? [req.user.role] : []);
+  if (!roles.some(r => ['admin','pm','qs'].includes(String(r)))) return res.status(403).json({ error: 'FORBIDDEN' });
+
+  const projectId = Number(req.params.projectId);
+  const { name, amount } = req.body || {};
+  if (!Number.isFinite(projectId) || !name || typeof amount !== 'number') return res.status(400).json({ error: 'Invalid payload' });
+
+  const proj = await prisma.project.findFirst({ where: { id: projectId, tenantId, deletedAt: null } });
+  if (!proj) return res.status(400).json({ error: 'Invalid projectId' });
+
+  const item = await prisma.financialItem.create({ data: { tenantId, projectId, name, amount } });
+  res.status(201).json(item);
+});
+
 // ---------- BudgetLine ----------
 router.get('/budgets', async (req, res) => {
   try {
