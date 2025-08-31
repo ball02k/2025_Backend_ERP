@@ -213,6 +213,8 @@ const tasksPath = path.join(__dirname, '..', 'routes', 'tasks.js');
 const variationsPath = path.join(__dirname, '..', 'routes', 'variations.cjs');
 const procurementPath = path.join(__dirname, '..', 'routes', 'procurement.cjs');
 const tasksContent = read(tasksPath);
+const projectsPath = path.join(__dirname, '..', 'routes', 'projects.js');
+const projectsContent = read(projectsPath);
 add(
   'ROUTES',
   (routeExists(tasksContent, "router.post('/") || routeExists(tasksContent, "router.put('/") || routeExists(tasksContent, "router.delete('/")) ? checkImport(tasksPath) : true,
@@ -313,6 +315,41 @@ add(
   /res\.json\({\s*project[\s\S]*widgets[\s\S]*quickLinks/.test(overviewContent),
   'projects_overview.cjs returns project/widgets/quickLinks',
   `${overviewPath}: res.json({ project, widgets: ..., quickLinks: ... })`
+);
+
+// Summary endpoints checks
+add(
+  'ROUTES',
+  /router\.get\(['"]\/summary['"]/.test(tasksContent),
+  'tasks.js has GET /summary endpoint',
+  `${tasksPath}: add router.get('/summary', ...)`
+);
+add(
+  'ROUTES',
+  /router\.get\(['"]\/summary['"]/.test(projectsContent),
+  'projects.js has GET /summary endpoint',
+  `${projectsPath}: add router.get('/summary', ...)`
+);
+
+// Variations CSV routes present
+const variationsContent2 = read(variationsPath);
+add(
+  'ROUTES',
+  /router\.get\(['"]\/csv\/template['"]/.test(variationsContent2),
+  'variations.cjs has GET /csv/template',
+  `${variationsPath}: add router.get('/csv/template', ...)`
+);
+add(
+  'ROUTES',
+  /router\.get\(['"]\/csv\/export['"]/.test(variationsContent2),
+  'variations.cjs has GET /csv/export',
+  `${variationsPath}: add router.get('/csv/export', ...)`
+);
+add(
+  'ROUTES',
+  /router\.post\(['"]\/csv\/import['"]/.test(variationsContent2),
+  'variations.cjs has POST /csv/import',
+  `${variationsPath}: add router.post('/csv/import', ...)`
 );
 
 // Dev login route should be dev-only

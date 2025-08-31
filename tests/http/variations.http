@@ -57,3 +57,21 @@ DELETE http://localhost:3001/api/variations/{{variationId}}
 Authorization: Bearer {{token}}
 X-Tenant-Id: demo
 
+### CSV template
+GET http://localhost:3001/api/variations/csv/template
+Authorization: Bearer {{token}}
+X-Tenant-Id: demo
+
+### CSV export (optional project filter)
+GET http://localhost:3001/api/variations/csv/export?projectId={{projectId}}
+Authorization: Bearer {{token}}
+X-Tenant-Id: demo
+
+### CSV import (raw CSV body)
+POST http://localhost:3001/api/variations/csv/import
+Authorization: Bearer {{token}}
+Content-Type: text/csv
+X-Tenant-Id: demo
+
+projectId,title,reference,contractType,type,status,reason,submissionDate,decisionDate,value,costImpact,timeImpactDays,notes
+{{projectId}},"Spec change A",CE-200,NEC4,compensation_event,submitted,"Client instruction",2025-08-01,,2500.00,2000.00,2,"Batch import"
