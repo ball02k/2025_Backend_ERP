@@ -104,6 +104,20 @@ async function run() {
     create: { tenantId: tId, poId: po.id, expectedAt: new Date() },
   });
 
+  // Seed supplier capabilities
+  const capabilitySupplier = await prisma.supplier.upsert({
+    where: { name: 'Capability Supplier' },
+    update: {},
+    create: { tenantId: tId, name: 'Capability Supplier', status: 'approved' },
+  });
+  await prisma.supplierCapability.createMany({
+    data: [
+      { tenantId: tId, supplierId: capabilitySupplier.id, tag: 'Civils' },
+      { tenantId: tId, supplierId: capabilitySupplier.id, tag: 'M&E' },
+    ],
+    skipDuplicates: true,
+  });
+
   await prisma.project.upsert({
     where: { code: 'DEMO-CLOSED' },
     update: {},

@@ -507,8 +507,20 @@ model Supplier {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  capabilities SupplierCapability[]
+
   @@index([tenantId, name])
   @@index([tenantId, status])
+}
+
+model SupplierCapability {
+  id         Int    @id @default(autoincrement())
+  supplierId Int
+  tag        String
+  tenantId   String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([tenantId, supplierId, tag])
 }
 
 model ProjectMembership {
