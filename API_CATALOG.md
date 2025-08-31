@@ -1146,11 +1146,10 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 
 ### POST //api/requests/:id/award
 
-- Middlewares: <anonymous>
+- Middlewares: requirePerm('procurement:award')
 - Controller: anonymous
-- Auth/Guards: none
+- Auth/Guards: requireAuth
 - Path params: id
-- Lint: Missing requireAuth
 
 ### POST //api/requests/:id/create-po
 

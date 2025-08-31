@@ -5,7 +5,7 @@ const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
 const pkg = require('./package.json');
 const { logError } = require('./utils/errors.cjs');
-const { getCatalogHash } = require('./utils/apiCatalog.cjs');
+const { getCatalogHash, getDeltaPrompt } = require('./utils/apiCatalog.cjs');
 const devDeltaRoutes = require('./routes/dev_delta.cjs');
 
 // BigInt JSON patch
@@ -18,6 +18,7 @@ const prisma = new PrismaClient();
 const TENANT_DEFAULT = process.env.TENANT_DEFAULT || 'demo';
 
 console.log('[API Catalog] hash:', getCatalogHash());
+console.log(getDeltaPrompt());
 
 
 const variationsRouter = require('./routes/variations.cjs');

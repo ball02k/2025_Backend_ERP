@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { prisma, Prisma } = require('../utils/prisma.cjs');
 const { computeRequestScore } = require('../services/rfx_scoring.cjs');
+const { requirePerm } = require('../middleware/checkPermission.cjs');
 
 function toInt(v) {
   const n = Number(v);
@@ -625,7 +626,7 @@ router.post('/:id/score/:supplierId', async (req, res, next) => {
 });
 
 // ---- Award / Decline ----
-router.post('/:id/award', async (req, res, next) => {
+router.post('/:id/award', requirePerm('procurement:award'), async (req, res, next) => {
   try {
     const tenantId = req.user.tenantId;
     const requestId = toInt(req.params.id);
