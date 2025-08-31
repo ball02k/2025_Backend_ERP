@@ -1,8 +1,8 @@
 # API Catalog
 
-Generated: 2025-08-31T17:20:20.991Z (UTC) / Sunday, 31 August 2025 at 18:20:21 BST (Europe/London)
+Generated: 2025-08-31T18:35:05.943Z (UTC) / Sunday, 31 August 2025 at 19:35:05 BST (Europe/London)
 
-Commit: 4f7cda6
+Commit: bb2b78d
 
 ## Reminders
 
@@ -1146,10 +1146,11 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 
 ### POST //api/requests/:id/award
 
-- Middlewares: requirePerm('procurement:award')
+- Middlewares: <anonymous>, <anonymous>
 - Controller: anonymous
-- Auth/Guards: requireAuth
+- Auth/Guards: none
 - Path params: id
+- Lint: Missing requireAuth
 
 ### POST //api/requests/:id/create-po
 
