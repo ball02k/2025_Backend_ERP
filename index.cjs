@@ -7,6 +7,8 @@ const pkg = require('./package.json');
 const { logError } = require('./utils/errors.cjs');
 const { getCatalogHash, getDeltaPrompt } = require('./utils/apiCatalog.cjs');
 const devDeltaRoutes = require('./routes/dev_delta.cjs');
+const path = require('path');
+const fs = require('fs');
 
 // BigInt JSON patch
 BigInt.prototype.toJSON = function () {
@@ -84,6 +86,14 @@ const INITIAL_PORT = EXPLICIT_PORT || DEFAULT_PORT;
 app.get(['/health', '/api/health'], (_req, res) =>
   res.json({ ok: true, version: pkg.version, time: new Date().toISOString() })
 );
+
+// Serve OpenAPI (light) so FE can fetch it at build time
+app.get('/openapi-lite.json', (req, res) => {
+  const p = path.join(__dirname, 'openapi-lite.json'); // written by scripts/api_inventory.js
+  if (!fs.existsSync(p)) return res.status(404).json({ error: 'openapi-lite.json not found' });
+  res.setHeader('Content-Type', 'application/json');
+  res.send(fs.readFileSync(p, 'utf8'));
+});
 
 
 app.use(devDeltaRoutes);
