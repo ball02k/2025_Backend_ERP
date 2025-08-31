@@ -38,6 +38,7 @@ const homeRoutes = require('./routes/home.cjs');
 const { attachUser } = require('./middleware/auth.cjs');
 const requireAuth = require('./middleware/requireAuth.cjs');
 const devAuth = require('./middleware/devAuth.cjs');
+const devRbac = require('./middleware/devRbac.cjs');
 const authDev = require('./routes/auth.dev.cjs');
 
 // CORS: allow Vite dev servers and handle preflight
@@ -66,6 +67,8 @@ app.use(morgan('dev'));
 app.use(attachUser);
 // In dev, allow bypass to attach a demo user when no token is provided
 app.use(devAuth); // must be before routes that use requireAuth
+// DEV-ONLY RBAC helper to ensure admin role and project membership
+app.use(devRbac);
 
 // Make BigInt values JSON-safe (Node can't stringify BigInt)
 // If you prefer string IDs, swap Number(value) for value.toString()
