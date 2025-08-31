@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "bb2b78d"
+    "version": "4906d5c"
   },
   "paths": {
     "*": {
@@ -19,6 +19,17 @@
     "/health,/api/health": {
       "get": {
         "summary": "GET /health,/api/health",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/openapi-lite.json": {
+      "get": {
+        "summary": "GET /openapi-lite.json",
         "parameters": [],
         "responses": {
           "200": {
