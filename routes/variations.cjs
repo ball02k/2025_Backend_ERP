@@ -234,11 +234,11 @@ router.post('/csv/import', async (req, res) => {
           if (!exists) { skipped++; skippedRows.push({ rowIndex, reason: 'VARIATION_NOT_FOUND' }); continue; }
           await prisma.variation.update({ where: { id }, data });
           updated++;
-          try { await recomputeProjectSnapshot(projectId, tenantId); } catch {}
+          try { await recomputeProjectSnapshot(prisma, { projectId }); } catch {}
         } else {
           await prisma.variation.create({ data });
           imported++;
-          try { await recomputeProjectSnapshot(projectId, tenantId); } catch {}
+          try { await recomputeProjectSnapshot(prisma, { projectId }); } catch {}
         }
       } catch (e) {
         skipped++; skippedRows.push({ rowIndex, reason: 'ERROR:' + (e.code || e.message || 'UNKNOWN') });
@@ -344,7 +344,7 @@ router.post("/", requireProjectMember, async (req, res) => {
       include: { lines: true },
     });
 
-    await recomputeProjectSnapshot(Number(created.projectId), tenantId);
+    await recomputeProjectSnapshot(prisma, { projectId: Number(created.projectId) });
     res.status(201).json({ data: created });
   } catch (err) {
     console.error(err);
@@ -433,9 +433,9 @@ router.put("/:id", async (req, res, next) => {
       return upd;
     });
 
-    await recomputeProjectSnapshot(Number(updated.projectId), tenantId);
+    await recomputeProjectSnapshot(prisma, { projectId: Number(updated.projectId) });
     if (updated.projectId !== existing.projectId) {
-      await recomputeProjectSnapshot(Number(existing.projectId), tenantId);
+      await recomputeProjectSnapshot(prisma, { projectId: Number(existing.projectId) });
     }
 
     res.json({ data: updated });
@@ -487,7 +487,7 @@ router.patch("/:id/status",
 
       if (!updated) return res.status(404).json({ error: "Not found" });
 
-      await recomputeProjectSnapshot(Number(updated.projectId), tenantId);
+      await recomputeProjectSnapshot(prisma, { projectId: Number(updated.projectId) });
       return res.json({ data: updated });
     } catch (err) {
       console.error(err);
@@ -531,7 +531,7 @@ router.delete("/:id",
       const result = await prisma.variation.deleteMany({ where: { id, tenantId } });
       if (result.count === 0) return res.status(404).json({ error: "Not found" });
 
-      await recomputeProjectSnapshot(Number(existing.projectId), tenantId);
+      await recomputeProjectSnapshot(prisma, { projectId: Number(existing.projectId) });
       return res.json({ data: existing });
     } catch (err) {
       console.error(err);

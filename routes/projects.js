@@ -371,8 +371,8 @@ module.exports = (prisma) => {
         const tp = await prisma.projectType.findFirst({ where: { id: body.typeId } });
         if (!tp) return res.status(400).json({ error: 'Invalid typeId' });
       }
-      if (body.projectManagerId) {
-        const pm = await prisma.user.findFirst({ where: { id: body.projectManagerId, tenantId } });
+      if (body.projectManagerId !== undefined) {
+        const pm = await prisma.user.findFirst({ where: { id: Number(body.projectManagerId), tenantId } });
         if (!pm) return res.status(400).json({ error: 'Invalid projectManagerId' });
       }
 
@@ -427,10 +427,10 @@ module.exports = (prisma) => {
         const tp = await prisma.projectType.findFirst({ where: { id: body.typeId } });
         if (!tp) return res.status(400).json({ error: 'Invalid typeId' });
       }
-      if (body.projectManagerId) {
-        const pm = await prisma.user.findFirst({ where: { id: body.projectManagerId, tenantId } });
-        if (!pm) return res.status(400).json({ error: 'Invalid projectManagerId' });
-      }
+        if (body.projectManagerId !== undefined) {
+          const pm = await prisma.user.findFirst({ where: { id: Number(body.projectManagerId), tenantId } });
+          if (!pm) return res.status(400).json({ error: 'Invalid projectManagerId' });
+        }
 
       const updated = await prisma.project.update({
         where: { id },
@@ -439,7 +439,7 @@ module.exports = (prisma) => {
           ...(body.name !== undefined ? { name: body.name } : {}),
           ...(body.description !== undefined ? { description: body.description } : {}),
           ...(body.clientId !== undefined ? { clientId: body.clientId } : {}),
-          ...(body.projectManagerId !== undefined ? { projectManagerId: body.projectManagerId } : {}),
+            ...(body.projectManagerId !== undefined ? { projectManagerId: Number(body.projectManagerId) } : {}),
           ...(body.statusId !== undefined ? { statusId: body.statusId } : {}),
           ...(body.typeId !== undefined ? { typeId: body.typeId } : {}),
           ...(body.budget !== undefined ? { budget: body.budget } : {}),
@@ -458,89 +458,6 @@ module.exports = (prisma) => {
       if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed', details: err.errors });
       console.error(err);
       res.status(500).json({ error: err.message || 'Failed to update project' });
-    }
-  });
-
-  const membershipBody = z.object({
-    userId: z.number().int(),
-    role: z.string().trim().min(1),
-  });
-
-  router.get('/:id/members', requireProjectMember, async (req, res) => {
-    try {
-      const tenantId = req.user && req.user.tenantId;
-      const projectId = Number(req.params.id);
-      if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'Invalid id' });
-      const members = await prisma.projectMembership.findMany({
-        where: { tenantId, projectId },
-        select: { id: true, userId: true, role: true, user: { select: { id: true, name: true, email: true } } },
-      });
-      res.json({ members });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Failed to list members' });
-    }
-  });
-
-  router.post('/:id/members', requireProjectMember, async (req, res) => {
-    try {
-      const tenantId = req.user && req.user.tenantId;
-      const projectId = Number(req.params.id);
-      if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'Invalid id' });
-      const body = membershipBody.parse(req.body);
-
-      const roles = Array.isArray(req.user?.roles)
-        ? req.user.roles
-        : req.user?.role
-        ? [req.user.role]
-        : [];
-      const isAdmin = roles.includes('admin');
-      const allowed = new Set(['admin', 'pm']);
-      if (!isAdmin && !(req.membership && allowed.has(req.membership.role))) {
-        return res.status(403).json({ error: 'FORBIDDEN' });
-      }
-
-      const user = await prisma.user.findFirst({ where: { id: body.userId, tenantId } });
-      if (!user) return res.status(400).json({ error: 'Invalid userId' });
-
-      const existing = await prisma.projectMembership.findFirst({ where: { tenantId, projectId, userId: body.userId } });
-      if (existing) return res.status(400).json({ error: 'ALREADY_MEMBER' });
-
-      const member = await prisma.projectMembership.create({
-        data: { tenantId, projectId, userId: body.userId, role: body.role },
-        select: { id: true, userId: true, role: true, user: { select: { id: true, name: true, email: true } } },
-      });
-      res.status(201).json(member);
-    } catch (err) {
-      if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed', details: err.errors });
-      console.error(err);
-      res.status(500).json({ error: 'Failed to add member' });
-    }
-  });
-
-  router.delete('/:id/members/:userId', requireProjectMember, async (req, res) => {
-    try {
-      const tenantId = req.user && req.user.tenantId;
-      const projectId = Number(req.params.id);
-      const userId = Number(req.params.userId);
-      if (!Number.isFinite(projectId) || !Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid id' });
-
-      const roles = Array.isArray(req.user?.roles)
-        ? req.user.roles
-        : req.user?.role
-        ? [req.user.role]
-        : [];
-      const isAdmin = roles.includes('admin');
-      const allowed = new Set(['admin', 'pm']);
-      if (!isAdmin && !(req.membership && allowed.has(req.membership.role))) {
-        return res.status(403).json({ error: 'FORBIDDEN' });
-      }
-
-      await prisma.projectMembership.deleteMany({ where: { tenantId, projectId, userId } });
-      res.status(204).end();
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Failed to remove member' });
     }
   });
 

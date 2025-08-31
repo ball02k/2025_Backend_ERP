@@ -1,7 +1,10 @@
-const { prisma } = require("../utils/prisma.cjs");
+const { prisma: globalPrisma } = require("../utils/prisma.cjs");
 
-async function recomputeProjectSnapshot(projectId, tenantId) {
-  // Variations
+async function recomputeProjectSnapshot(prisma, { projectId }) {
+  const proj = await prisma.project.findUnique({ where: { id: projectId }, select: { tenantId: true } });
+  if (!proj) return;
+  const tenantId = proj.tenantId;
+
   const statusesApproved = ["approved", "implemented"];
   const statusesPending = ["proposed", "in_review"];
   const [totalAll, varApproved, varPending, varApprovedValue] = await Promise.all([
@@ -15,7 +18,6 @@ async function recomputeProjectSnapshot(projectId, tenantId) {
   ]);
   const varDraft = Math.max(totalAll - varApproved - varPending, 0);
 
-  // Tasks
   const now = new Date();
   const weekFromNow = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
   const [tasksOverdue, tasksDueThisWeek, openTasks, totalTasks] = await Promise.all([
@@ -58,8 +60,8 @@ async function recomputeProjectSnapshot(projectId, tenantId) {
 async function recomputeProcurement(projectId, tenantId) {
   const now = new Date();
   const [posOpen, criticalLate] = await Promise.all([
-    prisma.purchaseOrder.count({ where: { projectId, tenantId, status: "Open" } }),
-    prisma.delivery.count({
+    globalPrisma.purchaseOrder.count({ where: { projectId, tenantId, status: "Open" } }),
+    globalPrisma.delivery.count({
       where: {
         po: { projectId, tenantId },
         expectedAt: { lt: now },
@@ -67,7 +69,7 @@ async function recomputeProcurement(projectId, tenantId) {
       },
     }),
   ]);
-  await prisma.projectSnapshot.upsert({
+  await globalPrisma.projectSnapshot.upsert({
     where: { projectId },
     update: {
       tenantId,
@@ -88,19 +90,19 @@ async function recomputeFinancials(projectId, tenantId) {
   const now = new Date();
 
   const [budget, committed, actual, forecast] = await Promise.all([
-    prisma.budgetLine.aggregate({
+    globalPrisma.budgetLine.aggregate({
       _sum: { amount: true },
       where: { tenantId, projectId },
     }),
-    prisma.commitment.aggregate({
+    globalPrisma.commitment.aggregate({
       _sum: { amount: true },
       where: { tenantId, projectId, status: "Open" },
     }),
-    prisma.actualCost.aggregate({
+    globalPrisma.actualCost.aggregate({
       _sum: { amount: true },
       where: { tenantId, projectId },
     }),
-    prisma.forecast.aggregate({
+    globalPrisma.forecast.aggregate({
       _sum: { amount: true },
       where: { tenantId, projectId },
     }),
@@ -113,7 +115,7 @@ async function recomputeFinancials(projectId, tenantId) {
     forecast: forecast._sum.amount ?? 0,
   };
 
-  await prisma.projectSnapshot.updateMany({
+  await globalPrisma.projectSnapshot.updateMany({
     where: { tenantId, projectId },
     data: {
       financialBudget: sums.budget,

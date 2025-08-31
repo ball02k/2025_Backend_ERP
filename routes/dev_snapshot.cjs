@@ -8,9 +8,8 @@ function getTenantId(req) { return (req.user && req.user.tenantId) || "demo"; }
 
 router.post("/recompute/:projectId", async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
     const projectId = Number(req.params.projectId);
-    await recomputeProjectSnapshot(projectId, tenantId);
+    await recomputeProjectSnapshot(prisma, { projectId });
     const snap = await prisma.projectSnapshot.findUnique({ where: { projectId } });
     res.json({ ok: true, snapshot: snap });
   } catch (e) {

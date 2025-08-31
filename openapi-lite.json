@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "e52b728"
+    "version": "76f39dd"
   },
   "paths": {
     "*": {
@@ -495,9 +495,9 @@
         }
       }
     },
-    "//api/projects/{id}/members/{userId}": {
+    "//api/projects/{id}/members/{memberId}": {
       "delete": {
-        "summary": "DELETE //api/projects/:id/members/:userId",
+        "summary": "DELETE //api/projects/:id/members/:memberId",
         "parameters": [
           {
             "name": "id",
@@ -508,7 +508,27 @@
             }
           },
           {
-            "name": "userId",
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/projects/{id}/alerts": {
+      "get": {
+        "summary": "GET //api/projects/:id/alerts",
+        "parameters": [
+          {
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {
@@ -1264,6 +1284,26 @@
       "get": {
         "summary": "GET //api/financials",
         "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/financials/{projectId}/adjustments": {
+      "post": {
+        "summary": "POST //api/financials/:projectId/adjustments",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
