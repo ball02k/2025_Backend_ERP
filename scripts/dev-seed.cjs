@@ -26,6 +26,8 @@ const { cascadeDeleteProjects } = require('./dev-utils/cascade.cjs');
     { title:'Site survey', status:'in_progress', due:'2025-09-01', projectCode:'P-001' },
     { title:'Steel delivery', status:'overdue', due:'2025-08-15', projectCode:'P-002' },
     { title:'Planning consent', status:'done', due:'2025-07-30', projectCode:'P-003' },
+    { title:'Design review', status:'in_progress', due:'2025-08-01', projectCode:'P-001' },
+    { title:'Groundworks complete', status:'overdue', due:'2025-07-01', projectCode:'P-001' },
   ];
 
   // --- SAFER CLEANUP START ---
@@ -95,10 +97,44 @@ const { cascadeDeleteProjects } = require('./dev-utils/cascade.cjs');
     create: { tenantId: TENANT, userId: devUser.id, roleId: adminRole.id },
   });
 
+  const pmUser = await prisma.user.upsert({
+    where: { email: 'pm@demo.local' },
+    update: { tenantId: TENANT, name: 'Demo PM', passwordSHA: sha256('demo1234') },
+    create: { email: 'pm@demo.local', name: 'Demo PM', tenantId: TENANT, passwordSHA: sha256('demo1234') },
+  });
+  const pmRole = await prisma.role.upsert({
+    where: { tenantId_name: { tenantId: TENANT, name: 'pm' } },
+    update: {},
+    create: { tenantId: TENANT, name: 'pm' },
+  });
+  await prisma.userRole.upsert({
+    where: { tenantId_userId_roleId: { tenantId: TENANT, userId: pmUser.id, roleId: pmRole.id } },
+    update: {},
+    create: { tenantId: TENANT, userId: pmUser.id, roleId: pmRole.id },
+  });
+
   // Create projects with status/type by simple strings and tenantId
   const projectMap = {};
+  const statusMap = {};
+  for (const key of projectStatuses) {
+    statusMap[key] = await prisma.projectStatus.findFirst({ where: { tenantId: STATUS_TENANT_ID, key } });
+  }
+  const typeMap = {};
+  for (const key of projectTypes) {
+    typeMap[key] = await prisma.projectType.findFirst({ where: { tenantId: STATUS_TENANT_ID, key } });
+  }
+
   for (const p of DEMO_PROJECTS) {
     const client = clientMap[p.clientName];
+    const extra = p.code === 'P-001' ? {
+      budget: 200000,
+      actualSpend: 50000,
+      startDate: new Date('2025-01-01'),
+      endDate: new Date('2025-12-31'),
+      projectManagerId: pmUser.id,
+      statusId: statusMap[p.status]?.id,
+      typeId: typeMap[p.type]?.id,
+    } : { statusId: statusMap[p.status]?.id, typeId: typeMap[p.type]?.id };
     const project = await prisma.project.create({
       data:{
         code:p.code,
@@ -106,7 +142,8 @@ const { cascadeDeleteProjects } = require('./dev-utils/cascade.cjs');
         status:p.status,
         type:p.type,
         client:{ connect:{ id: client.id } },
-        tenantId:TENANT
+        tenantId:TENANT,
+        ...extra,
       }
     });
     projectMap[p.code] = project;
@@ -120,6 +157,12 @@ const { cascadeDeleteProjects } = require('./dev-utils/cascade.cjs');
       create: { tenantId: TENANT, projectId: proj.id, userId: devUser.id, role: 'Member' },
     });
   }
+
+  await prisma.projectMembership.upsert({
+    where: { tenantId_projectId_userId: { tenantId: TENANT, projectId: projectMap['P-001'].id, userId: pmUser.id } },
+    update: { role: 'pm' },
+    create: { tenantId: TENANT, projectId: projectMap['P-001'].id, userId: pmUser.id, role: 'pm' },
+  });
 
   // Ensure demo membership for project id 1 (useful for quick /projects/1 checks)
   const p1 = await prisma.project.findFirst({ where: { id: 1 } });

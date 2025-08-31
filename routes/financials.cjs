@@ -15,6 +15,35 @@ async function ensureMember(req, projectId) {
 
 function num(x) { return x == null ? undefined : Number(x); }
 
+router.get('/', async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = num(req.query.projectId);
+    if (!projectId) return res.status(400).json({ error: 'projectId required' });
+    await ensureMember(req, projectId);
+    const where = { tenantId, projectId };
+    const [rows, total] = await Promise.all([
+      prisma.actualCost.findMany({
+        where,
+        orderBy: { incurredAt: 'desc' },
+        select: { id: true, description: true, amount: true, category: true, incurredAt: true },
+      }),
+      prisma.actualCost.count({ where }),
+    ]);
+    const items = rows.map((r) => ({
+      id: r.id,
+      name: r.description,
+      amount: r.amount,
+      category: r.category,
+      date: r.incurredAt,
+    }));
+    res.json({ total, items });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    res.status(500).json({ error: 'Failed to list financials' });
+  }
+});
+
 // ---------- BudgetLine ----------
 router.get('/budgets', async (req, res) => {
   try {

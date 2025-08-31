@@ -87,62 +87,28 @@ async function getCsvTextFromRequest(req) {
 router.get("/", requireProjectMember, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const {
-      projectId,
-      status,
-      type,
-      q,
-      limit = 20,
-      offset = 0,
-    } = req.query;
+    const { projectId, limit = 20, offset = 0 } = req.query;
     if (!projectId) return res.status(400).json({ error: "projectId required" });
     const where = { tenantId, projectId: Number(projectId) };
-    if (status) where.status = String(status);
-    if (type) where.type = String(type);
-    if (q) {
-      where.OR = [
-        { title: { contains: String(q), mode: "insensitive" } },
-        { reference: { contains: String(q), mode: "insensitive" } },
-        { reason: { contains: String(q), mode: "insensitive" } },
-        { notes: { contains: String(q), mode: "insensitive" } },
-      ];
-    }
-
     const [rows, total] = await Promise.all([
       prisma.variation.findMany({
         where,
-        orderBy: { updatedAt: "desc" },
+        orderBy: { createdAt: "desc" },
         skip: Number(offset) || 0,
         take: Number(limit) || 20,
-        select: {
-          id: true,
-          projectId: true,
-          tenantId: true,
-          title: true,
-          reference: true,
-          contractType: true,
-          status: true,
-          type: true,
-          reason: true,
-          submissionDate: true,
-          decisionDate: true,
-          value: true,
-          costImpact: true,
-          timeImpactDays: true,
-          notes: true,
-          createdAt: true,
-          updatedAt: true,
-          // Minimal relation for FE linking
-          project: { select: { id: true, name: true } },
-        },
+        select: { id: true, reference: true, title: true, status: true, value: true, createdAt: true },
       }),
       prisma.variation.count({ where }),
     ]);
-
-    return res.json({
-      data: rows,
-      meta: { total, limit: Number(limit), offset: Number(offset) },
-    });
+    const items = rows.map((r) => ({
+      id: r.id,
+      ref: r.reference,
+      title: r.title,
+      status: r.status,
+      value: r.value,
+      createdAt: r.createdAt,
+    }));
+    res.json({ total, items });
   } catch (err) {
     console.error(err);
     res.status(500).json({

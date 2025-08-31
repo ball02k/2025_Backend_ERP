@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "c0d7d9b"
+    "version": "cfbb6e7"
   },
   "paths": {
     "*": {
@@ -443,6 +443,72 @@
         "parameters": [
           {
             "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/projects/{id}/members": {
+      "get": {
+        "summary": "GET //api/projects/:id/members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //api/projects/:id/members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/projects/{id}/members/{userId}": {
+      "delete": {
+        "summary": "DELETE //api/projects/:id/members/:userId",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "userId",
             "in": "path",
             "required": true,
             "schema": {
@@ -1032,6 +1098,17 @@
         }
       }
     },
+    "//api/procurement": {
+      "get": {
+        "summary": "GET //api/procurement",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "//api/procurement/pos": {
       "get": {
         "summary": "GET //api/procurement/pos",
@@ -1175,6 +1252,17 @@
     "//api/procurement/pos/bulk-map-suppliers-tenant": {
       "post": {
         "summary": "POST //api/procurement/pos/bulk-map-suppliers-tenant",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/financials": {
+      "get": {
+        "summary": "GET //api/financials",
         "parameters": [],
         "responses": {
           "200": {
