@@ -3,13 +3,13 @@ FRONTEND_DELTA_PROMPT
 You are syncing the FRONTEND after backend API changes.
 
 API CHANGES:
-- CHANGED GET /api/suppliers?approved=true&capability=tag1,tag2 → now filters suppliers that match ANY provided capability tags and returns { data: [{ id, name, capabilityTags, insuranceValid, accreditations }] }
+- POST /api/requests/:id/award now requires permission `procurement:award` and returns 403 { error:{ code:'FORBIDDEN', message:'Missing permission: procurement:award' } } when absent.
 
 UPDATE THESE CALLS/COMPONENTS:
-- SupplierFilter.jsx: adjust fetch logic and response handling for new shape
+- Procurement.jsx and RFxCompare.jsx: check user permission before calling award endpoint and handle 403 errors.
 
 TEST UPDATES:
-- Update supplier capability filter tests to expect { data } response and ANY-tag logic
+- Add tests covering missing permission on RFx award.
 
 After applying, bump localStorage.lastSeenCatalogHash to "<CURRENT_HASH>".
 --------------------------------

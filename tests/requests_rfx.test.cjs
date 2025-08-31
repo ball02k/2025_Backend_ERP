@@ -3,6 +3,7 @@ process.env.ENABLE_DEV_AUTH = '1';
 const request = require('supertest');
 const app = require('../index.cjs');
 const { PrismaClient } = require('@prisma/client');
+const { sign } = require('../utils/jwt.cjs');
 
 const prisma = new PrismaClient();
 
@@ -113,6 +114,15 @@ describe('RFx HTTP flow', () => {
     const prev = await request(app).get(`/api/requests/${requestId}/score/${supplierId}/preview?override=1`).expect(200);
     expect(prev.body).toHaveProperty('preview', true);
     expect(prev.body).toHaveProperty('score');
+  });
+
+  test('Award requires procurement:award permission', async () => {
+    const token = sign({ id: 999, tenantId, role: 'QS' }, 'dev_secret');
+    await request(app)
+      .post(`/api/requests/${requestId}/award`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ supplierId })
+      .expect(403);
   });
 });
 
