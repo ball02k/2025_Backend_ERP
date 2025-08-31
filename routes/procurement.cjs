@@ -46,6 +46,39 @@ async function attachSupplierInfo(rows, tenantId) {
   return Array.isArray(rows) ? rows.map(decorate) : decorate(rows);
 }
 
+router.get('/', requireProjectMember, async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const projectId = Number(req.query.projectId);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'projectId required' });
+    const where = { tenantId, projectId };
+    const [rows, total] = await Promise.all([
+      prisma.purchaseOrder.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          code: true,
+          supplier: true,
+          status: true,
+          total: true,
+          deliveries: { select: { expectedAt: true }, orderBy: { expectedAt: 'asc' }, take: 1 },
+        },
+      }),
+      prisma.purchaseOrder.count({ where }),
+    ]);
+    const items = rows.map((r) => ({
+      id: r.id,
+      poNumber: r.code,
+      supplierName: r.supplier,
+      status: r.status,
+      amount: r.total,
+      neededBy: r.deliveries[0]?.expectedAt || null,
+    }));
+    res.json({ total, items });
+  } catch (e) { next(e); }
+});
+
 // --- Fuzzy matching utilities (no external deps) ---
 function normName(s) {
   return String(s || '')

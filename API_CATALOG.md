@@ -1,8 +1,8 @@
 # API Catalog
 
-Generated: 2025-08-31T18:35:05.943Z (UTC) / Sunday, 31 August 2025 at 19:35:05 BST (Europe/London)
+Generated: 2025-08-31T19:53:23.544Z (UTC) / Sunday, 31 August 2025 at 20:53:23 BST (Europe/London)
 
-Commit: bb2b78d
+Commit: cfbb6e7
 
 ## Reminders
 
@@ -25,6 +25,14 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Lint: Missing requireAuth; Missing tenant scoping
 
 ### GET /health,/api/health
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth; Missing tenant scoping
+
+### GET /openapi-lite.json
 
 - Middlewares: <anonymous>
 - Controller: anonymous
@@ -270,6 +278,30 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Controller: anonymous
 - Auth/Guards: none
 - Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/projects/:id/members
+
+- Middlewares: requireProjectMember, <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### POST //api/projects/:id/members
+
+- Middlewares: requireProjectMember, <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### DELETE //api/projects/:id/members/:userId
+
+- Middlewares: requireProjectMember, <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id, userId
 - Lint: Missing requireAuth
 
 ### DELETE //api/projects/:id
@@ -608,6 +640,14 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Path params: none
 - Lint: Missing requireAuth
 
+### GET //api/procurement
+
+- Middlewares: requireProjectMember, <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
 ### GET //api/procurement/pos
 
 - Middlewares: <anonymous>
@@ -689,6 +729,14 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Lint: Missing requireAuth
 
 ### POST //api/procurement/pos/bulk-map-suppliers-tenant
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### GET //api/financials
 
 - Middlewares: <anonymous>
 - Controller: anonymous
