@@ -5,9 +5,8 @@ const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
 const pkg = require('./package.json');
 const { logError } = require('./utils/errors.cjs');
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
+const { getCatalogHash } = require('./utils/apiCatalog.cjs');
+const devDeltaRoutes = require('./routes/dev_delta.cjs');
 
 // BigInt JSON patch
 BigInt.prototype.toJSON = function () {
@@ -18,24 +17,8 @@ const app = express();
 const prisma = new PrismaClient();
 const TENANT_DEFAULT = process.env.TENANT_DEFAULT || 'demo';
 
-const API_CATALOG_PATH = path.join(__dirname, 'API_CATALOG.md');
-let API_CATALOG_HASH = '';
-try {
-  API_CATALOG_HASH = crypto
-    .createHash('sha1')
-    .update(fs.readFileSync(API_CATALOG_PATH))
-    .digest('hex');
-} catch (e) {
-  console.error('Failed to compute API catalog hash', e);
-}
+console.log('[API Catalog] hash:', getCatalogHash());
 
-const DELTA_FILE = path.join(__dirname, 'scripts', '__last_delta.txt');
-let FRONTEND_DELTA_PROMPT = '';
-try {
-  FRONTEND_DELTA_PROMPT = fs.readFileSync(DELTA_FILE, 'utf8');
-} catch {
-  FRONTEND_DELTA_PROMPT = '';
-}
 
 const variationsRouter = require('./routes/variations.cjs');
 const documentsRouter = require('./routes/documents_v2.cjs');
@@ -98,13 +81,8 @@ app.get(['/health', '/api/health'], (_req, res) =>
   res.json({ ok: true, version: pkg.version, time: new Date().toISOString() })
 );
 
-app.get('/api/__catalog/hash', requireAuth, (_req, res) =>
-  res.json({ hash: API_CATALOG_HASH })
-);
-app.get('/api/__delta', requireAuth, (_req, res) => {
-  res.set('Content-Type', 'text/plain');
-  res.send(FRONTEND_DELTA_PROMPT);
-});
+
+app.use(devDeltaRoutes);
 
 app.use('/auth', authRouter);
 app.use('/me', meRouter);
