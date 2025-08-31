@@ -431,6 +431,15 @@ function toYYYYMM(d) {
   const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
   return `${y}-${m}`;
 }
+function toCsvRow(values) {
+  return values
+    .map((v) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    })
+    .join(',') + '\n';
+}
 
 router.get('/:projectId/periods', async (req, res) => {
   try {
@@ -455,6 +464,89 @@ router.get('/:projectId/periods', async (req, res) => {
     res.json({ data: { periods, latest: periods[periods.length - 1] || null } });
   } catch (e) {
     res.status(500).json({ error: 'Failed to list periods' });
+  }
+});
+
+router.get('/:projectId/cvr', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    const roles = Array.isArray(req.user.roles) ? req.user.roles : [];
+    if (!roles.includes('finance') && !roles.includes('admin')) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'projectId required' });
+    await ensureMember(req, projectId);
+
+    const [budgets, commitments, actuals, forecasts] = await Promise.all([
+      prisma.budgetLine.findMany({ where: { tenantId, projectId } }),
+      prisma.commitment.findMany({ where: { tenantId, projectId } }),
+      prisma.actualCost.findMany({ where: { tenantId, projectId } }),
+      prisma.forecast.findMany({ where: { tenantId, projectId } }),
+    ]);
+
+    const map = {};
+    const add = (code, field, amount) => {
+      const key = code || 'Uncoded';
+      if (!map[key]) map[key] = { code: key, budget: 0, committed: 0, actual: 0, forecast: 0 };
+      map[key][field] += Number(amount || 0);
+    };
+    budgets.forEach((b) => add(b.code, 'budget', b.amount));
+    commitments.forEach((c) => add(c.category, 'committed', c.amount));
+    actuals.forEach((a) => add(a.category, 'actual', a.amount));
+    forecasts.forEach((f) => add(f.description, 'forecast', f.amount));
+
+    const byCostCode = Object.values(map).map((r) => {
+      const value = Number(r.budget) + Number(r.forecast);
+      const cost = Number(r.committed) + Number(r.actual);
+      return { ...r, margin: value - cost, marginPct: safePct(value - cost, value) };
+    });
+
+    const totals = {
+      budget: sum(byCostCode, (r) => r.budget),
+      committed: sum(byCostCode, (r) => r.committed),
+      actual: sum(byCostCode, (r) => r.actual),
+      forecast: sum(byCostCode, (r) => r.forecast),
+    };
+    totals.value = totals.budget + totals.forecast;
+    totals.cost = totals.committed + totals.actual;
+    totals.margin = totals.value - totals.cost;
+    totals.marginPct = safePct(totals.margin, totals.value);
+
+    const periodsSet = new Set();
+    budgets.forEach((b) => b.periodMonth && periodsSet.add(b.periodMonth));
+    commitments.forEach((c) => c.periodMonth && periodsSet.add(c.periodMonth));
+    actuals.forEach((a) => periodsSet.add(a.periodMonth || toYYYYMM(a.incurredAt)));
+    forecasts.forEach((f) => periodsSet.add(f.periodMonth || f.period));
+    const periods = Array.from(periodsSet).filter(Boolean).sort();
+    const trend = periods.map((p) => {
+      const b = sum(budgets.filter((r) => r.periodMonth === p), (r) => r.amount || 0);
+      const c = sum(commitments.filter((r) => r.periodMonth === p), (r) => r.amount || 0);
+      const a = sum(actuals.filter((r) => (r.periodMonth || toYYYYMM(r.incurredAt)) === p), (r) => r.amount || 0);
+      const f = sum(forecasts.filter((r) => (r.periodMonth || r.period) === p), (r) => r.amount || 0);
+      const v = b + f;
+      const costP = c + a;
+      return { period: p, budgets: b, commitments: c, actuals: a, forecasts: f, value: v, cost: costP, marginPct: safePct(v - costP, v) };
+    });
+
+    if ((req.query.format || '').toLowerCase() === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="cvr-${projectId}.csv"`);
+      res.write(toCsvRow(['code', 'budget', 'committed', 'actual', 'forecast', 'margin', 'marginPct']));
+      for (const row of byCostCode) {
+        res.write(
+          toCsvRow([row.code, row.budget, row.committed, row.actual, row.forecast, row.margin, row.marginPct])
+        );
+      }
+      return res.end();
+    }
+
+    res.json({ data: { byCostCode, totals, trend } });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to compute CVR report' });
   }
 });
 
