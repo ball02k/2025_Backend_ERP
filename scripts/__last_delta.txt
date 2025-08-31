@@ -1,0 +1,19 @@
+FRONTEND_DELTA_PROMPT
+--------------------------------
+You are syncing the FRONTEND after backend API changes.
+Apply the following changes in the FE codebase, then run tests and build.
+
+API CHANGES:
+- Added: GET /api/__catalog/hash – returns { hash: string }
+- Added: GET /api/__delta – returns text/plain with latest frontend delta prompt
+
+UPDATE THESE CALLS/COMPONENTS:
+- Update API sync utilities to fetch /api/__catalog/hash and /api/__delta
+- Surface new backend delta prompt in dev tools
+
+TEST UPDATES:
+- Add tests for /api/__catalog/hash and /api/__delta endpoints
+
+After applying, bump localStorage.lastSeenCatalogHash to "0ce1845ca36ae037a07b57f32e34fb8e2634bb62".
+--------------------------------
+/END FRONTEND_DELTA_PROMPT
