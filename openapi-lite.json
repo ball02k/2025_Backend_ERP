@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "9f94dd8"
+    "version": "da0deae"
   },
   "paths": {
     "*": {
@@ -394,6 +394,64 @@
       "post": {
         "summary": "POST //api/projects/csv/import",
         "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/packages": {
+      "get": {
+        "summary": "GET //api/projects/:projectId/packages",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //api/projects/:projectId/packages",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/contracts": {
+      "get": {
+        "summary": "GET //api/projects/:projectId/contracts",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
@@ -1273,6 +1331,86 @@
       "post": {
         "summary": "POST //api/procurement/pos/bulk-map-suppliers-tenant",
         "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/packages/{packageId}/invite": {
+      "post": {
+        "summary": "POST //api/packages/:packageId/invite",
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/packages/{packageId}/submit": {
+      "post": {
+        "summary": "POST //api/packages/:packageId/submit",
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/submissions/{submissionId}/score": {
+      "post": {
+        "summary": "POST //api/submissions/:submissionId/score",
+        "parameters": [
+          {
+            "name": "submissionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/packages/{packageId}/award": {
+      "post": {
+        "summary": "POST //api/packages/:packageId/award",
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
