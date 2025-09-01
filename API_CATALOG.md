@@ -1,8 +1,8 @@
 # API Catalog
 
-Generated: 2025-08-31T20:41:39.326Z (UTC) / Sunday, 31 August 2025 at 21:41:39 BST (Europe/London)
+Generated: 2025-09-01T09:20:58.549Z (UTC) / Monday, 1 September 2025 at 10:20:58 BST (Europe/London)
 
-Commit: 76f39dd
+Commit: 59d3ff9
 
 ## Reminders
 
@@ -1351,6 +1351,22 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Auth/Guards: none
 - Path params: none
 - Lint: Missing requireAuth
+
+### GET //api/integrations/companies-house/:companyNumber/profile
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: companyNumber
+- Lint: Missing requireAuth; Missing tenant scoping
+
+### GET //api/integrations/hmrc/vat/:vrn/check
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: vrn
+- Lint: Missing requireAuth; Missing tenant scoping
 
 ### GET //api/home/overview
 

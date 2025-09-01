@@ -21,6 +21,8 @@ npm run health
   - Ignored in production when `NODE_ENV=production`.
   - Do not set in production environments.
 - See `.env.example` for other variables and defaults.
+- `COMPANIES_HOUSE_API_KEY`: API key for Companies House lookup service.
+- `HMRC_VAT_API_KEY`: API key for HMRC VAT validation service.
 
 ### Dev Auth Bypass
 - When active: `NODE_ENV !== 'production'` or `DEV_AUTH_BYPASS=true`.

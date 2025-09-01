@@ -37,6 +37,7 @@ const suppliersRouter = require('./routes/suppliers.cjs');
 const searchRouter = require('./routes/search.cjs');
 const requestsRouter = require('./routes/requests.cjs');
 const spmRouter = require('./routes/spm.cjs');
+const integrationsRouter = require('./routes/integrations.cjs');
 const homeRoutes = require('./routes/home.cjs');
 const { attachUser } = require('./middleware/auth.cjs');
 const requireAuth = require('./middleware/requireAuth.cjs');
@@ -121,6 +122,7 @@ app.use('/api/suppliers', requireAuth, suppliersRouter);
 app.use('/api/requests', requireAuth, requestsRouter);
 app.use('/api/spm', requireAuth, spmRouter);
 app.use('/api/search', requireAuth, searchRouter);
+app.use('/api/integrations', requireAuth, integrationsRouter());
 app.use('/api', homeRoutes(prisma, { requireAuth }));
 
 if (process.env.NODE_ENV !== 'production' || process.env.DEV_AUTH_BYPASS === 'true') {
