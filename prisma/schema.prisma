@@ -174,6 +174,8 @@ model Project {
   actualCosts ActualCost[]
   forecasts   Forecast[]
   financialItems FinancialItem[]
+  packages     Package[]
+  contracts    Contract[]
 
   @@index([tenantId, status])
   @@index([tenantId, name])
@@ -438,6 +440,7 @@ model User {
   updatedAt   DateTime            @updatedAt
   memberships ProjectMembership[]
   userRoles   UserRole[]
+  auditLogs   AuditLog[]
 
   @@index([tenantId, email])
 }
@@ -509,6 +512,10 @@ model Supplier {
   updatedAt        DateTime @updatedAt
 
   capabilities SupplierCapability[]
+  invites      TenderInvite[] @relation("SupplierInvites")
+  submissions  Submission[]   @relation("SupplierSubmissions")
+  contracts    Contract[]     @relation("SupplierContracts")
+  awardedPackages Package[]   @relation("PackageAwardSupplier")
 
   @@index([tenantId, name])
   @@index([tenantId, status])
@@ -807,3 +814,103 @@ model FinancialItem {
 
   @@index([tenantId, projectId])
 }
+
+model Package {
+  id              Int       @id @default(autoincrement())
+  projectId       Int
+  project         Project   @relation(fields: [projectId], references: [id])
+  name            String
+  scope           String?
+  trade           String?
+  status          String    @default("Draft")
+  budgetEstimate  Decimal?
+  deadline        DateTime?
+  awardValue      Decimal?
+  awardSupplierId Int?
+  awardSupplier   Supplier? @relation("PackageAwardSupplier", fields: [awardSupplierId], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  submissions Submission[] @relation("PackageSubmissions")
+  invites     TenderInvite[] @relation("PackageInvites")
+  contract    Contract?      @relation("PackageContract")
+
+  @@index([projectId])
+}
+
+model TenderInvite {
+  id          Int      @id @default(autoincrement())
+  packageId   Int
+  package     Package  @relation(name: "PackageInvites", fields: [packageId], references: [id])
+  supplierId  Int
+  supplier    Supplier @relation("SupplierInvites", fields: [supplierId], references: [id])
+  invitedAt   DateTime @default(now())
+  respondedAt DateTime?
+  status      String   @default("Invited")
+
+  submission Submission? @relation("TenderInviteSubmission")
+
+  @@unique([packageId, supplierId])
+  @@index([supplierId])
+}
+
+model Submission {
+  id            Int      @id @default(autoincrement())
+  packageId     Int
+  package       Package @relation(name: "PackageSubmissions", fields: [packageId], references: [id])
+  supplierId    Int
+  supplier      Supplier @relation("SupplierSubmissions", fields: [supplierId], references: [id])
+  submittedAt   DateTime @default(now())
+  price         Decimal?
+  durationWeeks Int?
+  technicalScore Float?
+  priceScore     Float?
+  overallScore   Float?
+  rank           Int?
+  status        String   @default("Submitted")
+  details       Json?
+
+  invite TenderInvite? @relation("TenderInviteSubmission", fields: [packageId, supplierId], references: [packageId, supplierId])
+
+  @@index([packageId])
+  @@index([supplierId])
+  @@unique([packageId, supplierId])
+}
+
+model Contract {
+  id            BigInt   @id @default(autoincrement())
+  projectId     Int
+  project       Project  @relation(fields: [projectId], references: [id])
+  packageId     Int?     @unique
+  package       Package? @relation(name: "PackageContract", fields: [packageId], references: [id])
+  supplierId    Int
+  supplier      Supplier @relation("SupplierContracts", fields: [supplierId], references: [id])
+  title         String
+  contractNumber String?
+  value         Decimal
+  status        String   @default("Pending")
+  signedAt      DateTime?
+  startDate     DateTime?
+  endDate       DateTime?
+  retentionPct  Float?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([supplierId])
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  timestamp DateTime @default(now())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id])
+  entity    String
+  entityId  String
+  action    String
+  changes   Json?
+  ipAddress String?
+
+  @@index([entity, entityId])
+}
+
