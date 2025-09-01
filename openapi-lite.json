@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "76f39dd"
+    "version": "9f94dd8"
   },
   "paths": {
     "*": {
@@ -2615,6 +2615,46 @@
       "get": {
         "summary": "GET //api/search",
         "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/integrations/companies-house/{companyNumber}/profile": {
+      "get": {
+        "summary": "GET //api/integrations/companies-house/:companyNumber/profile",
+        "parameters": [
+          {
+            "name": "companyNumber",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "//api/integrations/hmrc/vat/{vrn}/check": {
+      "get": {
+        "summary": "GET //api/integrations/hmrc/vat/:vrn/check",
+        "parameters": [
+          {
+            "name": "vrn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
