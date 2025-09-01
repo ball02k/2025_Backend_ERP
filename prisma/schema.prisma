@@ -173,6 +173,7 @@ model Project {
   commitments Commitment[]
   actualCosts ActualCost[]
   forecasts   Forecast[]
+  financialItems FinancialItem[]
 
   @@index([tenantId, status])
   @@index([tenantId, name])

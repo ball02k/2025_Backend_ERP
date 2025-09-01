@@ -232,7 +232,7 @@ router.post('/csv/import', async (req, res) => {
         if (id && Number.isFinite(id)) {
           const exists = await prisma.variation.findFirst({ where: { id, tenantId } });
           if (!exists) { skipped++; skippedRows.push({ rowIndex, reason: 'VARIATION_NOT_FOUND' }); continue; }
-          await prisma.variation.update({ where: { id }, data });
+          await prisma.variation.update({ where: { id, tenantId }, data });
           updated++;
           try { await recomputeProjectSnapshot(prisma, { projectId }); } catch {}
         } else {

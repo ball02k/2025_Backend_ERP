@@ -214,7 +214,7 @@ module.exports = (prisma) => {
           if (id && Number.isFinite(id)) {
             const exists = await prisma.task.findFirst({ where: { id, tenantId } });
             if (!exists) { skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'TASK_NOT_FOUND' }); continue; }
-            await prisma.task.update({ where: { id }, data });
+            await prisma.task.update({ where: { id, tenantId }, data });
             updated++;
           } else {
             await prisma.task.create({ data });
