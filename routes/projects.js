@@ -2,6 +2,7 @@ const express = require('express');
 const { z } = require('zod');
 const { requireProjectMember } = require('../middleware/membership.cjs');
 const { projectBodySchema } = require('../lib/validation');
+const PackageController = require('../controllers/packageController.js');
 module.exports = (prisma) => {
   const router = express.Router();
   function toCsvRow(values) {
@@ -281,6 +282,11 @@ module.exports = (prisma) => {
     }
   });
 
+  // Nested package and contract routes
+  router.get('/:projectId/packages', PackageController.listPackages);
+  router.post('/:projectId/packages', PackageController.createPackage);
+  router.get('/:projectId/contracts', PackageController.listContractsByProject);
+
   // GET /api/projects/:id (auth only) -> basic project payload to let page render even if overview fails
   router.get('/:id', async (req, res) => {
     try {
@@ -305,6 +311,7 @@ module.exports = (prisma) => {
           startDate: true,
           endDate: true,
           client: { select: { id: true, name: true, vatNo: true, companyRegNo: true } },
+          _count: { select: { packages: true, contracts: true } },
         },
       });
 
@@ -325,6 +332,8 @@ module.exports = (prisma) => {
         actualSpend: projectRow.actualSpend,
         startDate: projectRow.startDate,
         endDate: projectRow.endDate,
+        packagesCount: projectRow._count?.packages || 0,
+        contractsCount: projectRow._count?.contracts || 0,
         clientId: projectRow.client ? projectRow.client.id : null,
         clientName: projectRow.client ? projectRow.client.name : null,
         client: projectRow.client
