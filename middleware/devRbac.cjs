@@ -13,19 +13,33 @@ module.exports = async function devRbac(req, _res, next) {
     req.user.role = 'admin';
     req.user.roles = Array.from(new Set([...(req.user.roles || []), 'admin']));
 
-    // Ensure Role and UserRole rows exist for admin
-    const role = await prisma.role.upsert({
-      where: { tenantId_name: { tenantId, name: 'admin' } },
-      update: {},
-      create: { tenantId, name: 'admin' },
-    });
-    await prisma.userRole.upsert({
-      where: {
-        tenantId_userId_roleId: { tenantId, userId: Number(userId), roleId: role.id },
-      },
-      update: {},
-      create: { tenantId, userId: Number(userId), roleId: role.id },
-    });
+    /* BEGIN guard patch */
+    try {
+      if (prisma.role?.upsert && prisma.userRole?.upsert) {
+        const tenantId = req.tenantId || 'demo';
+
+        // Role: @@unique([tenantId, name]) -> tenantId_name
+        const role = await prisma.role.upsert({
+          where: { tenantId_name: { tenantId, name: 'admin' } },
+          update: {},
+          create: { tenantId, name: 'admin' }
+        });
+
+        // UserRole: @@unique([tenantId, userId, roleId]) -> tenantId_userId_roleId
+        await prisma.userRole.upsert({
+          where: { tenantId_userId_roleId: { tenantId, userId: req.user.id, roleId: role.id } },
+          update: {},
+          create: { tenantId, userId: req.user.id, roleId: role.id }
+        });
+      }
+    } catch (e) {
+      if (e?.code === 'P2021') {
+        console.warn('[devRbac] Skipping role bootstrap: tables not present yet.');
+      } else {
+        throw e; // keep other errors loud in dev
+      }
+    }
+    /* END guard patch */
 
     // If hitting /api/projects/:id/* ensure project membership as PM
     const m = /^\/api\/projects\/(\d+)/.exec(req.path);

@@ -77,14 +77,14 @@ async function run() {
   }
   if (hasRole) {
     const adminRole = await prisma.role.upsert({
-      where: { name_tenantId: { name: "admin", tenantId: TENANT_ID } },
+      where: { tenantId_name: { tenantId: TENANT_ID, name: "admin" } },
       update: {},
       create: { name: "admin", tenantId: TENANT_ID },
     });
     if (hasUserRole && adminUser) {
       await prisma.userRole.upsert({
         where: {
-          userId_roleId: { userId: adminUser.id, roleId: adminRole.id },
+          tenantId_userId_roleId: { tenantId: TENANT_ID, userId: adminUser.id, roleId: adminRole.id },
         },
         update: {},
         create: { userId: adminUser.id, roleId: adminRole.id, tenantId: TENANT_ID },
