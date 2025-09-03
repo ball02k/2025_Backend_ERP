@@ -15,6 +15,28 @@ module.exports = async function devRbac(req, _res, next) {
 
     /* BEGIN guard patch */
     try {
+      if (prisma.role?.upsert && prisma.userRole?.upsert) {
+        const tenantId = req.tenantId || 'demo';
+
+        // Role: @@unique([tenantId, name]) -> tenantId_name
+        const role = await prisma.role.upsert({
+          where: { tenantId_name: { tenantId, name: 'admin' } },
+          update: {},
+          create: { tenantId, name: 'admin' }
+        });
+
+        // UserRole: @@unique([tenantId, userId, roleId]) -> tenantId_userId_roleId
+        await prisma.userRole.upsert({
+          where: { tenantId_userId_roleId: { tenantId, userId: req.user.id, roleId: role.id } },
+          update: {},
+          create: { tenantId, userId: req.user.id, roleId: role.id }
+        });
+      }
+    } catch (e) {
+      if (e?.code === 'P2021') {
+        console.warn('[devRbac] Skipping role bootstrap: tables not present yet.');
+      } else {
+        throw e; // keep other errors loud in dev
       // Ensure Role and UserRole rows exist for admin (dev only)
       if (prisma.role?.upsert && prisma.userRole?.upsert) {
         const role = await prisma.role.upsert({
