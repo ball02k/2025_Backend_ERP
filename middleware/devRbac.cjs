@@ -17,6 +17,7 @@ module.exports = async function devRbac(req, _res, next) {
     try {
       if (prisma.role?.upsert && prisma.userRole?.upsert) {
         const tenantId = req.tenantId || 'demo';
+        const userId = (req.user && req.user.id) ? req.user.id : 1;
 
         // Role: @@unique([tenantId, name]) -> tenantId_name
         const role = await prisma.role.upsert({
@@ -27,36 +28,17 @@ module.exports = async function devRbac(req, _res, next) {
 
         // UserRole: @@unique([tenantId, userId, roleId]) -> tenantId_userId_roleId
         await prisma.userRole.upsert({
-          where: { tenantId_userId_roleId: { tenantId, userId: req.user.id, roleId: role.id } },
+          where: { tenantId_userId_roleId: { tenantId, userId, roleId: role.id } },
           update: {},
-          create: { tenantId, userId: req.user.id, roleId: role.id }
+          create: { tenantId, userId, roleId: role.id }
         });
       }
     } catch (e) {
+      // If tables not created yet, don't block dev boot.
       if (e?.code === 'P2021') {
         console.warn('[devRbac] Skipping role bootstrap: tables not present yet.');
       } else {
-        throw e; // keep other errors loud in dev
-      // Ensure Role and UserRole rows exist for admin (dev only)
-      if (prisma.role?.upsert && prisma.userRole?.upsert) {
-        const role = await prisma.role.upsert({
-          where: { name_tenantId: { name: 'admin', tenantId: req.tenantId || 'demo' } },
-          update: {},
-          create: { name: 'admin', tenantId: req.tenantId || 'demo' }
-        });
-
-        await prisma.userRole.upsert({
-          where: { userId_roleId: { userId: req.user.id, roleId: role.id } },
-          update: {},
-          create: { userId: req.user.id, roleId: role.id, tenantId: req.tenantId || 'demo' }
-        });
-      }
-    } catch (e) {
-      // If tables don’t exist yet (P2021), don’t block startup; log and continue.
-      if (e?.code === 'P2021') {
-        console.warn('[devRbac] Skipping role bootstrap: tables not present yet.');
-      } else {
-        throw e;
+        throw e; // keep other errors loud
       }
     }
     /* END guard patch */
