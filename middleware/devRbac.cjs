@@ -37,6 +37,26 @@ module.exports = async function devRbac(req, _res, next) {
         console.warn('[devRbac] Skipping role bootstrap: tables not present yet.');
       } else {
         throw e; // keep other errors loud in dev
+      // Ensure Role and UserRole rows exist for admin (dev only)
+      if (prisma.role?.upsert && prisma.userRole?.upsert) {
+        const role = await prisma.role.upsert({
+          where: { name_tenantId: { name: 'admin', tenantId: req.tenantId || 'demo' } },
+          update: {},
+          create: { name: 'admin', tenantId: req.tenantId || 'demo' }
+        });
+
+        await prisma.userRole.upsert({
+          where: { userId_roleId: { userId: req.user.id, roleId: role.id } },
+          update: {},
+          create: { userId: req.user.id, roleId: role.id, tenantId: req.tenantId || 'demo' }
+        });
+      }
+    } catch (e) {
+      // If tables don’t exist yet (P2021), don’t block startup; log and continue.
+      if (e?.code === 'P2021') {
+        console.warn('[devRbac] Skipping role bootstrap: tables not present yet.');
+      } else {
+        throw e;
       }
     }
     /* END guard patch */
