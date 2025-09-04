@@ -34,7 +34,6 @@ module.exports = async function devRbac(req, _res, next) {
         });
       }
     } catch (e) {
-      // If tables not created yet, don't block dev boot.
       if (e?.code === 'P2021') {
         console.warn('[devRbac] Skipping role bootstrap: tables not present yet.');
       } else {
