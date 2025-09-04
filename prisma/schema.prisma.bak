@@ -5,8 +5,6 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-
-  shadowDatabaseUrl = env("PRISMA_MIGRATE_SHADOW_DATABASE_URL")
 }
 
 // Supplier Onboarding
@@ -22,26 +20,26 @@ model OnboardingProject {
 }
 
 model OnboardingForm {
-  id          Int     @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   tenantId    String
   projectId   Int
   title       String
-  version     String  @default("v1")
-  isPublished Boolean @default(false)
+  version     String   @default("v1")
+  isPublished Boolean  @default(false)
   sections    Json?
 
   @@index([tenantId, projectId])
 }
 
 model OnboardingInvite {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   tenantId    String
   projectId   Int
   supplierId  Int
   email       String
   token       String
-  status      String    @default("invited")
-  invitedAt   DateTime  @default(now())
+  status      String   @default("invited")
+  invitedAt   DateTime @default(now())
   respondedAt DateTime?
 
   @@index([tenantId, projectId, status])
@@ -51,11 +49,11 @@ model OnboardingResponse {
   id          Int       @id @default(autoincrement())
   tenantId    String
   projectId   Int
-  supplierId  Int? // link to Supplier when approved
+  supplierId  Int?      // link to Supplier when approved
   formId      Int
   answers     Json
   files       Json?
-  status      String    @default("in_progress")
+  status      String     @default("in_progress")
   submittedAt DateTime?
   reviewedBy  Int?
   reviewedAt  DateTime?
@@ -162,8 +160,8 @@ model Project {
   endDate     DateTime?
 
   deletedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   tasks          Task[]
   variations     Variation[]
@@ -171,13 +169,13 @@ model Project {
   memberships    ProjectMembership[]
   purchaseOrders PurchaseOrder[]
 
-  budgetLines    BudgetLine[]
-  commitments    Commitment[]
-  actualCosts    ActualCost[]
-  forecasts      Forecast[]
+  budgetLines BudgetLine[]
+  commitments Commitment[]
+  actualCosts ActualCost[]
+  forecasts   Forecast[]
   financialItems FinancialItem[]
-  packages       Package[]
-  contracts      Contract[]
+  packages     Package[]
+  contracts    Contract[]
 
   @@index([tenantId, status])
   @@index([tenantId, name])
@@ -200,8 +198,8 @@ model Task {
   statusRel TaskStatus @relation("TaskStatusRel", fields: [statusId], references: [id])
 
   deletedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([tenantId, projectId])
   @@index([tenantId, projectId, status])
@@ -226,8 +224,8 @@ model Contact {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([clientId, email])
   @@index([tenantId, clientId])
+  @@unique([clientId, email])
   @@index([clientId, isPrimary])
   @@index([email])
   @@index([role])
@@ -254,10 +252,10 @@ model Variation {
 
   // Commercials
   // New spec fields
-  value          Decimal @db.Decimal(18, 2)
-  costImpact     Decimal @db.Decimal(18, 2)
+  value       Decimal   @db.Decimal(18, 2)
+  costImpact  Decimal   @db.Decimal(18, 2)
   timeImpactDays Int?
-  notes          String?
+  notes       String?
 
   // Legacy/computed fields retained for compatibility
   estimated_cost Decimal? @db.Decimal(18, 2)
@@ -398,14 +396,14 @@ model ProjectSnapshot {
 }
 
 model Document {
-  id           BigInt         @id @default(autoincrement())
+  id           BigInt   @id @default(autoincrement())
   tenantId     String
   filename     String
   mimeType     String
   size         Int
-  storageKey   String         @unique
+  storageKey   String   @unique
   sha256       String?
-  uploadedAt   DateTime       @default(now())
+  uploadedAt   DateTime @default(now())
   uploadedById String?
   links        DocumentLink[]
 
@@ -501,30 +499,30 @@ model RolePermission {
 
 // Supplier Management
 model Supplier {
-  id               Int       @id @default(autoincrement())
+  id               Int      @id @default(autoincrement())
   tenantId         String
   name             String
-  status           String    @default("active")
+  status           String   @default("active")
   companyRegNo     String?
   vatNo            String?
   insuranceExpiry  DateTime?
   hsAccreditations String?
   performanceScore Decimal?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  capabilities    SupplierCapability[]
-  invites         TenderInvite[]       @relation("SupplierInvites")
-  submissions     Submission[]         @relation("SupplierSubmissions")
-  contracts       Contract[]           @relation("SupplierContracts")
-  awardedPackages Package[]            @relation("PackageAwardSupplier")
+  capabilities SupplierCapability[]
+  invites      TenderInvite[] @relation("SupplierInvites")
+  submissions  Submission[]   @relation("SupplierSubmissions")
+  contracts    Contract[]     @relation("SupplierContracts")
+  awardedPackages Package[]   @relation("PackageAwardSupplier")
 
   @@index([tenantId, name])
   @@index([tenantId, status])
 }
 
 model SupplierCapability {
-  id         Int      @id @default(autoincrement())
+  id         Int    @id @default(autoincrement())
   supplierId Int
   tag        String
   tenantId   String
@@ -640,50 +638,50 @@ model RequestQuestion {
 }
 
 model RequestInvite {
-  id          Int       @id @default(autoincrement())
-  tenantId    String
-  requestId   Int
-  supplierId  Int
-  email       String
-  status      String    @default("invited")
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  requestId  Int
+  supplierId Int
+  email      String
+  status     String   @default("invited")
   respondedAt DateTime?
 
   @@index([tenantId, requestId, status])
 }
 
 model RequestResponse {
-  id          Int       @id @default(autoincrement())
-  tenantId    String
-  requestId   Int
-  supplierId  Int
-  stage       Int
-  answers     Json
-  files       Json?
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  requestId  Int
+  supplierId Int
+  stage      Int
+  answers    Json
+  files      Json?
   submittedAt DateTime?
-  score       Decimal?
-  status      String    @default("in_progress")
+  score      Decimal?
+  status     String   @default("in_progress")
 
   @@index([tenantId, requestId, supplierId, stage])
 }
 
 model RequestQna {
-  id          Int       @id @default(autoincrement())
-  tenantId    String
-  requestId   Int
-  supplierId  Int?
-  question    String
-  answer      String?
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  requestId  Int
+  supplierId Int?
+  question   String
+  answer     String?
   attachments Json?
-  createdAt   DateTime  @default(now())
-  answeredAt  DateTime?
+  createdAt  DateTime @default(now())
+  answeredAt DateTime?
 }
 
 model AwardDecision {
-  id         Int       @id @default(autoincrement())
+  id         Int      @id @default(autoincrement())
   tenantId   String
   requestId  Int
   supplierId Int
-  decision   String    @default("pending")
+  decision   String   @default("pending")
   reason     String?
   decidedBy  Int?
   decidedAt  DateTime?
@@ -703,20 +701,20 @@ model SpmTemplate {
 }
 
 model SpmScorecard {
-  id          Int      @id @default(autoincrement())
-  tenantId    String
-  supplierId  Int
-  templateId  Int
-  periodMonth String
-  status      String   @default("open")
-  totalScore  Decimal?
-  createdAt   DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  tenantId     String
+  supplierId   Int
+  templateId   Int
+  periodMonth  String
+  status       String   @default("open")
+  totalScore   Decimal?
+  createdAt    DateTime @default(now())
 
   @@index([tenantId, supplierId, periodMonth])
 }
 
 model SpmScore {
-  id          Int      @id @default(autoincrement())
+  id          Int     @id @default(autoincrement())
   tenantId    String
   scorecardId Int
   category    String
@@ -808,9 +806,9 @@ model FinancialItem {
   tenantId  String
   projectId Int
   name      String
-  amount    Decimal  @db.Decimal(18, 2)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  amount    Decimal   @db.Decimal(18, 2)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   project Project @relation(fields: [projectId], references: [id])
 
@@ -833,7 +831,7 @@ model Package {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  submissions Submission[]   @relation("PackageSubmissions")
+  submissions Submission[] @relation("PackageSubmissions")
   invites     TenderInvite[] @relation("PackageInvites")
   contract    Contract?      @relation("PackageContract")
 
@@ -841,14 +839,14 @@ model Package {
 }
 
 model TenderInvite {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   packageId   Int
-  package     Package   @relation(name: "PackageInvites", fields: [packageId], references: [id])
+  package     Package  @relation(name: "PackageInvites", fields: [packageId], references: [id])
   supplierId  Int
-  supplier    Supplier  @relation("SupplierInvites", fields: [supplierId], references: [id])
-  invitedAt   DateTime  @default(now())
+  supplier    Supplier @relation("SupplierInvites", fields: [supplierId], references: [id])
+  invitedAt   DateTime @default(now())
   respondedAt DateTime?
-  status      String    @default("Invited")
+  status      String   @default("Invited")
 
   submission Submission? @relation("TenderInviteSubmission")
 
@@ -857,46 +855,46 @@ model TenderInvite {
 }
 
 model Submission {
-  id             Int      @id @default(autoincrement())
-  packageId      Int
-  package        Package  @relation(name: "PackageSubmissions", fields: [packageId], references: [id])
-  supplierId     Int
-  supplier       Supplier @relation("SupplierSubmissions", fields: [supplierId], references: [id])
-  submittedAt    DateTime @default(now())
-  price          Decimal?
-  durationWeeks  Int?
+  id            Int      @id @default(autoincrement())
+  packageId     Int
+  package       Package @relation(name: "PackageSubmissions", fields: [packageId], references: [id])
+  supplierId    Int
+  supplier      Supplier @relation("SupplierSubmissions", fields: [supplierId], references: [id])
+  submittedAt   DateTime @default(now())
+  price         Decimal?
+  durationWeeks Int?
   technicalScore Float?
   priceScore     Float?
   overallScore   Float?
   rank           Int?
-  status         String   @default("Submitted")
-  details        Json?
+  status        String   @default("Submitted")
+  details       Json?
 
   invite TenderInvite? @relation("TenderInviteSubmission", fields: [packageId, supplierId], references: [packageId, supplierId])
 
-  @@unique([packageId, supplierId])
   @@index([packageId])
   @@index([supplierId])
+  @@unique([packageId, supplierId])
 }
 
 model Contract {
-  id             BigInt    @id @default(autoincrement())
-  projectId      Int
-  project        Project   @relation(fields: [projectId], references: [id])
-  packageId      Int?      @unique
-  package        Package?  @relation(name: "PackageContract", fields: [packageId], references: [id])
-  supplierId     Int
-  supplier       Supplier  @relation("SupplierContracts", fields: [supplierId], references: [id])
-  title          String
+  id            BigInt   @id @default(autoincrement())
+  projectId     Int
+  project       Project  @relation(fields: [projectId], references: [id])
+  packageId     Int?     @unique
+  package       Package? @relation(name: "PackageContract", fields: [packageId], references: [id])
+  supplierId    Int
+  supplier      Supplier @relation("SupplierContracts", fields: [supplierId], references: [id])
+  title         String
   contractNumber String?
-  value          Decimal
-  status         String    @default("Pending")
-  signedAt       DateTime?
-  startDate      DateTime?
-  endDate        DateTime?
-  retentionPct   Float?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  value         Decimal
+  status        String   @default("Pending")
+  signedAt      DateTime?
+  startDate     DateTime?
+  endDate       DateTime?
+  retentionPct  Float?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([projectId])
   @@index([supplierId])
@@ -915,3 +913,4 @@ model AuditLog {
 
   @@index([entity, entityId])
 }
+
