@@ -5,6 +5,10 @@
   "type": "commonjs",
   "scripts": {
     "dev": "nodemon index.cjs",
+    "dev:all": "bash scripts/dev-all.sh",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f db",
     "seed": "node prisma/seed.cjs",
     "dev-seed": "node scripts/dev-seed.cjs",
     "seed:demo": "node scripts/dev-seed.cjs",
