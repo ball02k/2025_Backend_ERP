@@ -152,7 +152,8 @@ module.exports = (prisma) => {
         ...p,
         clientName: p.client ? p.client.name : null,
       }));
-      res.json({ total, projects });
+      // Include compatibility aliases for FE variants expecting different shapes
+      res.json({ total, projects, items: projects, data: { items: projects, total } });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: err.message || 'Failed to fetch projects' });

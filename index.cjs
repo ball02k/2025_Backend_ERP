@@ -26,6 +26,7 @@ console.log(getDeltaPrompt());
 const variationsRouter = require('./routes/variations.cjs');
 const documentsRouter = require('./routes/documents_v2.cjs');
 const projectsOverviewRouter = require('./routes/projects_overview.cjs');
+const projectDocumentsRouter = require('./routes/project_documents.cjs');
 const healthRouter = require('./routes/health.cjs');
 const authRouter = require('./routes/auth.cjs');
 const meRouter = require('./routes/me.cjs');
@@ -34,6 +35,10 @@ const rolesRouter = require('./routes/roles.cjs');
 const financialsRouter = require('./routes/financials.cjs');
 const onboardingRouter = require('./routes/onboarding.cjs');
 const suppliersRouter = require('./routes/suppliers.cjs');
+const rfisRouter = require('./routes/rfis.cjs');
+const qaRouter = require('./routes/qa.cjs');
+const hsRouter = require('./routes/hs.cjs');
+const carbonRouter = require('./routes/carbon.cjs');
 const searchRouter = require('./routes/search.cjs');
 const requestsRouter = require('./routes/requests.cjs');
 const spmRouter = require('./routes/spm.cjs');
@@ -45,9 +50,22 @@ const requireAuth = require('./middleware/requireAuth.cjs');
 const devAuth = require('./middleware/devAuth.cjs');
 const devRbac = require('./middleware/devRbac.cjs');
 const authDev = require('./routes/auth.dev.cjs');
+const { isDevAuthEnabled, isDevEnv } = require('./utils/devFlags.cjs');
 
-// CORS: allow Vite dev servers and handle preflight
-const allowedOrigins = ['http://localhost:5173', 'http://localhost:5174'];
+// CORS: allow dev servers and handle preflight
+// Allow override via CORS_ORIGINS env (comma-separated)
+const defaultOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3000', // common React dev server
+  'http://localhost:4173', // Vite preview
+  'http://localhost:4174',
+];
+const envOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const allowedOrigins = Array.from(new Set([...defaultOrigins, ...envOrigins]));
 app.use(
   cors({
     origin(origin, cb) {
@@ -74,6 +92,31 @@ app.use(attachUser);
 app.use(devAuth); // must be before routes that use requireAuth
 // DEV-ONLY RBAC helper to ensure admin role and project membership
 app.use(devRbac);
+
+// Rewrite common malformed URLs where the frontend missed the '?' before query params
+// Example: /api/projectslimit=10&offset=0 -> /api/projects?limit=10&offset=0
+app.use((req, _res, next) => {
+  try {
+    if (req.url && req.url.startsWith('/api/')) {
+      const after = req.url.slice(5); // strip '/api/'
+      // Only attempt when there is no '?' yet and there's an '=' present
+      if (after && !after.includes('?') && after.includes('=')) {
+        // Detect a resource immediately followed by a known param name
+        const m = /^(\/?[^/?#]+?)(limit|offset|sort|status|clientId|projectId|page|pageSize|q|search|order)=/i.exec(after);
+        if (m) {
+          const resource = m[1];
+          const rest = after.slice(resource.length);
+          const fixed = `/api/${resource.replace(/^\//,'')}?${rest}`;
+          console.warn('[rewrite] malformed URL', req.url, '->', fixed);
+          req.url = fixed;
+        }
+      }
+    }
+  } catch (_) {
+    // Non-fatal; continue
+  }
+  next();
+});
 
 // Make BigInt values JSON-safe (Node can't stringify BigInt)
 // If you prefer string IDs, swap Number(value) for value.toString()
@@ -112,6 +155,7 @@ app.use('/api/projects', requireAuth, require('./routes/project_members.cjs')(pr
 app.use('/api/projects', requireAuth, require('./routes/project_alerts.cjs')(prisma));
 // app.use('/api/projects', projectsOverviewRouter);
 app.use('/api/projects', requireAuth, projectsOverviewRouter);
+app.use('/api/projects', requireAuth, projectDocumentsRouter);
 app.use('/api/health', requireAuth, healthRouter);
 app.use('/api/tasks', requireAuth, require('./routes/tasks')(prisma));
 app.use('/api/variations', requireAuth, variationsRouter);
@@ -120,21 +164,47 @@ app.use('/api/onboarding', requireAuth, onboardingRouter);
 app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
 app.use('/api', requireAuth, procurementRoutes);
 app.use('/api/financials', requireAuth, financialsRouter);
+// Also expose financials under /api/projects/financials for compatibility
+app.use('/api/projects/financials', requireAuth, financialsRouter);
 app.use('/api/suppliers', requireAuth, suppliersRouter);
 app.use('/api/requests', requireAuth, requestsRouter);
 app.use('/api/spm', requireAuth, spmRouter);
 app.use('/api/search', requireAuth, searchRouter);
 app.use('/api/integrations', requireAuth, integrationsRouter());
+app.use('/api/rfis', requireAuth, rfisRouter);
+app.use('/api/qa', requireAuth, qaRouter);
+app.use('/api/hs', requireAuth, hsRouter);
+app.use('/api/carbon', requireAuth, carbonRouter);
 app.use('/api', homeRoutes(prisma, { requireAuth }));
 
-if (process.env.NODE_ENV !== 'production' || process.env.DEV_AUTH_BYPASS === 'true') {
+// Lightweight compatibility/stub endpoints to avoid 404s on common FE calls
+app.get('/api/activity', requireAuth, (req, res) => {
+  const limit = Number(req.query.limit || 20);
+  res.json({ total: 0, items: [], limit });
+});
+app.get('/api/audit/events', requireAuth, (req, res) => {
+  const limit = Number(req.query.limit || 20);
+  res.json({ total: 0, events: [], limit });
+});
+app.get(['/api/resources/utilization', '/api/planning/utilization'], requireAuth, (_req, res) => {
+  res.json({ utilization: [] });
+});
+
+// Alias: /api/finance/snapshot -> /api/financials/snapshot
+app.get('/api/finance/snapshot', requireAuth, (req, res) => {
+  const qsIndex = req.url.indexOf('?');
+  const qs = qsIndex !== -1 ? req.url.slice(qsIndex) : '';
+  res.redirect(307, '/api/financials/snapshot' + qs);
+});
+
+if (isDevEnv()) {
   // Dev-only routes
   app.use('/api/dev', require('./routes/dev.cjs'));
   app.use('/api/dev/snapshot', requireAuth, require('./routes/dev_snapshot.cjs'));
 }
 
 // Dev-only: expose /api/dev-token when enabled
-if (process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_AUTH === '1') {
+if (isDevAuthEnabled()) {
   app.use('/api', authDev(prisma));
 }
 
@@ -153,9 +223,10 @@ app.use((err, _req, res, _next) => {
 
 // Start server with friendly EADDRINUSE handling during development
 function startServer(port, allowRetry) {
+  const host = '127.0.0.1';
   const server = app
-    .listen(port, () => {
-      console.log(`API on :${port}`);
+    .listen(port, host, () => {
+      console.log(`API on ${host}:${port}`);
     })
     .on('error', (err) => {
       if (err && err.code === 'EADDRINUSE') {

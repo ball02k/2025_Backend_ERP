@@ -21,6 +21,21 @@ function ensureTenant(where, tenantId) {
   return { ...where, tenantId };
 }
 
+// Basic summary endpoint for onboarding root to avoid 404s on /api/onboarding
+router.get('/', async (req, res) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const [forms, invites, responses] = await Promise.all([
+      prisma.onboardingForm?.count ? prisma.onboardingForm.count({ where: { tenantId } }) : Promise.resolve(0),
+      prisma.onboardingInvite?.count ? prisma.onboardingInvite.count({ where: { tenantId } }) : Promise.resolve(0),
+      prisma.onboardingResponse?.count ? prisma.onboardingResponse.count({ where: { tenantId } }) : Promise.resolve(0),
+    ]);
+    res.json({ ok: true, totals: { forms, invites, responses } });
+  } catch (e) {
+    res.json({ ok: true, totals: { forms: 0, invites: 0, responses: 0 } });
+  }
+});
+
 // ---- Projects ----
 router.get('/projects', async (req, res) => {
   try {

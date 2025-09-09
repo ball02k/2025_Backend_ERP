@@ -126,12 +126,53 @@ function writeOpenAPI(routes) {
       },
     },
   };
+  const inferExample = (r, method) => {
+    const isGet = method.toUpperCase() === 'GET';
+    const isPost = method.toUpperCase() === 'POST';
+    const isPut = method.toUpperCase() === 'PUT';
+    const isPatch = method.toUpperCase() === 'PATCH';
+    const isDelete = method.toUpperCase() === 'DELETE';
+    const isSingle = r.pathParams && r.pathParams.length > 0; // heuristic
+    if (isGet && !isSingle) {
+      return { total: 1, items: [{ id: 1, _example: true }] };
+    }
+    if (isGet && isSingle) {
+      return { id: 1, _example: true };
+    }
+    if (isPost) {
+      return { id: 101, created: true };
+    }
+    if (isPut || isPatch) {
+      return { id: 1, updated: true };
+    }
+    if (isDelete) {
+      return { ok: true };
+    }
+    return { ok: true };
+  };
   routes.forEach((r) => {
     const pathKey = r.path.replace(/:([^/]+)/g, '{$1}');
     if (!doc.paths[pathKey]) doc.paths[pathKey] = {};
     r.methods.forEach((method) => {
       const params = r.pathParams.map((p) => ({ name: p, in: 'path', required: true, schema: { type: 'number' } }));
-      const obj = { summary: `${method} ${r.path}`, parameters: params, responses: { 200: { description: 'OK' } } };
+      const okExample = inferExample(r, method);
+      const responses = {
+        200: {
+          description: 'OK',
+          content: { 'application/json': { example: okExample } },
+        },
+      };
+      if (r.hasRequireAuth) {
+        responses[401] = {
+          description: 'Unauthorized',
+          content: { 'application/json': { example: { error: 'Unauthorized' } } },
+        };
+        responses[403] = {
+          description: 'Forbidden',
+          content: { 'application/json': { example: { error: { code: 'FORBIDDEN', message: 'Forbidden' } } } },
+        };
+      }
+      const obj = { summary: `${method} ${r.path}`, parameters: params, responses };
       if (r.hasRequireAuth) obj.security = [{ bearerAuth: [] }];
       doc.paths[pathKey][method.toLowerCase()] = obj;
     });

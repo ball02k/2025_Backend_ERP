@@ -25,7 +25,8 @@ async function login() {
   const projs = await j(await fetch(`${api}/projects?limit=1`, { headers: auth }));
   const projectId = projs.projects?.[0]?.id || 1;
   const list = await j(await fetch(`${base}?projectId=${projectId}&limit=3`, { headers: auth }));
-  console.log('list.meta', list.meta, 'count', list.data.length, 'projectId', projectId);
+  const count = (Array.isArray(list.items) ? list.items.length : Array.isArray(list.data) ? list.data.length : 0);
+  console.log('list.count', count, 'projectId', projectId);
 
   const created = await j(await fetch(base, {
     method: 'POST',

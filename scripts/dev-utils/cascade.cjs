@@ -32,6 +32,7 @@ module.exports = {
       await tx.budgetLine?.deleteMany?.({ where: { projectId: { in: projectIds }, tenantId } }).catch(() => {});
       await tx.actualCost?.deleteMany?.({ where: { projectId: { in: projectIds }, tenantId } }).catch(() => {});
       await tx.forecast?.deleteMany?.({ where: { projectId: { in: projectIds }, tenantId } }).catch(() => {});
+      await tx.financialItem?.deleteMany?.({ where: { projectId: { in: projectIds }, tenantId } }).catch(() => {});
       await tx.valuation?.deleteMany?.({ where: { projectId: { in: projectIds }, tenantId } }).catch(() => {});
 
       // 4) Documents (unlink rows that FK projectId)
@@ -45,15 +46,25 @@ module.exports = {
       await tx.delivery?.deleteMany?.({ where: { po: { projectId: { in: projectIds }, tenantId } } }).catch(() => {});
       await tx.pOLine?.deleteMany?.({ where: { po: { projectId: { in: projectIds }, tenantId } } }).catch(() => {});
       await tx.purchaseOrder?.deleteMany?.({ where: { projectId: { in: projectIds }, tenantId } }).catch(() => {});
+      // Packages and related submissions/invites/contracts
+      const pkgIds = (await tx.package?.findMany?.({ where: { projectId: { in: projectIds } }, select: { id: true } }).catch(() => [])).map(p => p.id);
+      if (pkgIds.length) {
+        await tx.submission?.deleteMany?.({ where: { packageId: { in: pkgIds } } }).catch(() => {});
+        await tx.tenderInvite?.deleteMany?.({ where: { packageId: { in: pkgIds } } }).catch(() => {});
+        await tx.contract?.deleteMany?.({ where: { packageId: { in: pkgIds } } }).catch(() => {});
+        await tx.package?.deleteMany?.({ where: { id: { in: pkgIds } } }).catch(() => {});
+      }
+      // Standalone contracts on the projects
+      await tx.contract?.deleteMany?.({ where: { projectId: { in: projectIds } } }).catch(() => {});
       // Other potential modules
       await tx.procurementItem?.deleteMany?.({ where: { projectId: { in: projectIds }, tenantId } }).catch(() => {});
       await tx.procurement?.deleteMany?.({ where: { projectId: { in: projectIds }, tenantId } }).catch(() => {});
 
       // 7) Finally: Projects
+      await tx.projectSnapshot?.deleteMany?.({ where: { projectId: { in: projectIds } } }).catch(() => {});
       await tx.project.deleteMany({
         where: { id: { in: projectIds }, tenantId },
       });
     });
   },
 };
-
