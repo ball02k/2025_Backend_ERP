@@ -346,6 +346,22 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 
 ### GET //api/projects/:id/overview
 
+- Notes: Aggregated project overview (tenant-scoped). Returns both legacy fields and enriched widgets/tables for the Overview screen.
+- Response:
+  - id, code, name, status
+  - links: [{ type, id, label, route }]
+  - widgets:
+    - cvr: { budget, committed, actual, forecast, marginPct }
+    - rfi: { open, latest: [Rfi] }
+    - qa: { open }
+    - hs: { open }
+    - carbon: { monthKgCO2e, ytdKgCO2e }
+    - overdueTasks: [Task]
+    - deliveries: [Delivery]
+  - tables: { rfis: [Rfi], variations: [Variation], pos: [PurchaseOrder] }
+  - health: { finance, rfi, qa, hs, carbon } where values are 'green'|'amber'|'red'
+  - Back-compat: { project, widgets (snapshot), quickLinks, trendsSummary, updatedAt }
+
 ### PATCH //api/projects/:id
 
 - Middlewares: requireProjectMember, <anonymous>

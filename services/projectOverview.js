@@ -182,6 +182,172 @@ async function buildProjectOverview(prisma, { tenantId, projectId }) {
     }
   }
 
+  // --- Aggregates for CVR + latest tables (Overview V2) ---
+  async function safeAgg(modelAggPromise, key) {
+    try {
+      const res = await modelAggPromise;
+      return Number((res && res._sum && res._sum[key]) || 0);
+    } catch (e) {
+      if (e && e.code === 'P2021') return 0; // missing table
+      throw e;
+    }
+  }
+
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+
+  async function carbonMonthAndYtd() {
+    // Try periodMonth/periodYear first; fall back to activityDate windows
+    try {
+      const m = await prisma.carbonEntry.aggregate({
+        where: { tenantId, projectId, periodMonth: month, periodYear: year },
+        _sum: { calculatedKgCO2e: true },
+      });
+      const y = await prisma.carbonEntry.aggregate({
+        where: { tenantId, projectId, periodYear: year },
+        _sum: { calculatedKgCO2e: true },
+      });
+      return {
+        month: Number(m?._sum?.calculatedKgCO2e || 0),
+        ytd: Number(y?._sum?.calculatedKgCO2e || 0),
+      };
+    } catch (e) {
+      if (!(e && e.code === 'P2021')) {
+        // If table exists but fields differ, try date-based
+          const startOfMonth = new Date(year, month - 1, 1);
+          const startOfYear = new Date(year, 0, 1);
+          try {
+            const m2 = await prisma.carbonEntry.aggregate({
+              where: { tenantId, projectId, activityDate: { gte: startOfMonth } },
+              _sum: { calculatedKgCO2e: true },
+            });
+            const y2 = await prisma.carbonEntry.aggregate({
+              where: { tenantId, projectId, activityDate: { gte: startOfYear } },
+              _sum: { calculatedKgCO2e: true },
+            });
+            return {
+              month: Number(m2?._sum?.calculatedKgCO2e || 0),
+              ytd: Number(y2?._sum?.calculatedKgCO2e || 0),
+            };
+          } catch (e2) {
+            if (e2 && e2.code === 'P2021') return { month: 0, ytd: 0 };
+            throw e2;
+          }
+      }
+      return { month: 0, ytd: 0 };
+    }
+  }
+
+  // Parallel queries for overview v2
+  const [
+    budgetSum,
+    committedSum,
+    actualSum,
+    forecastSum,
+    rfisLatest,
+    rfisOpenCount,
+    qaOpenCount,
+    hsOpenCount,
+    carbonAgg,
+    overdueTasks,
+    nextDeliveries,
+    variationsOpen,
+    posRecent,
+  ] = await Promise.all([
+    safeAgg(prisma.budgetLine.aggregate({ _sum: { amount: true }, where: { tenantId, projectId } }), 'amount').catch(() => 0),
+    safeAgg(prisma.commitment.aggregate({ _sum: { amount: true }, where: { tenantId, projectId } }), 'amount').catch(() => 0),
+    safeAgg(prisma.actualCost.aggregate({ _sum: { amount: true }, where: { tenantId, projectId } }), 'amount').catch(() => 0),
+    safeAgg(prisma.forecast.aggregate({ _sum: { amount: true }, where: { tenantId, projectId } }), 'amount').catch(() => 0),
+    prisma.rfi
+      .findMany({ where: { tenantId, projectId }, orderBy: { updatedAt: 'desc' }, take: 5 })
+      .catch(() => []),
+    prisma.rfi
+      .count({ where: { tenantId, projectId, status: { in: ['open', 'Open'] } } })
+      .catch(() => 0),
+    prisma.qaRecord
+      .count({ where: { tenantId, projectId, status: { in: ['open', 'Open', 'fail', 'Fail'] } } })
+      .catch(() => 0),
+    prisma.hsEvent
+      .count({ where: { tenantId, projectId, status: { in: ['open', 'Open', 'investigating', 'Investigating'] } } })
+      .catch(() => 0),
+    carbonMonthAndYtd().catch(() => ({ month: 0, ytd: 0 })),
+    prisma.task
+      .findMany({
+        where: {
+          tenantId,
+          projectId,
+          status: { in: ['Open', 'open', 'In Progress', 'in_progress'] },
+          dueDate: { lt: new Date() },
+        },
+        orderBy: { dueDate: 'asc' },
+        take: 5,
+      })
+      .catch(() => []),
+    prisma.delivery
+      .findMany({
+        where: { tenantId, expectedAt: { gte: new Date() }, po: { projectId } },
+        orderBy: { expectedAt: 'asc' },
+        take: 5,
+        select: { id: true, expectedAt: true, note: true, poId: true, po: { select: { id: true, code: true } } },
+      })
+      .catch(() => []),
+    prisma.variation
+      .findMany({
+        where: { tenantId, projectId, deletedAt: null, NOT: { status: 'Approved' } },
+        orderBy: { updatedAt: 'desc' },
+        take: 5,
+        select: { id: true, title: true, status: true },
+      })
+      .catch(() => []),
+    prisma.purchaseOrder
+      .findMany({
+        where: { tenantId, projectId },
+        orderBy: { orderDate: 'desc' },
+        take: 5,
+        select: { id: true, code: true, status: true },
+      })
+      .catch(() => []),
+  ]);
+
+  const budget = Number(budgetSum || 0);
+  const committed = Number(committedSum || 0);
+  const actual = Number(actualSum || 0);
+  const forecastAtComplete = Number(forecastSum || 0);
+  const valueBase = budget || forecastAtComplete || committed || 1;
+  const marginPct = Math.round(((valueBase - (actual || committed)) / valueBase) * 1000) / 10;
+
+  const health = {
+    finance: marginPct >= 8 ? 'green' : marginPct >= 4 ? 'amber' : 'red',
+    rfi: rfisOpenCount <= 5 ? 'green' : rfisOpenCount <= 12 ? 'amber' : 'red',
+    qa: qaOpenCount <= 10 ? 'green' : qaOpenCount <= 25 ? 'amber' : 'red',
+    hs: hsOpenCount === 0 ? 'green' : hsOpenCount <= 3 ? 'amber' : 'red',
+    carbon: (carbonAgg?.month || 0) <= 0 ? 'green' : 'amber',
+  };
+
+  const overviewV2 = {
+    id: projectOut.id,
+    code: projectOut.code,
+    name: projectOut.name,
+    status: projectOut.status,
+    links,
+    widgets: {
+      cvr: { budget, committed, actual, forecast: forecastAtComplete, marginPct },
+      rfi: { open: rfisOpenCount, latest: rfisLatest },
+      qa: { open: qaOpenCount },
+      hs: { open: hsOpenCount },
+      carbon: { monthKgCO2e: carbonAgg?.month || 0, ytdKgCO2e: carbonAgg?.ytd || 0 },
+      overdueTasks,
+      deliveries: nextDeliveries.map((d) => ({ id: d.id, expectedAt: d.expectedAt, note: d.note, poId: d.poId, po: d.po })),
+    },
+    tables: {
+      rfis: rfisLatest,
+      variations: variationsOpen,
+      pos: posRecent.map((p) => ({ id: p.id, number: p.code, status: p.status })),
+    },
+    health,
+  };
+
   return {
     project: projectOut,
     widgets,
@@ -194,6 +360,7 @@ async function buildProjectOverview(prisma, { tenantId, projectId }) {
     },
     links,
     updatedAt: snap?.updatedAt ?? null,
+    overviewV2,
   };
 }
 
