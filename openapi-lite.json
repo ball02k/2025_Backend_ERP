@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "9e60884"
+    "version": "f3dcb0c"
   },
   "paths": {
     "*": {
