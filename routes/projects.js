@@ -306,6 +306,17 @@ module.exports = (prisma) => {
           type: true,
           statusId: true,
           typeId: true,
+          country: true,
+          currency: true,
+          unitSystem: true,
+          taxScheme: true,
+          contractForm: true,
+          startPlanned: true,
+          endPlanned: true,
+          startActual: true,
+          endActual: true,
+          statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
+          typeRel: { select: { id: true, key: true, label: true, colorHex: true } },
           projectManagerId: true,
           budget: true,
           actualSpend: true,
@@ -328,6 +339,17 @@ module.exports = (prisma) => {
         type: projectRow.type,
         statusId: projectRow.statusId,
         typeId: projectRow.typeId,
+        country: projectRow.country ?? null,
+        currency: projectRow.currency ?? null,
+        unitSystem: projectRow.unitSystem ?? null,
+        taxScheme: projectRow.taxScheme ?? null,
+        contractForm: projectRow.contractForm ?? null,
+        startPlanned: projectRow.startPlanned ?? null,
+        endPlanned: projectRow.endPlanned ?? null,
+        startActual: projectRow.startActual ?? null,
+        endActual: projectRow.endActual ?? null,
+        statusRel: projectRow.statusRel || null,
+        typeRel: projectRow.typeRel || null,
         projectManagerId: projectRow.projectManagerId,
         budget: projectRow.budget,
         actualSpend: projectRow.actualSpend,
@@ -345,9 +367,15 @@ module.exports = (prisma) => {
               registrationNumber: projectRow.client.companyRegNo ?? null,
             }
           : null,
+        // Convenience fields for FE chips
+        statusLabel: projectRow.statusRel?.label ?? projectRow.status ?? null,
+        statusColorHex: projectRow.statusRel?.colorHex ?? null,
+        typeLabel: projectRow.typeRel?.label ?? projectRow.type ?? null,
+        typeColorHex: projectRow.typeRel?.colorHex ?? null,
       };
 
-      return res.json({ project });
+      // Compatibility: also include { data } alias for FE variants
+      return res.json({ project, data: project });
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Failed to load project' });
@@ -425,22 +453,30 @@ module.exports = (prisma) => {
       if (!existing) return res.status(404).json({ error: 'Project not found' });
       const body = projectBodySchema.partial().parse(req.body);
 
-      if (body.clientId) {
-        const client = await prisma.client.findFirst({ where: { id: body.clientId, deletedAt: null } });
-        if (!client) return res.status(400).json({ error: 'Invalid clientId' });
+      if (body.clientId !== undefined) {
+        if (body.clientId !== null) {
+          const client = await prisma.client.findFirst({ where: { id: Number(body.clientId), deletedAt: null } });
+          if (!client) return res.status(400).json({ error: 'Invalid clientId' });
+        }
       }
-      if (body.statusId) {
-        const st = await prisma.projectStatus.findFirst({ where: { id: body.statusId } });
-        if (!st) return res.status(400).json({ error: 'Invalid statusId' });
+      if (body.statusId !== undefined) {
+        if (body.statusId !== null) {
+          const st = await prisma.projectStatus.findFirst({ where: { id: Number(body.statusId) } });
+          if (!st) return res.status(400).json({ error: 'Invalid statusId' });
+        }
       }
-      if (body.typeId) {
-        const tp = await prisma.projectType.findFirst({ where: { id: body.typeId } });
-        if (!tp) return res.status(400).json({ error: 'Invalid typeId' });
+      if (body.typeId !== undefined) {
+        if (body.typeId !== null) {
+          const tp = await prisma.projectType.findFirst({ where: { id: Number(body.typeId) } });
+          if (!tp) return res.status(400).json({ error: 'Invalid typeId' });
+        }
       }
-        if (body.projectManagerId !== undefined) {
+      if (body.projectManagerId !== undefined) {
+        if (body.projectManagerId !== null) {
           const pm = await prisma.user.findFirst({ where: { id: Number(body.projectManagerId), tenantId } });
           if (!pm) return res.status(400).json({ error: 'Invalid projectManagerId' });
         }
+      }
 
       const updated = await prisma.project.update({
         where: { id },
@@ -448,10 +484,21 @@ module.exports = (prisma) => {
           ...(body.code !== undefined ? { code: body.code } : {}),
           ...(body.name !== undefined ? { name: body.name } : {}),
           ...(body.description !== undefined ? { description: body.description } : {}),
-          ...(body.clientId !== undefined ? { clientId: body.clientId } : {}),
-            ...(body.projectManagerId !== undefined ? { projectManagerId: Number(body.projectManagerId) } : {}),
-          ...(body.statusId !== undefined ? { statusId: body.statusId } : {}),
-          ...(body.typeId !== undefined ? { typeId: body.typeId } : {}),
+          ...(body.clientId !== undefined ? { clientId: body.clientId == null ? null : Number(body.clientId) } : {}),
+          ...(body.projectManagerId !== undefined ? { projectManagerId: body.projectManagerId == null ? null : Number(body.projectManagerId) } : {}),
+          ...(body.statusId !== undefined ? { statusId: body.statusId == null ? null : Number(body.statusId) } : {}),
+          ...(body.typeId !== undefined ? { typeId: body.typeId == null ? null : Number(body.typeId) } : {}),
+          ...(body.status !== undefined ? { status: body.status } : {}),
+          ...(body.type !== undefined ? { type: body.type } : {}),
+          ...(body.country !== undefined ? { country: body.country } : {}),
+          ...(body.currency !== undefined ? { currency: body.currency } : {}),
+          ...(body.unitSystem !== undefined ? { unitSystem: body.unitSystem } : {}),
+          ...(body.taxScheme !== undefined ? { taxScheme: body.taxScheme } : {}),
+          ...(body.contractForm !== undefined ? { contractForm: body.contractForm } : {}),
+          ...(body.startPlanned !== undefined ? { startPlanned: body.startPlanned ? new Date(body.startPlanned) : null } : {}),
+          ...(body.endPlanned !== undefined ? { endPlanned: body.endPlanned ? new Date(body.endPlanned) : null } : {}),
+          ...(body.startActual !== undefined ? { startActual: body.startActual ? new Date(body.startActual) : null } : {}),
+          ...(body.endActual !== undefined ? { endActual: body.endActual ? new Date(body.endActual) : null } : {}),
           ...(body.budget !== undefined ? { budget: body.budget } : {}),
           ...(body.actualSpend !== undefined ? { actualSpend: body.actualSpend } : {}),
           ...(body.startDate !== undefined ? { startDate: body.startDate ? new Date(body.startDate) : null } : {}),
@@ -463,7 +510,8 @@ module.exports = (prisma) => {
           typeRel: { select: { id: true, key: true, label: true, colorHex: true } },
         },
       });
-      res.json(updated);
+      // Compatibility alias for FE variants
+      res.json({ ...updated, data: updated });
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed', details: err.errors });
       console.error(err);
