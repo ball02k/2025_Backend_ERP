@@ -346,6 +346,30 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 
 ### GET //api/projects/:id/overview
 
+### PATCH //api/projects/:id
+
+- Middlewares: requireProjectMember, <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Notes: Partial update; accepts optional reason for audit. Returns updated project and {data} alias.
+
+### PATCH //api/clients/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Notes: Partial update; accepts optional reason for audit. Returns updated client and {data} alias.
+
+### POST //api/projects/:projectId/packages/:packageId/push-to-rfx
+
+- Middlewares: requireProjectMember, requireFeature('rfx')
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: projectId, packageId
+- Notes: Creates RFx draft (Request) from a Package; pre-seeds invites from package invites, sets deadline = now + 10 days; returns { rfxId, link }.
+
 - Middlewares: requireProjectMember, <anonymous>
 - Controller: anonymous
 - Auth/Guards: none
@@ -1983,4 +2007,3 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Auth/Guards: none
 - Path params: none
 - Lint: Missing requireAuth
-

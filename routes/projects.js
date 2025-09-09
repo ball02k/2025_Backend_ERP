@@ -519,6 +519,67 @@ module.exports = (prisma) => {
     }
   });
 
+  // PATCH /api/projects/:id (partial update with audit)
+  router.patch('/:id', requireProjectMember, async (req, res) => {
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+      const existing = await prisma.project.findFirst({ where: { id, tenantId, deletedAt: null } });
+      if (!existing) return res.status(404).json({ error: 'Project not found' });
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason : null;
+      // Reuse the same parsing as PUT partial
+      const body = projectBodySchema.partial().parse(req.body || {});
+      const updated = await prisma.project.update({
+        where: { id },
+        data: {
+          ...(body.code !== undefined ? { code: body.code } : {}),
+          ...(body.name !== undefined ? { name: body.name } : {}),
+          ...(body.description !== undefined ? { description: body.description } : {}),
+          ...(body.clientId !== undefined ? { clientId: body.clientId == null ? null : Number(body.clientId) } : {}),
+          ...(body.projectManagerId !== undefined ? { projectManagerId: body.projectManagerId == null ? null : Number(body.projectManagerId) } : {}),
+          ...(body.statusId !== undefined ? { statusId: body.statusId == null ? null : Number(body.statusId) } : {}),
+          ...(body.typeId !== undefined ? { typeId: body.typeId == null ? null : Number(body.typeId) } : {}),
+          ...(body.status !== undefined ? { status: body.status } : {}),
+          ...(body.type !== undefined ? { type: body.type } : {}),
+          ...(body.country !== undefined ? { country: body.country } : {}),
+          ...(body.currency !== undefined ? { currency: body.currency } : {}),
+          ...(body.unitSystem !== undefined ? { unitSystem: body.unitSystem } : {}),
+          ...(body.taxScheme !== undefined ? { taxScheme: body.taxScheme } : {}),
+          ...(body.contractForm !== undefined ? { contractForm: body.contractForm } : {}),
+          ...(body.startPlanned !== undefined ? { startPlanned: body.startPlanned ? new Date(body.startPlanned) : null } : {}),
+          ...(body.endPlanned !== undefined ? { endPlanned: body.endPlanned ? new Date(body.endPlanned) : null } : {}),
+          ...(body.startActual !== undefined ? { startActual: body.startActual ? new Date(body.startActual) : null } : {}),
+          ...(body.endActual !== undefined ? { endActual: body.endActual ? new Date(body.endActual) : null } : {}),
+          ...(body.budget !== undefined ? { budget: body.budget } : {}),
+          ...(body.actualSpend !== undefined ? { actualSpend: body.actualSpend } : {}),
+          ...(body.startDate !== undefined ? { startDate: body.startDate ? new Date(body.startDate) : null } : {}),
+          ...(body.endDate !== undefined ? { endDate: body.endDate ? new Date(body.endDate) : null } : {}),
+        },
+        include: {
+          client: { select: { id: true, name: true } },
+          statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
+          typeRel: { select: { id: true, key: true, label: true, colorHex: true } },
+        },
+      });
+      try {
+        await prisma.auditLog.create({
+          data: {
+            entity: 'Project',
+            entityId: String(id),
+            action: 'update',
+            userId: req.user?.id ? Number(req.user.id) : null,
+            changes: { set: { reason } },
+          },
+        });
+      } catch (_) {}
+      res.json({ ...updated, data: updated });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: err.message || 'Failed to patch project' });
+    }
+  });
+
   // DELETE /api/projects/:id (soft delete)
   router.delete('/:id', requireProjectMember, async (req, res) => {
     try {

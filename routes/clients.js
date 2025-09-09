@@ -240,7 +240,7 @@ module.exports = (prisma) => {
   });
 
   // PUT /api/clients/:id
-  router.put('/:id', async (req, res) => {
+router.put('/:id', async (req, res) => {
     try {
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
@@ -258,7 +258,43 @@ module.exports = (prisma) => {
       console.error(err);
       res.status(500).json({ error: err.message || 'Failed to update client' });
     }
-  });
+});
+
+// PATCH /api/clients/:id  (partial with audit)
+router.patch('/:id', async (req, res) => {
+  try {
+    const prisma = req.prisma || require('../utils/prisma.cjs').prisma;
+    const tenantId = req.user && req.user.tenantId;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+    const existing = await prisma.client.findFirst({ where: { id, deletedAt: null } });
+    if (!existing) return res.status(404).json({ error: 'Client not found' });
+    const body = req.body || {};
+    const reason = typeof body?.reason === 'string' ? body.reason : null;
+    const data = {};
+    // allow a small set of edits additively
+    if (body.name !== undefined) data.name = String(body.name);
+    if (body.industry !== undefined) data.industry = body.industry == null ? null : String(body.industry);
+    if (body.companyNumber !== undefined) data.companyRegNo = body.companyNumber == null ? null : String(body.companyNumber);
+    if (body.vatNo !== undefined) data.vatNo = body.vatNo == null ? null : String(body.vatNo);
+    const updated = await prisma.client.update({ where: { id }, data });
+    try {
+      await prisma.auditLog.create({
+        data: {
+          entity: 'Client',
+          entityId: String(id),
+          action: 'update',
+          userId: req.user?.id ? Number(req.user.id) : null,
+          changes: { set: { reason } },
+        },
+      });
+    } catch (_) {}
+    res.json({ ...updated, data: updated });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to patch client' });
+  }
+});
 
   // DELETE /api/clients/:id (soft delete)
   router.delete('/:id', async (req, res) => {

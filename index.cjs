@@ -45,6 +45,8 @@ const spmRouter = require('./routes/spm.cjs');
 const integrationsRouter = require('./routes/integrations.cjs');
 const homeRoutes = require('./routes/home.cjs');
 const procurementRoutes = require('./routes/procurement');
+const analyticsRouter = require('./routes/analytics.cjs');
+const rfxRouter = require('./routes/rfx.cjs');
 const { attachUser } = require('./middleware/auth.cjs');
 const requireAuth = require('./middleware/requireAuth.cjs');
 const devAuth = require('./middleware/devAuth.cjs');
@@ -155,6 +157,7 @@ app.use('/api/projects', requireAuth, require('./routes/project_members.cjs')(pr
 app.use('/api/projects', requireAuth, require('./routes/project_alerts.cjs')(prisma));
 // app.use('/api/projects', projectsOverviewRouter);
 app.use('/api/projects', requireAuth, projectsOverviewRouter);
+app.use('/api/projects', requireAuth, rfxRouter(prisma));
 app.use('/api/projects', requireAuth, projectDocumentsRouter);
 app.use('/api/health', requireAuth, healthRouter);
 app.use('/api/tasks', requireAuth, require('./routes/tasks')(prisma));
@@ -175,6 +178,7 @@ app.use('/api/rfis', requireAuth, rfisRouter);
 app.use('/api/qa', requireAuth, qaRouter);
 app.use('/api/hs', requireAuth, hsRouter);
 app.use('/api/carbon', requireAuth, carbonRouter);
+app.use('/api/analytics', requireAuth, analyticsRouter(prisma));
 app.use('/api', homeRoutes(prisma, { requireAuth }));
 
 // Lightweight compatibility/stub endpoints to avoid 404s on common FE calls
