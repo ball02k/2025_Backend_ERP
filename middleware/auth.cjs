@@ -1,4 +1,5 @@
 const { verify } = require('../utils/jwt.cjs');
+const { isDevAuthEnabled } = require('../utils/devFlags.cjs');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 const DEFAULT_TENANT = process.env.TENANT_DEFAULT || 'demo';
@@ -12,7 +13,7 @@ function attachUser(req, _res, next) {
   try {
     let tok = parseBearer(req);
     // Dev-only: allow token via query string (?token=...) when enabled
-    if (!tok && process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_AUTH === '1') {
+    if (!tok && isDevAuthEnabled()) {
       if (req.query && req.query.token) tok = String(req.query.token);
     }
     if (tok) {

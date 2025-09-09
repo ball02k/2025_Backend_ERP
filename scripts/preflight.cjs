@@ -31,6 +31,11 @@ try {
   if (process.env.RUN_SMOKES === '1') {
     run('node scripts/variations-smoke.mjs');
     run('npm run smoke:docs');
+    // New module smokes
+    run('npm run smoke:rfis');
+    run('npm run smoke:qa');
+    run('npm run smoke:hs');
+    run('npm run smoke:carbon');
   }
   console.log('Preflight OK');
 } catch (e) {

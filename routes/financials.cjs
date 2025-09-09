@@ -467,6 +467,36 @@ router.delete('/forecasts/:id', async (req, res) => {
 });
 
 module.exports = router;
+// ---------- Snapshot ----------
+router.get('/snapshot', async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = req.query.projectId != null ? Number(req.query.projectId) : undefined;
+
+    const where = projectId ? { tenantId, projectId } : { tenantId };
+    const [budget, committed, actual, forecast] = await Promise.all([
+      prisma.budgetLine.aggregate({ _sum: { amount: true }, where }),
+      prisma.commitment.aggregate({ _sum: { amount: true }, where: { ...where, status: 'Open' } }),
+      prisma.actualCost.aggregate({ _sum: { amount: true }, where }),
+      prisma.forecast.aggregate({ _sum: { amount: true }, where }),
+    ]);
+
+    const sums = {
+      budget: Number(budget._sum.amount || 0),
+      committed: Number(committed._sum.amount || 0),
+      actual: Number(actual._sum.amount || 0),
+      forecast: Number(forecast._sum.amount || 0),
+    };
+    const value = sums.budget; // simplified "value" proxy
+    const cost = sums.actual + sums.committed;
+    const margin = value - cost;
+    const marginPct = value > 0 ? (margin / value) * 100 : 0;
+
+    res.json({ ...sums, value, cost, margin, marginPct });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to compute financial snapshot' });
+  }
+});
 // ---------- Periods & CVR ----------
 function safePct(n, d) { if (!d || Number(d) === 0) return null; return Number(((Number(n) / Number(d)) * 100).toFixed(2)); }
 function sum(arr, f) { return (arr || []).reduce((t, x) => t + Number(f ? f(x) : x), 0); }

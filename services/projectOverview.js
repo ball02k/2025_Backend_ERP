@@ -32,11 +32,11 @@ async function buildProjectOverview(prisma, { tenantId, projectId }) {
 
   const widgets = {
     financial: {
-      budget: snap?.budget ?? null,
-      committed: snap?.committed ?? null,
-      actual: snap?.actual ?? null,
+      budget: (snap?.financialBudget ?? snap?.budget) ?? null,
+      committed: (snap?.financialCommitted ?? snap?.committed) ?? null,
+      actual: (snap?.financialActual ?? snap?.actual) ?? null,
       retentionHeld: snap?.retentionHeld ?? null,
-      forecastAtComplete: snap?.forecastAtComplete ?? null,
+      forecastAtComplete: (snap?.financialForecast ?? snap?.forecastAtComplete) ?? null,
       variance: snap?.variance ?? null,
     },
     schedule: {

@@ -1,8 +1,8 @@
 # API Catalog
 
-Generated: 2025-09-01T09:20:58.549Z (UTC) / Monday, 1 September 2025 at 10:20:58 BST (Europe/London)
+Generated: 2025-09-09T09:24:20.372Z (UTC) / Tuesday 9 September 2025 at 10:24:20 BST (Europe/London)
 
-Commit: 59d3ff9
+Commit: e455054
 
 ## Reminders
 
@@ -256,6 +256,30 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Path params: none
 - Lint: Missing requireAuth
 
+### GET //api/projects/:projectId/packages
+
+- Middlewares: <anonymous>
+- Controller: anonymous (/Users/Baller/Documents/2025_ERP/2025_Backend_ERP/controllers/packageController.js#listPackages)
+- Auth/Guards: none
+- Path params: projectId
+- Lint: Missing requireAuth; Missing tenant scoping
+
+### POST //api/projects/:projectId/packages
+
+- Middlewares: <anonymous>
+- Controller: anonymous (/Users/Baller/Documents/2025_ERP/2025_Backend_ERP/controllers/packageController.js#createPackage)
+- Auth/Guards: none
+- Path params: projectId
+- Lint: Missing requireAuth; Missing tenant scoping
+
+### GET //api/projects/:projectId/contracts
+
+- Middlewares: <anonymous>
+- Controller: anonymous (/Users/Baller/Documents/2025_ERP/2025_Backend_ERP/controllers/packageController.js#listContractsByProject)
+- Auth/Guards: none
+- Path params: projectId
+- Lint: Missing requireAuth; Missing tenant scoping
+
 ### GET //api/projects/:id
 
 - Middlewares: <anonymous>
@@ -323,6 +347,22 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 ### GET //api/projects/:id/overview
 
 - Middlewares: requireProjectMember, <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/projects/:id/documents
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### POST //api/projects/:id/documents
+
+- Middlewares: <anonymous>
 - Controller: anonymous
 - Auth/Guards: none
 - Path params: id
@@ -552,6 +592,14 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Path params: id
 - Lint: Missing requireAuth
 
+### GET //api/onboarding
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
 ### GET //api/onboarding/projects
 
 - Middlewares: <anonymous>
@@ -744,6 +792,38 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Path params: none
 - Lint: Missing requireAuth
 
+### POST //api/packages/:packageId/invite
+
+- Middlewares: <anonymous>
+- Controller: anonymous (/Users/Baller/Documents/2025_ERP/2025_Backend_ERP/controllers/procurementController.js#inviteSuppliers)
+- Auth/Guards: none
+- Path params: packageId
+- Lint: Missing requireAuth; Missing tenant scoping
+
+### POST //api/packages/:packageId/submit
+
+- Middlewares: <anonymous>
+- Controller: anonymous (/Users/Baller/Documents/2025_ERP/2025_Backend_ERP/controllers/procurementController.js#submitBid)
+- Auth/Guards: none
+- Path params: packageId
+- Lint: Missing requireAuth; Missing tenant scoping
+
+### POST //api/submissions/:submissionId/score
+
+- Middlewares: <anonymous>
+- Controller: anonymous (/Users/Baller/Documents/2025_ERP/2025_Backend_ERP/controllers/procurementController.js#scoreSubmission)
+- Auth/Guards: none
+- Path params: submissionId
+- Lint: Missing requireAuth; Missing tenant scoping
+
+### POST //api/packages/:packageId/award
+
+- Middlewares: <anonymous>
+- Controller: anonymous (/Users/Baller/Documents/2025_ERP/2025_Backend_ERP/controllers/procurementController.js#awardContract)
+- Auth/Guards: none
+- Path params: packageId
+- Lint: Missing requireAuth; Missing tenant scoping
+
 ### GET //api/financials
 
 - Middlewares: <anonymous>
@@ -920,6 +1000,14 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Path params: id
 - Lint: Missing requireAuth
 
+### GET //api/financials/snapshot
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
 ### GET //api/financials/:projectId/periods
 
 - Middlewares: <anonymous>
@@ -944,6 +1032,214 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Path params: projectId, period
 - Lint: Missing requireAuth
 
+### GET //api/projects/financials
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### POST //api/projects/financials/:projectId/adjustments
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: projectId
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/budgets
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### POST //api/projects/financials/budgets
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/budgets/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### PUT //api/projects/financials/budgets/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### DELETE //api/projects/financials/budgets/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/commitments
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### POST //api/projects/financials/commitments
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/commitments/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### PUT //api/projects/financials/commitments/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### DELETE //api/projects/financials/commitments/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/actuals
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### POST //api/projects/financials/actuals
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/actuals/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### PUT //api/projects/financials/actuals/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### DELETE //api/projects/financials/actuals/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/forecasts
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### POST //api/projects/financials/forecasts
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/forecasts/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### PUT //api/projects/financials/forecasts/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### DELETE //api/projects/financials/forecasts/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/snapshot
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/:projectId/periods
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: projectId
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/:projectId/cvr
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: projectId
+- Lint: Missing requireAuth
+
+### GET //api/projects/financials/:projectId/cvr/:period
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: projectId, period
+- Lint: Missing requireAuth
+
 ### GET //api/suppliers
 
 - Middlewares: <anonymous>
@@ -953,6 +1249,46 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Lint: Missing requireAuth
 
 ### GET //api/suppliers/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### POST //api/suppliers
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### PUT //api/suppliers/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### DELETE //api/suppliers/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### POST //api/suppliers/onboarding-links
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### GET //api/suppliers/:id/contracts
 
 - Middlewares: <anonymous>
 - Controller: anonymous
@@ -1368,6 +1704,222 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Path params: vrn
 - Lint: Missing requireAuth; Missing tenant scoping
 
+### GET //api/rfis
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### POST //api/rfis
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### GET //api/rfis/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### PATCH //api/rfis/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### DELETE //api/rfis/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/rfis/:id/documents
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/qa/records
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### POST //api/qa/records
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### GET //api/qa/records/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### PATCH //api/qa/records/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### DELETE //api/qa/records/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### POST //api/qa/records/:id/items
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### PATCH //api/qa/items/:itemId
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: itemId
+- Lint: Missing requireAuth
+
+### DELETE //api/qa/items/:itemId
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: itemId
+- Lint: Missing requireAuth
+
+### GET //api/qa/records/:id/documents
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/hs/events
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### POST //api/hs/events
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### GET //api/hs/events/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### PATCH //api/hs/events/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### DELETE //api/hs/events/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/hs/events/:id/documents
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/carbon/entries
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### POST //api/carbon/entries
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: none
+- Lint: Missing requireAuth
+
+### GET //api/carbon/entries/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### PATCH //api/carbon/entries/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### DELETE //api/carbon/entries/:id
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
+### GET //api/carbon/entries/:id/documents
+
+- Middlewares: <anonymous>
+- Controller: anonymous
+- Auth/Guards: none
+- Path params: id
+- Lint: Missing requireAuth
+
 ### GET //api/home/overview
 
 - Middlewares: requireAuth, <anonymous>
@@ -1375,6 +1927,38 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Auth/Guards: requireAuth
 - Path params: none
 - Lint: OK
+
+### GET /api/activity
+
+- Middlewares: requireAuth, <anonymous>
+- Controller: anonymous
+- Auth/Guards: requireAuth
+- Path params: none
+- Lint: Missing tenant scoping
+
+### GET /api/audit/events
+
+- Middlewares: requireAuth, <anonymous>
+- Controller: anonymous
+- Auth/Guards: requireAuth
+- Path params: none
+- Lint: Missing tenant scoping
+
+### GET /api/resources/utilization,/api/planning/utilization
+
+- Middlewares: requireAuth, <anonymous>
+- Controller: anonymous
+- Auth/Guards: requireAuth
+- Path params: none
+- Lint: Missing tenant scoping
+
+### GET /api/finance/snapshot
+
+- Middlewares: requireAuth, <anonymous>
+- Controller: anonymous
+- Auth/Guards: requireAuth
+- Path params: none
+- Lint: Missing tenant scoping
 
 ### POST //api/dev/login
 

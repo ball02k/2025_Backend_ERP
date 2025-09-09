@@ -1,14 +1,18 @@
+const { isDevAuthEnabled } = require('../utils/devFlags.cjs');
+
 module.exports = function devAuth(req, _res, next) {
-  // Dev-only shortcut, gated behind explicit flag
-  const bypass = process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_AUTH === '1';
+  // Dev-only shortcut to attach a demo user when no token is provided
+  const bypass = isDevAuthEnabled();
   if (!bypass) return next();
 
   // If attachUser has already set req.user (valid token), do nothing
   if (req.user && req.user.tenantId) return next();
 
-  // If caller sent a Bearer token, let normal auth handle it
+  // If caller sent a valid Bearer token, attachUser has already populated req.user.
+  // If there's an Authorization header but it's invalid (req.user not set), still bypass in dev.
+  // This avoids dev 401s when FE sends a stale/empty token.
   const hasAuthHeader = req.headers.authorization && req.headers.authorization.startsWith('Bearer ');
-  if (hasAuthHeader) return next();
+  if (hasAuthHeader && req.user) return next();
 
   // Dev fallback: attach a demo user so requireAuth passes
   req.user = {

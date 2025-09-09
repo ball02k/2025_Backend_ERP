@@ -34,7 +34,10 @@ function ensureS3() {
 // POST /api/documents/init
 router.post('/init', async (req, res) => {
   try {
-    const { filename, mimeType } = req.body || {};
+    // Accept both new and legacy field names from FE
+    const body = req.body || {};
+    const filename = body.filename || body.fileName;
+    const mimeType = body.mimeType || body.contentType;
     if (!filename) return res.status(400).json({ error: 'filename is required' });
     const storageKey = makeStorageKey(filename);
 
@@ -51,7 +54,7 @@ router.post('/init', async (req, res) => {
 
     const token = signKey(storageKey);
     const uploadUrl = `/api/documents/upload/${encodeURIComponent(storageKey)}?token=${token}`;
-    return res.json({ data: { storageKey, uploadUrl, token } });
+    return res.json({ data: { storageKey, uploadUrl, token, provider: 'local' } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to init upload', details: DEV ? String(err.message) : undefined });
@@ -77,9 +80,17 @@ router.put('/upload/:key', async (req, res) => {
 router.post('/complete', async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const { storageKey, filename, mimeType, size, sha256, projectId, variationId } = req.body || {};
+    const body = req.body || {};
+    // Accept legacy aliases (fileName/contentType) and pass-through extra fields
+    const storageKey = body.storageKey;
+    const filename = body.filename || body.fileName;
+    const mimeType = body.mimeType || body.contentType || 'application/octet-stream';
+    const size = body.size != null ? body.size : body.fileSize;
+    const sha256 = body.sha256 || body.hash || null;
+    const projectId = body.projectId;
+    const variationId = body.variationId;
 
-    if (!storageKey || !filename || !mimeType || size == null)
+    if (!storageKey || !filename || size == null)
       return res.status(400).json({ error: 'Missing required fields' });
 
     const created = await prisma.document.create({
@@ -117,7 +128,7 @@ router.post('/complete', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const { q, projectId, variationId, limit = 50, offset = 0 } = req.query;
+    const { q, projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId, limit = 50, offset = 0 } = req.query;
 
     const where = { tenantId };
 
@@ -128,12 +139,16 @@ router.get('/', async (req, res) => {
       ];
     }
 
-    if (projectId || variationId) {
+    if (projectId || variationId || rfiId || qaRecordId || hsEventId || carbonEntryId) {
       where.links = {
         some: {
           tenantId,
           ...(projectId ? { projectId: Number(projectId) } : {}),
           ...(variationId ? { variationId: Number(variationId) } : {}),
+          ...(rfiId ? { rfiId: Number(rfiId) } : {}),
+          ...(qaRecordId ? { qaRecordId: Number(qaRecordId) } : {}),
+          ...(hsEventId ? { hsEventId: Number(hsEventId) } : {}),
+          ...(carbonEntryId ? { carbonEntryId: Number(carbonEntryId) } : {}),
         },
       };
     }
@@ -149,7 +164,13 @@ router.get('/', async (req, res) => {
       prisma.document.count({ where }),
     ]);
 
-    res.json({ data, meta: { total, limit: Number(limit), offset: Number(offset) } });
+    // Provide both modern and legacy shapes
+    res.json({
+      data,
+      items: data,
+      meta: { total: Number(total), limit: Number(limit), offset: Number(offset) },
+      total: Number(total),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to list documents', details: DEV ? String(err.message) : undefined });
@@ -204,7 +225,8 @@ router.delete('/:id', async (req, res) => {
       prisma.document.delete({ where: { id } }),
     ]);
 
-    res.json({ data: { id: Number(id) } });
+    // Return a compatibility flag some callers expect
+    res.json({ data: { id: Number(id), is_deleted: true } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete document', details: DEV ? String(err.message) : undefined });
@@ -213,9 +235,9 @@ router.delete('/:id', async (req, res) => {
 
 // POST /api/documents/:id/link
 router.post('/:id/link', async (req, res) => {
-  const { projectId, variationId } = req.body || {};
-  if (!projectId && !variationId)
-    return res.status(400).json({ error: 'Provide projectId or variationId' });
+  const { projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId } = req.body || {};
+  if (!projectId && !variationId && !rfiId && !qaRecordId && !hsEventId && !carbonEntryId)
+    return res.status(400).json({ error: 'Provide a valid link target' });
 
   try {
     const tenantId = req.user.tenantId;
@@ -229,7 +251,11 @@ router.post('/:id/link', async (req, res) => {
         documentId: id,
         projectId: projectId ? Number(projectId) : null,
         variationId: variationId ? Number(variationId) : null,
-        linkType: projectId ? 'project' : 'variation',
+        rfiId: rfiId ? Number(rfiId) : null,
+        qaRecordId: qaRecordId ? Number(qaRecordId) : null,
+        hsEventId: hsEventId ? Number(hsEventId) : null,
+        carbonEntryId: carbonEntryId ? Number(carbonEntryId) : null,
+        linkType: projectId ? 'project' : variationId ? 'variation' : rfiId ? 'rfi' : qaRecordId ? 'qa' : hsEventId ? 'hs' : 'carbon',
       },
     });
 
@@ -242,9 +268,9 @@ router.post('/:id/link', async (req, res) => {
 
 // POST /api/documents/:id/unlink
 router.post('/:id/unlink', async (req, res) => {
-  const { projectId, variationId } = req.body || {};
-  if (!projectId && !variationId)
-    return res.status(400).json({ error: 'Provide projectId or variationId' });
+  const { projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId } = req.body || {};
+  if (!projectId && !variationId && !rfiId && !qaRecordId && !hsEventId && !carbonEntryId)
+    return res.status(400).json({ error: 'Provide a valid unlink target' });
   try {
     const tenantId = req.user.tenantId;
     const id = BigInt(req.params.id);
@@ -253,6 +279,10 @@ router.post('/:id/unlink', async (req, res) => {
       documentId: id,
       ...(projectId ? { projectId: Number(projectId) } : {}),
       ...(variationId ? { variationId: Number(variationId) } : {}),
+      ...(rfiId ? { rfiId: Number(rfiId) } : {}),
+      ...(qaRecordId ? { qaRecordId: Number(qaRecordId) } : {}),
+      ...(hsEventId ? { hsEventId: Number(hsEventId) } : {}),
+      ...(carbonEntryId ? { carbonEntryId: Number(carbonEntryId) } : {}),
     };
     const result = await prisma.documentLink.deleteMany({ where });
     res.json({ data: { deleted: result.count } });
