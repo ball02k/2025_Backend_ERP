@@ -153,29 +153,32 @@ module.exports = (prisma, { requireAuth }) => {
       }, { scope1: 0, scope2: 0, scope3: 0 });
 
       // --- 8) Cashflow (invoices in/out next 30 days) ---
+      // Schema does not have a `direction` field. Treat invoices with a supplier as payables (money out),
+      // and those without a supplier as receivables (money in). Use `gross` as the amount.
+      const windowEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
       const [payables, receivables] = await Promise.all([
         prisma.invoice?.findMany
           ? prisma.invoice.findMany({
               where: {
                 tenantId,
-                direction: { equals: 'payable', mode: 'insensitive' },
-                dueDate: { gte: today, lte: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30) }
+                supplierId: { not: null },
+                dueDate: { gte: today, lte: windowEnd }
               },
-              select: { amount: true }
+              select: { gross: true }
             })
           : [],
         prisma.invoice?.findMany
           ? prisma.invoice.findMany({
               where: {
                 tenantId,
-                direction: { equals: 'receivable', mode: 'insensitive' },
-                dueDate: { gte: today, lte: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30) }
+                supplierId: null,
+                dueDate: { gte: today, lte: windowEnd }
               },
-              select: { amount: true }
+              select: { gross: true }
             })
           : []
       ]);
-      const sum = arr => (arr || []).reduce((a, x) => a + Number(x.amount || 0), 0);
+      const sum = arr => (arr || []).reduce((a, x) => a + Number(x.gross || 0), 0);
       const cashflow = { receivables: sum(receivables), payables: sum(payables) };
 
       // --- 9) Overdue tasks (top 5) ---

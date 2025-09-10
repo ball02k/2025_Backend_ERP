@@ -60,8 +60,11 @@ router.get('/', requireProjectMember, async (req, res, next) => {
           id: true,
           code: true,
           supplier: true,
+          supplierId: true,
           status: true,
           total: true,
+          projectId: true,
+          project: { select: { id: true, name: true } },
           deliveries: { select: { expectedAt: true }, orderBy: { expectedAt: 'asc' }, take: 1 },
         },
       }),
@@ -74,6 +77,10 @@ router.get('/', requireProjectMember, async (req, res, next) => {
       status: r.status,
       amount: r.total,
       neededBy: r.deliveries[0]?.expectedAt || null,
+      projectId: r.projectId,
+      project: r.project ? { id: r.project.id, name: r.project.name } : { id: r.projectId, name: null },
+      // Additive: normalized supplier object for pill labels
+      supplier: { id: r.supplierId || null, name: r.supplier || null },
     }));
     res.json({ total, items });
   } catch (e) { next(e); }
@@ -144,7 +151,12 @@ router.get('/pos', async (req, res, next) => {
       },
     });
     const rows = await attachSupplierInfo(rowsRaw, tenantId);
-    res.json(rows);
+    // Additive field: supplier { id, name } while keeping existing supplierInfo
+    const enriched = rows.map((r) => ({
+      ...r,
+      supplier: r.supplierId ? { id: r.supplierId, name: r.supplierInfo?.name || r.supplier || null } : (r.supplier ? { id: null, name: r.supplier } : null),
+    }));
+    res.json(enriched);
   } catch (e) { next(e); }
 });
 
@@ -153,18 +165,21 @@ router.get('/pos/:id', async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const id = Number(req.params.id);
-    const rowRaw = await prisma.purchaseOrder.findFirst({
-      where: { id, tenantId },
-      include: {
-        lines: true,
-        deliveries: true,
-        // Minimal relation for FE linking
-        project: { select: { id: true, name: true } },
-      },
-    });
-    if (!rowRaw) return res.status(404).json({ error: 'Not found' });
+  const rowRaw = await prisma.purchaseOrder.findFirst({
+    where: { id, tenantId },
+    include: {
+      lines: true,
+      deliveries: true,
+      // Minimal relation for FE linking
+      project: { select: { id: true, name: true } },
+    },
+  });
+  if (!rowRaw) return res.status(404).json({ error: 'Not found' });
     const row = await attachSupplierInfo(rowRaw, tenantId);
-    res.json(row);
+    res.json({
+      ...row,
+      supplier: row.supplierId ? { id: row.supplierId, name: row.supplierInfo?.name || row.supplier || null } : (row.supplier ? { id: null, name: row.supplier } : null),
+    });
   } catch (e) { next(e); }
 });
 
@@ -207,7 +222,10 @@ router.post('/pos', requireProjectMember, async (req, res, next) => {
     if (created.status === 'Open') {
       await adjustSnapshot(created.projectId, tenantId, 'procurementPOsOpen', 1);
     }
-    res.status(201).json(created);
+    res.status(201).json({
+      ...created,
+      supplier: created.supplierId ? { id: created.supplierId, name: created.supplierInfo?.name || created.supplier || null } : (created.supplier ? { id: null, name: created.supplier } : null),
+    });
   } catch (e) { next(e); }
 });
 
@@ -281,7 +299,10 @@ router.put('/pos/:id', async (req, res, next) => {
       await adjustSnapshot(updated.projectId, tenantId, 'procurementPOsOpen', 1);
     }
 
-    res.json(updatedWithSupplier);
+    res.json({
+      ...updatedWithSupplier,
+      supplier: updatedWithSupplier.supplierId ? { id: updatedWithSupplier.supplierId, name: updatedWithSupplier.supplierInfo?.name || updatedWithSupplier.supplier || null } : (updatedWithSupplier.supplier ? { id: null, name: updatedWithSupplier.supplier } : null),
+    });
   } catch (e) { next(e); }
 });
 

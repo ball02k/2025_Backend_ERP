@@ -47,6 +47,7 @@ const homeRoutes = require('./routes/home.cjs');
 const procurementRoutes = require('./routes/procurement');
 const analyticsRouter = require('./routes/analytics.cjs');
 const rfxRouter = require('./routes/rfx.cjs');
+const projectInvoicesRouter = require('./routes/project_invoices.cjs');
 const { attachUser } = require('./middleware/auth.cjs');
 const requireAuth = require('./middleware/requireAuth.cjs');
 const devAuth = require('./middleware/devAuth.cjs');
@@ -158,6 +159,7 @@ app.use('/api/projects', requireAuth, require('./routes/project_alerts.cjs')(pri
 // app.use('/api/projects', projectsOverviewRouter);
 app.use('/api/projects', requireAuth, projectsOverviewRouter);
 app.use('/api/projects', requireAuth, rfxRouter(prisma));
+app.use('/api/projects', requireAuth, projectInvoicesRouter(prisma));
 app.use('/api/projects', requireAuth, projectDocumentsRouter);
 app.use('/api/health', requireAuth, healthRouter);
 app.use('/api/tasks', requireAuth, require('./routes/tasks')(prisma));

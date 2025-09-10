@@ -178,6 +178,7 @@ model Project {
   financialItems FinancialItem[]
   packages       Package[]
   contracts      Contract[]
+  invoices       Invoice[]
 
   // Additive relations to new modules
   rfis           Rfi[]
@@ -187,6 +188,9 @@ model Project {
 
   @@index([tenantId, status])
   @@index([tenantId, name])
+  // Hot paths: client-filtered project lists and planned end sorting
+  @@index([tenantId, clientId])
+  @@index([tenantId, endPlanned])
 }
 
 model Task {
@@ -704,6 +708,7 @@ model Supplier {
   submissions     Submission[]         @relation("SupplierSubmissions")
   contracts       Contract[]           @relation("SupplierContracts")
   awardedPackages Package[]            @relation("PackageAwardSupplier")
+  invoices        Invoice[]
 
   @@index([tenantId, name])
   @@index([tenantId, status])
@@ -797,7 +802,12 @@ model Request {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  // Optional link to a procurement package when RFx is created from/for a package
+  packageId   Int?
+  package     Package?  @relation(fields: [packageId], references: [id])
+
   @@index([tenantId, status, deadline])
+  @@index([tenantId, packageId, status])
 }
 
 model RequestSection {
@@ -1003,6 +1013,29 @@ model FinancialItem {
   @@index([tenantId, projectId])
 }
 
+// Invoices (project-scoped)
+model Invoice {
+  id         Int       @id @default(autoincrement())
+  tenantId   String
+  projectId  Int
+  project    Project   @relation(fields: [projectId], references: [id])
+  supplierId Int?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+  number     String
+  issueDate  DateTime?
+  dueDate    DateTime?
+  net        Decimal   @default(0)
+  vat        Decimal   @default(0)
+  gross      Decimal   @default(0)
+  status     String    @default("Open")
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, supplierId])
+  @@index([tenantId, projectId, dueDate])
+}
+
 model Package {
   id              Int       @id @default(autoincrement())
   projectId       Int
@@ -1022,6 +1055,7 @@ model Package {
   submissions Submission[]   @relation("PackageSubmissions")
   invites     TenderInvite[] @relation("PackageInvites")
   contract    Contract?      @relation("PackageContract")
+  requests    Request[]
 
   @@index([projectId])
 }

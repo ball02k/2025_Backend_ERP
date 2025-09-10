@@ -36,7 +36,35 @@ router.get('/', async (req, res, next) => {
         orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       }),
     ]);
-    res.json({ total, rows });
+
+    // Additive: attach awarded/preferred supplier { id, name } when available
+    let items = rows;
+    if (rows.length) {
+      const ids = rows.map((r) => r.id);
+      const decisions = await prisma.awardDecision.findMany({
+        where: { tenantId, requestId: { in: ids }, decision: { in: ['awarded', 'preferred'] } },
+        orderBy: [{ decidedAt: 'desc' }],
+      });
+      // Pick the best decision per request: awarded > preferred
+      const bestByRequest = new Map();
+      for (const d of decisions) {
+        const existing = bestByRequest.get(d.requestId);
+        if (!existing || existing.decision !== 'awarded') {
+          bestByRequest.set(d.requestId, d);
+        }
+      }
+      const supplierIds = Array.from(new Set(Array.from(bestByRequest.values()).map((d) => d.supplierId).filter((v) => Number.isFinite(v))));
+      const suppliers = supplierIds.length
+        ? await prisma.supplier.findMany({ where: { tenantId, id: { in: supplierIds } }, select: { id: true, name: true } })
+        : [];
+      const supplierMap = new Map(suppliers.map((s) => [s.id, s]));
+      items = rows.map((r) => {
+        const d = bestByRequest.get(r.id);
+        const supplier = d ? (supplierMap.get(d.supplierId) || { id: d.supplierId, name: null }) : null;
+        return { ...r, supplier };
+      });
+    }
+    res.json({ total, rows: items });
   } catch (e) { next(e); }
 });
 
@@ -73,8 +101,25 @@ router.get('/:id/bundle', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const tenantId = req.user.tenantId;
-    const { title, type, deadline, totalStages = 1, weighting, addenda } = req.body || {};
+    const { title, type, deadline, totalStages = 1, weighting, addenda, packageId } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
+    // Optional: attach to a package, enforcing package assignment rules
+    let pkgId = null;
+    if (packageId != null) {
+      const pid = Number(packageId);
+      if (!Number.isFinite(pid)) return res.status(400).json({ error: 'Invalid packageId' });
+      // Ensure package exists under this tenant via project relation
+      const pkg = await prisma.package.findFirst({ where: { id: pid, project: { tenantId } }, select: { id: true } });
+      if (!pkg) return res.status(400).json({ error: 'PACKAGE_NOT_FOUND' });
+      // Enforce: not already assigned to an active/awarded RFx
+      const existing = await prisma.request.findMany({ where: { tenantId, packageId: pid } });
+      const hasOpen = existing.some((r) => (r.status || '').toLowerCase() !== 'closed');
+      const hasAwarded = existing.some((r) => (r.status || '').toLowerCase() === 'awarded');
+      if (hasOpen || hasAwarded) {
+        return res.status(400).json({ error: 'PACKAGE_ALREADY_ASSIGNED' });
+      }
+      pkgId = pid;
+    }
     const created = await prisma.request.create({
       data: {
         tenantId,
@@ -84,6 +129,7 @@ router.post('/', async (req, res, next) => {
         totalStages: Number(totalStages) || 1,
         ...(weighting != null ? { weighting } : {}),
         ...(addenda ? { addenda: String(addenda) } : {}),
+        ...(pkgId != null ? { packageId: pkgId } : {}),
       },
     });
     res.json({ data: created });

@@ -142,6 +142,118 @@ module.exports = (prisma) => {
     }
   });
 
+  // GET /api/clients/:id/projects
+  // Filtered, paginated list of projects for a given client within the current tenant
+  router.get('/:id/projects', async (req, res) => {
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+      // Validate client belongs to tenant via projects linkage (client itself is global)
+      const clientOk = await prisma.client.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          projects: { some: { tenantId, deletedAt: null } },
+        },
+        select: { id: true },
+      });
+      if (!clientOk) return res.status(404).json({ error: 'Client not found' });
+
+      // Parse query params
+      const limitRaw = Number(req.query.limit);
+      const limit = Math.max(1, Math.min(Number.isFinite(limitRaw) ? limitRaw : 25, 200));
+      const offsetRaw = Number(req.query.offset);
+      const offset = Math.max(0, Number.isFinite(offsetRaw) ? offsetRaw : 0);
+
+      const toList = (v) =>
+        (v == null || v === '')
+          ? null
+          : String(v)
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+
+      const statusList = toList(req.query.status);
+      const typeList = toList(req.query.type);
+      const q = typeof req.query.q === 'string' && req.query.q.trim().length ? String(req.query.q).trim() : null;
+
+      // Sort mapping: support plannedEndDate/actualEndDate aliases
+      const sortParam = String(req.query.sort || 'plannedEndDate:desc');
+      const [rawField, rawDir] = sortParam.split(':');
+      const dir = (rawDir && rawDir.toLowerCase() === 'asc') ? 'asc' : 'desc';
+      const fieldMap = new Map([
+        ['plannedEndDate', 'endPlanned'],
+        ['actualEndDate', 'endActual'],
+        ['name', 'name'],
+        ['code', 'code'],
+        ['status', 'status'],
+        ['type', 'type'],
+        // Allowed extras consistent with existing patterns
+        ['startDate', 'startDate'],
+        ['createdAt', 'createdAt'],
+        ['updatedAt', 'updatedAt'],
+      ]);
+      const sortField = fieldMap.get(String(rawField)) || 'endPlanned';
+      const orderBy = { [sortField]: dir };
+
+      const where = {
+        tenantId,
+        deletedAt: null,
+        clientId: id,
+        ...(statusList ? { status: { in: statusList } } : {}),
+        ...(typeList ? { type: { in: typeList } } : {}),
+        ...(q
+          ? {
+              OR: [
+                { name: { contains: q, mode: 'insensitive' } },
+                { code: { contains: q, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      };
+
+      const [total, rows] = await Promise.all([
+        prisma.project.count({ where }),
+        prisma.project.findMany({
+          where,
+          orderBy,
+          skip: offset,
+          take: limit,
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            status: true,
+            type: true,
+            budget: true,
+            actualSpend: true,
+            startDate: true,
+            endPlanned: true,
+            endActual: true,
+            client: { select: { id: true, name: true } },
+          },
+        }),
+      ]);
+
+      // Include additive aliases for compatibility where FE expects different field names
+      const items = rows.map((p) => ({
+        ...p,
+        // Aliases to align with possible FE expectations
+        budgetAmount: p.budget,
+        actualCost: p.actualSpend,
+        plannedEndDate: p.endPlanned,
+        actualEndDate: p.endActual,
+      }));
+
+      res.json({ items, total, limit, offset });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: err.message || 'Failed to list client projects' });
+    }
+  });
+
   // GET /api/clients/csv/template (downloadable example)
   router.get('/csv/template', async (_req, res) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

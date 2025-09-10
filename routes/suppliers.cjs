@@ -228,7 +228,8 @@ router.get('/:id/contracts', async (req, res, next) => {
     const tenantId = req.user.tenantId;
     const supplierId = Number(req.params.id);
     const rows = await prisma.contract.findMany({
-      where: { tenantId, supplierId },
+      // Contract has no tenantId column; filter via related project
+      where: { supplierId, project: { tenantId } },
       include: { project: { select: { id: true, name: true } } },
       orderBy: { createdAt: 'desc' },
     });

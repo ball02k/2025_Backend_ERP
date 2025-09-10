@@ -96,17 +96,29 @@ router.get("/", requireProjectMember, async (req, res) => {
         orderBy: { createdAt: "desc" },
         skip: Number(offset) || 0,
         take: Number(limit) || 20,
-        select: { id: true, reference: true, title: true, status: true, value: true, createdAt: true },
+        select: {
+          id: true,
+          projectId: true,
+          reference: true,
+          title: true,
+          status: true,
+          value: true,
+          createdAt: true,
+          // Minimal relation for FE pill labels
+          project: { select: { id: true, name: true } },
+        },
       }),
       prisma.variation.count({ where }),
     ]);
     const items = rows.map((r) => ({
       id: r.id,
+      projectId: r.projectId,
       ref: r.reference,
       title: r.title,
       status: r.status,
       value: r.value,
       createdAt: r.createdAt,
+      project: r.project ? { id: r.project.id, name: r.project.name } : null,
     }));
     res.json({ total, items });
   } catch (err) {
