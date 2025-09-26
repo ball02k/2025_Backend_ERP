@@ -40,6 +40,7 @@ const qaRouter = require('./routes/qa.cjs');
 const hsRouter = require('./routes/hs.cjs');
 const carbonRouter = require('./routes/carbon.cjs');
 const searchRouter = require('./routes/search.cjs');
+const publicRoutes = require('./routes/public.cjs');
 const requestsRouter = require('./routes/requests.cjs');
 const spmRouter = require('./routes/spm.cjs');
 const integrationsRouter = require('./routes/integrations.cjs');
@@ -182,6 +183,8 @@ app.use('/api/hs', requireAuth, hsRouter);
 app.use('/api/carbon', requireAuth, carbonRouter);
 app.use('/api/analytics', requireAuth, analyticsRouter(prisma));
 app.use('/api', homeRoutes(prisma, { requireAuth }));
+// Public, no auth routes (e.g., supplier onboarding)
+app.use('/public', publicRoutes);
 
 // Lightweight compatibility/stub endpoints to avoid 404s on common FE calls
 app.get('/api/activity', requireAuth, (req, res) => {

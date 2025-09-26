@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { prisma } = require('../utils/prisma.cjs');
+const jwt = require('jsonwebtoken');
 const { requireAuth } = require('../middleware/auth.cjs') || { requireAuth: (_req,_res,next)=>next() };
 
 // Read-only Suppliers API (tenant-scoped)
@@ -245,6 +246,38 @@ router.get('/:id/contracts', async (req, res, next) => {
     res.json({ data });
   } catch (err) {
     next(err);
+  }
+});
+
+// POST /api/suppliers/:id/onboarding-link — generate a signed public onboarding URL
+router.post('/:id/onboarding-link', async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const supplierId = Number(req.params.id);
+    if (!Number.isFinite(supplierId)) return res.status(400).json({ error: 'Invalid id' });
+
+    // ensure supplier belongs to tenant
+    const sup = await prisma.supplier.findFirst({
+      where: { id: supplierId, tenantId },
+      select: { id: true, name: true },
+    });
+    if (!sup) return res.status(404).json({ error: 'Supplier not found' });
+
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14); // 14 days
+    const payload = { tid: tenantId, sid: supplierId, exp: Math.floor(expiresAt.getTime() / 1000) };
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { algorithm: 'HS256' });
+
+    await prisma.supplierOnboardingToken.create({
+      data: { token, supplierId, tenantId, expiresAt },
+    });
+
+    const base = process.env.APP_BASE_URL || process.env.VITE_APP_BASE_URL || '';
+    const url = `${base}/onboard/${token}`;
+
+    return res.json({ url, expiresAt: expiresAt.toISOString() });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to generate onboarding link' });
   }
 });
 

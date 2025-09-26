@@ -43,7 +43,8 @@ module.exports = (prisma, { requireAuth }) => {
       // costs = actual + committed
       let cvrAgg;
       try {
-        cvrAgg = await prisma.$queryRawUnsafe(`
+        // Use parameterized raw query to avoid driver errors and injection risk
+        cvrAgg = await prisma.$queryRaw`
         SELECT 
           COALESCE(SUM(v.value),0) as value,
           COALESCE(SUM(vr.approvedValue),0) as variations,
@@ -53,22 +54,22 @@ module.exports = (prisma, { requireAuth }) => {
         LEFT JOIN (
           SELECT projectId, SUM(amount) as value
           FROM "Valuation"
-          WHERE "tenantId" = $1
+          WHERE "tenantId" = ${tenantId}
           GROUP BY projectId
         ) v ON 1=1
         LEFT JOIN (
           SELECT projectId, SUM(approvedValue) as approvedValue
           FROM "Variation"
-          WHERE "tenantId" = $1 AND status IN ('approved','accepted')
+          WHERE "tenantId" = ${tenantId} AND status IN ('approved','accepted')
           GROUP BY projectId
         ) vr ON 1=1
         LEFT JOIN (
           SELECT projectId, SUM(actualCost) as actualCost, SUM(committedCost) as committedCost
           FROM "CostPeriod"
-          WHERE "tenantId" = $1
+          WHERE "tenantId" = ${tenantId}
           GROUP BY projectId
         ) c ON 1=1
-      `, tenantId);
+        `;
       } catch (_e) {
         cvrAgg = [{ value: 0, variations: 0, actualCost: 0, committedCost: 0 }];
       }

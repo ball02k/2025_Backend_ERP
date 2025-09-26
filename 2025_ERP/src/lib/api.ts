@@ -1,50 +1,136 @@
+// Unified API helpers for the ERP FE
+// - Attaches JWT + X-Tenant-Id headers
+// - Consistent error handling with 401 redirect
+// - Helpers: apiGet/Post/Put/Patch/Delete + apiUpload + apiCsvPost
+// - Query-string builder with proper encoding
+
 export type Query = Record<string, any>;
 
-function qs(params?: Query) {
-  if (!params) return '';
-  const usp = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => {
-    if (v === undefined || v === null) return;
-    usp.append(k, String(v));
+function qs(query?: Query): string {
+  if (!query) return "";
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(query)) {
+    if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v)) {
+      v.forEach((vv) => parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(vv))}`));
+    } else {
+      parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+    }
+  }
+  return parts.length ? `?${parts.join("&")}` : "";
+}
+
+// If you already have an auth module, prefer importing getToken/isAuthed/tenant getters.
+// We keep a safe fallback to localStorage to avoid coupling.
+function getToken(): string | null {
+  try {
+    return localStorage.getItem("token");
+  } catch {
+    return null;
+  }
+}
+function getTenantId(): string | null {
+  try {
+    return localStorage.getItem("tenantId");
+  } catch {
+    return null;
+  }
+}
+
+function apiBase(): string {
+  // Prefer VITE_API_BASE_URL; fallback to same-origin
+  const b = (import.meta as any)?.env?.VITE_API_BASE_URL || "";
+  return String(b || "").replace(/\/+$/, "");
+}
+
+function loginRedirect() {
+  const loc = window.location;
+  const here = `${loc.pathname}${loc.search}${loc.hash}`;
+  const url = `/login?return=${encodeURIComponent(here)}`;
+  if (!/\/login/.test(loc.pathname)) {
+    window.location.replace(url);
+  }
+}
+
+async function handleResponse(resp: Response) {
+  const contentType = resp.headers.get("content-type") || "";
+  const isJson = contentType.includes("application/json");
+  const body = isJson ? await resp.json().catch(() => ({})) : await resp.text().catch(() => "");
+
+  if (!resp.ok) {
+    if (resp.status === 401) loginRedirect();
+    const errMsg =
+      (isJson && (body?.error || body?.message)) ||
+      (typeof body === "string" && body) ||
+      `HTTP ${resp.status}`;
+    const error = new Error(errMsg) as any;
+    error.status = resp.status;
+    error.body = body;
+    throw error;
+  }
+  return body;
+}
+
+type FetchOpts = {
+  method?: string;
+  query?: Query;
+  headers?: Record<string, string>;
+  body?: any;
+  csv?: boolean; // when true, send as text/csv
+  formData?: FormData; // when present, use multipart/form-data
+  credentials?: RequestCredentials; // default include
+};
+
+async function apiFetch(path: string, opts: FetchOpts = {}) {
+  const base = apiBase();
+  const url = `${base}${path}${qs(opts.query)}`;
+  const token = getToken();
+  const tenantId = getTenantId();
+
+  const headers: Record<string, string> = { ...(opts.headers || {}) };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (tenantId) headers["X-Tenant-Id"] = tenantId;
+
+  let body: BodyInit | undefined;
+  if (opts.formData) {
+    body = opts.formData; // browser sets boundary
+  } else if (opts.csv) {
+    headers["Content-Type"] = "text/csv";
+    body = typeof opts.body === "string" ? opts.body : String(opts.body ?? "");
+  } else if (opts.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(opts.body);
+  }
+
+  const resp = await fetch(url, {
+    method: opts.method || "GET",
+    headers,
+    body,
+    credentials: opts.credentials ?? "include",
   });
-  const s = usp.toString();
-  return s ? `?${s}` : '';
+
+  return handleResponse(resp);
 }
 
-function authHeaders(extra?: HeadersInit): HeadersInit {
-  const h: Record<string, string> = {};
-  const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-  const tenant = localStorage.getItem('tenantId') || 'demo';
-  if (token) h['Authorization'] = `Bearer ${token}`;
-  if (tenant) h['X-Tenant-Id'] = tenant;
-  return { ...h, ...(extra || {}) };
+// Public helpers
+export async function apiGet<T = any>(path: string, query?: Query): Promise<T> {
+  return apiFetch(path, { method: "GET", query });
 }
-
-export async function apiGet<T = any>(url: string, params?: Query): Promise<T> {
-  const res = await fetch(`${url}${qs(params)}`, { headers: authHeaders() });
-  if (!res.ok) throw new Error(`GET ${url} ${res.status}`);
-  return res.json();
+export async function apiPost<T = any>(path: string, body?: any, query?: Query): Promise<T> {
+  return apiFetch(path, { method: "POST", body, query });
 }
-
-export async function apiPost<T = any>(url: string, body?: any): Promise<T> {
-  const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
-  const headers = isForm ? authHeaders() : authHeaders({ 'Content-Type': 'application/json' });
-  const res = await fetch(url, { method: 'POST', headers, body: isForm ? body : JSON.stringify(body || {}) });
-  if (!res.ok) throw new Error(`POST ${url} ${res.status}`);
-  return res.json();
+export async function apiPut<T = any>(path: string, body?: any, query?: Query): Promise<T> {
+  return apiFetch(path, { method: "PUT", body, query });
 }
-
-export async function apiPatch<T = any>(url: string, body?: any): Promise<T> {
-  const headers = authHeaders({ 'Content-Type': 'application/json' });
-  const res = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify(body || {}) });
-  if (!res.ok) throw new Error(`PATCH ${url} ${res.status}`);
-  return res.json();
+export async function apiPatch<T = any>(path: string, body?: any, query?: Query): Promise<T> {
+  return apiFetch(path, { method: "PATCH", body, query });
 }
-
-export async function apiDelete<T = any>(url: string): Promise<T> {
-  const headers = authHeaders();
-  const res = await fetch(url, { method: 'DELETE', headers });
-  if (!res.ok) throw new Error(`DELETE ${url} ${res.status}`);
-  try { return await res.json(); } catch { return undefined as any; }
+export async function apiDelete<T = any>(path: string, query?: Query): Promise<T> {
+  return apiFetch(path, { method: "DELETE", query });
 }
-
+export async function apiUpload<T = any>(path: string, formData: FormData, query?: Query): Promise<T> {
+  return apiFetch(path, { method: "POST", formData, query });
+}
+export async function apiCsvPost<T = any>(path: string, csvText: string, query?: Query): Promise<T> {
+  return apiFetch(path, { method: "POST", csv: true, body: csvText, query });
+}

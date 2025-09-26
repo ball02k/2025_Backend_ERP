@@ -118,11 +118,13 @@ describe('RFx HTTP flow', () => {
 
   test('Award requires procurement:award permission', async () => {
     const token = sign({ id: 999, tenantId, role: 'QS' }, 'dev_secret');
-    await request(app)
+    const res = await request(app)
       .post(`/api/requests/${requestId}/award`)
       .set('Authorization', `Bearer ${token}`)
       .send({ supplierId })
       .expect(403);
+    expect(res.body).toHaveProperty('error');
+    expect(res.body.error).toMatchObject({ code: 'FORBIDDEN' });
+    expect(String(res.body.error.message || '')).toContain('procurement:award');
   });
 });
-

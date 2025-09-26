@@ -4,7 +4,7 @@ Runtime & ORM – Node 20.16.x; Prisma 6.14.0 for both runtime and CLI
 
 Key scripts – dev, seed, prisma:*, smoke:docs, smoke:variations
 
-Database target – construction_erp_vnext on port 5433 (Postgres)
+Database target – construction_erp_vnext on port 5432 (Postgres)
 
 Auth/RBAC – JWT (HS256) via custom crypto helper; attachUser + requireAuth middleware chain
 
@@ -267,7 +267,7 @@ Runtime & ORM – Node 20.16.x; Prisma 6.14.0 for both runtime and CLI
 
 Key scripts – dev, seed, prisma:*, smoke:docs, smoke:variations
 
-Database target – construction_erp_vnext on port 5433 (Postgres)
+Database target – construction_erp_vnext on port 5432 (Postgres)
 
 Auth/RBAC – JWT (HS256) via custom crypto helper; attachUser + requireAuth middleware chain
 

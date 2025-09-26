@@ -695,8 +695,13 @@ model Supplier {
   tenantId         String
   name             String
   status           String    @default("active")
+  // Contact details (additive)
+  email            String?
+  phone            String?
   companyRegNo     String?
   vatNo            String?
+  // Insurance details (additive)
+  insurancePolicyNumber String?
   insuranceExpiry  DateTime?
   hsAccreditations String?
   performanceScore Decimal?
@@ -709,9 +714,26 @@ model Supplier {
   contracts       Contract[]           @relation("SupplierContracts")
   awardedPackages Package[]            @relation("PackageAwardSupplier")
   invoices        Invoice[]
+  onboardingTokens SupplierOnboardingToken[]
 
   @@index([tenantId, name])
   @@index([tenantId, status])
+}
+
+/// Token store for supplier self-onboarding links (additive)
+model SupplierOnboardingToken {
+  id         Int      @id @default(autoincrement())
+  token      String   @unique
+  supplierId Int
+  tenantId   String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([supplierId])
+  @@index([tenantId])
+  @@index([expiresAt])
 }
 
 model SupplierCapability {
