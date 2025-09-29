@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "764880d"
+    "version": "66e417d"
   },
   "paths": {
     "*": {
@@ -6425,87 +6425,6 @@
             "bearerAuth": []
           }
         ]
-      }
-    },
-    "//api/features": {
-      "get": {
-        "summary": "GET //api/features",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "total": 1,
-                  "items": [
-                    {
-                      "id": 1,
-                      "_example": true
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/admin/features/grants": {
-      "get": {
-        "summary": "GET //api/admin/features/grants",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "total": 1,
-                  "items": [
-                    {
-                      "id": 1,
-                      "_example": true
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "summary": "POST //api/admin/features/grants",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "summary": "DELETE //api/admin/features/grants",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "ok": true
-                }
-              }
-            }
-          }
-        }
       }
     },
     "//api/finance/pos": {
