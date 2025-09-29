@@ -235,8 +235,8 @@ router.delete('/:id', async (req, res) => {
 
 // POST /api/documents/:id/link
 router.post('/:id/link', async (req, res) => {
-  const { projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId } = req.body || {};
-  if (!projectId && !variationId && !rfiId && !qaRecordId && !hsEventId && !carbonEntryId)
+  const { projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId, poId } = req.body || {};
+  if (!projectId && !variationId && !rfiId && !qaRecordId && !hsEventId && !carbonEntryId && !poId)
     return res.status(400).json({ error: 'Provide a valid link target' });
 
   try {
@@ -255,7 +255,8 @@ router.post('/:id/link', async (req, res) => {
         qaRecordId: qaRecordId ? Number(qaRecordId) : null,
         hsEventId: hsEventId ? Number(hsEventId) : null,
         carbonEntryId: carbonEntryId ? Number(carbonEntryId) : null,
-        linkType: projectId ? 'project' : variationId ? 'variation' : rfiId ? 'rfi' : qaRecordId ? 'qa' : hsEventId ? 'hs' : 'carbon',
+        poId: poId ? Number(poId) : null,
+        linkType: projectId ? 'project' : variationId ? 'variation' : poId ? 'po' : rfiId ? 'rfi' : qaRecordId ? 'qa' : hsEventId ? 'hs' : 'carbon',
       },
     });
 
@@ -268,8 +269,8 @@ router.post('/:id/link', async (req, res) => {
 
 // POST /api/documents/:id/unlink
 router.post('/:id/unlink', async (req, res) => {
-  const { projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId } = req.body || {};
-  if (!projectId && !variationId && !rfiId && !qaRecordId && !hsEventId && !carbonEntryId)
+  const { projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId, poId } = req.body || {};
+  if (!projectId && !variationId && !rfiId && !qaRecordId && !hsEventId && !carbonEntryId && !poId)
     return res.status(400).json({ error: 'Provide a valid unlink target' });
   try {
     const tenantId = req.user.tenantId;
@@ -279,6 +280,7 @@ router.post('/:id/unlink', async (req, res) => {
       documentId: id,
       ...(projectId ? { projectId: Number(projectId) } : {}),
       ...(variationId ? { variationId: Number(variationId) } : {}),
+      ...(poId ? { poId: Number(poId) } : {}),
       ...(rfiId ? { rfiId: Number(rfiId) } : {}),
       ...(qaRecordId ? { qaRecordId: Number(qaRecordId) } : {}),
       ...(hsEventId ? { hsEventId: Number(hsEventId) } : {}),

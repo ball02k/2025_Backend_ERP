@@ -434,6 +434,7 @@ model DocumentLink {
   qaRecordId    Int?
   hsEventId     Int?
   carbonEntryId Int?
+  poId          Int?
   linkType    String
   createdAt   DateTime @default(now())
 
@@ -448,6 +449,7 @@ model DocumentLink {
   @@index([tenantId, qaRecordId])
   @@index([tenantId, hsEventId])
   @@index([tenantId, carbonEntryId])
+  @@index([tenantId, poId])
 }
 
 // --- Additive optional links to new modules ---
@@ -1050,6 +1052,13 @@ model Invoice {
   vat        Decimal   @default(0)
   gross      Decimal   @default(0)
   status     String    @default("Open")
+  // Additive finance fields
+  documentId   BigInt?
+  ocrStatus    String?
+  ocrResultJson Json?
+  poNumberRef  String?
+  matchStatus  String?
+  matchedPoId  Int?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
@@ -1057,6 +1066,96 @@ model Invoice {
   @@index([tenantId, supplierId])
   @@index([tenantId, projectId, dueDate])
 }
+
+/// Finance: Invoice line items (additive)
+model InvoiceLine {
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  invoiceId   Int
+  lineNo      Int
+  description String
+  costCode    String?
+  qty         Decimal  @default(0)
+  unit        String?
+  rate        Decimal  @default(0)
+  vatRatePct  Float?
+  totalExVat  Decimal  @default(0)
+  totalVat    Decimal  @default(0)
+  totalIncVat Decimal  @default(0)
+
+  @@index([tenantId, invoiceId])
+}
+
+/// Finance: Matching records (additive)
+model FinanceMatch {
+  id            Int      @id @default(autoincrement())
+  tenantId      String   @default("demo")
+  type          String   // po_invoice|po_receipt|invoice_receipt|three_way
+  status        String   // proposed|accepted|rejected
+  reason        String?
+  varianceExVat Decimal? @default(0)
+  varianceVat   Decimal? @default(0)
+  varianceTotal Decimal? @default(0)
+  toleranceUsed Decimal? @default(0)
+  poId          Int?
+  invoiceId     Int?
+  receiptId     Int?
+  createdAt     DateTime @default(now())
+  createdById   Int?
+
+  @@index([tenantId, type, status])
+  @@index([tenantId, poId])
+  @@index([tenantId, invoiceId])
+}
+
+/// Finance: Inbound email storage (additive)
+model InboundEmail {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  inbox      String
+  fromAddr   String
+  subject    String?
+  bodyText   String?
+  rawId      String?
+  receivedAt DateTime @default(now())
+  invoiceId  Int?
+  status     String   @default("stored")
+  error      String?
+
+  attachments EmailAttachment[]
+
+  @@index([tenantId, inbox, receivedAt])
+}
+
+model EmailAttachment {
+  id             Int      @id @default(autoincrement())
+  inboundEmailId Int
+  inboundEmail   InboundEmail @relation(fields: [inboundEmailId], references: [id])
+  filename       String
+  mimeType       String?
+  size           Int?
+  documentId     BigInt?
+}
+
+/// Finance: OCR job queue (additive)
+model OcrJob {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  documentId BigInt
+  kind       String   @default("invoice") // invoice|po
+  status     String   @default("queued")   // queued|processing|done|failed
+  provider   String?
+  resultJson Json?
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  invoiceId  Int?
+  poId       Int?
+
+  @@index([tenantId, status])
+}
+
+// Feature flags removed by Task-14 rollback: FeatureGrant model deleted
 
 model Package {
   id              Int       @id @default(autoincrement())

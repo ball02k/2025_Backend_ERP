@@ -24,15 +24,6 @@ module.exports = (prisma) => {
         });
         if (!pkg) return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
 
-        // Enforce: a package cannot be assigned to another RFx unless previous RFx closed with no award
-        // Block if any non-closed request exists for this package, or any awarded request exists
-        const existing = await prisma.request.findMany({ where: { tenantId, packageId } });
-        const hasOpen = existing.some((r) => (r.status || '').toLowerCase() !== 'closed');
-        const hasAwarded = existing.some((r) => (r.status || '').toLowerCase() === 'awarded');
-        if (hasOpen || hasAwarded) {
-          return res.status(400).json({ error: 'PACKAGE_ALREADY_ASSIGNED' });
-        }
-
         const now = new Date();
         const deadline = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
 
@@ -40,7 +31,6 @@ module.exports = (prisma) => {
         const rfx = await prisma.request.create({
           data: {
             tenantId,
-            packageId,
             title: `RFx for ${pkg.name}`,
             type: 'RFP',
             status: 'draft',

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { apiPatch } from '@/lib/api';
 import LinkPill, { LinkDTO } from '@/components/LinkPill';
 
-type Field = { name: string; label: string; type?: 'text'|'textarea' };
+type Field = { name: string; label: string; type?: 'text'|'textarea'; listId?: string; options?: string[] };
 
 export default function EntityHeader({
   title,
@@ -63,9 +63,28 @@ export default function EntityHeader({
               {!edit ? (
                 <div className="py-2">{data?.[f.name] ?? '—'}</div>
               ) : f.type === 'textarea' ? (
-                <textarea rows={3} className="w-full rounded-md border px-3 py-2" defaultValue={data?.[f.name] || ''} onChange={e=>setDraft(d=>({ ...d, [f.name]: e.target.value }))} />
+                <textarea
+                  rows={3}
+                  className="w-full rounded-md border px-3 py-2"
+                  defaultValue={data?.[f.name] || ''}
+                  onChange={e=>setDraft(d=>({ ...d, [f.name]: e.target.value }))}
+                />
               ) : (
-                <input className="w-full rounded-md border px-3 py-2" defaultValue={data?.[f.name] || ''} onChange={e=>setDraft(d=>({ ...d, [f.name]: e.target.value }))} />
+                <>
+                  <input
+                    className="w-full rounded-md border px-3 py-2"
+                    defaultValue={data?.[f.name] || ''}
+                    onChange={e=>setDraft(d=>({ ...d, [f.name]: e.target.value }))}
+                    list={f.options && f.options.length ? f.listId : undefined}
+                  />
+                  {f.options && f.options.length ? (
+                    <datalist id={f.listId}>
+                      {f.options.map((opt) => (
+                        <option key={opt} value={opt} />
+                      ))}
+                    </datalist>
+                  ) : null}
+                </>
               )}
             </label>
           ))}
@@ -74,4 +93,3 @@ export default function EntityHeader({
     </div>
   );
 }
-

@@ -118,6 +118,18 @@ const { cascadeDeleteProjects } = require('./dev-utils/cascade.cjs');
     create: { tenantId: TENANT, userId: pmUser.id, roleId: pmRole.id },
   });
 
+  // Finance role for demo PM
+  const financeRole = await prisma.role.upsert({
+    where: { tenantId_name: { tenantId: TENANT, name: 'finance' } },
+    update: {},
+    create: { tenantId: TENANT, name: 'finance' },
+  });
+  await prisma.userRole.upsert({
+    where: { tenantId_userId_roleId: { tenantId: TENANT, userId: pmUser.id, roleId: financeRole.id } },
+    update: {},
+    create: { tenantId: TENANT, userId: pmUser.id, roleId: financeRole.id },
+  });
+
   // Projects
   const proj1 = await prisma.project.upsert({
     where: { code: 'P-001' },
