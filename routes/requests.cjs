@@ -20,6 +20,20 @@ router.get('/', async (req, res, next) => {
     const { q, status, limit = 20, offset = 0 } = req.query;
     const where = { tenantId };
     if (status) where.status = String(status);
+    // Optional: filter by project via attached package
+    if (req.query.projectId != null && req.query.projectId !== '') {
+      const pid = Number(req.query.projectId);
+      if (Number.isFinite(pid)) {
+        where.package = { ...(where.package || {}), projectId: pid };
+      }
+    }
+    // Optional: due by date (deadline <= date)
+    if (req.query.dueBy) {
+      const d = new Date(String(req.query.dueBy));
+      if (!isNaN(d.getTime())) {
+        where.deadline = { lte: d };
+      }
+    }
     if (q) {
       const term = String(q);
       where.OR = [
@@ -27,45 +41,94 @@ router.get('/', async (req, res, next) => {
         { type: { contains: term, mode: 'insensitive' } },
       ];
     }
+    // OrderBy: support "field.asc|desc" with safe whitelist
+    const rawOb = typeof req.query.orderBy === 'string' ? req.query.orderBy : '';
+    let orderBy = [];
+    if (rawOb) {
+      const m = /^(\w+)\.(asc|desc)$/i.exec(rawOb);
+      if (m) {
+        const field = m[1];
+        const dir = m[2].toLowerCase();
+        const map = { title: 'title', status: 'status', dueDate: 'deadline', deadline: 'deadline', createdAt: 'createdAt', updatedAt: 'updatedAt', id: 'id', stage: 'stage' };
+        const prismaField = map[field];
+        if (prismaField) {
+          orderBy.push({ [prismaField]: dir });
+        }
+      }
+    }
+    // Fallback stable sort
+    if (!orderBy.length) orderBy = [{ updatedAt: 'desc' }, { id: 'desc' }];
+
     const [total, rows] = await Promise.all([
       prisma.request.count({ where }),
       prisma.request.findMany({
         where,
         take: Number(limit),
         skip: Number(offset),
-        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        orderBy,
       }),
     ]);
 
-    // Additive: attach awarded/preferred supplier { id, name } when available
+    // Additive enrichments per request: supplier, project, submissionsCount
     let items = rows;
     if (rows.length) {
       const ids = rows.map((r) => r.id);
-      const decisions = await prisma.awardDecision.findMany({
-        where: { tenantId, requestId: { in: ids }, decision: { in: ['awarded', 'preferred'] } },
-        orderBy: [{ decidedAt: 'desc' }],
-      });
-      // Pick the best decision per request: awarded > preferred
-      const bestByRequest = new Map();
-      for (const d of decisions) {
-        const existing = bestByRequest.get(d.requestId);
-        if (!existing || existing.decision !== 'awarded') {
-          bestByRequest.set(d.requestId, d);
+      let bestByRequest = new Map();
+      try {
+        const decisions = await prisma.awardDecision.findMany({
+          where: { tenantId, requestId: { in: ids }, decision: { in: ['awarded', 'preferred'] } },
+          orderBy: [{ decidedAt: 'desc' }],
+        });
+        for (const d of decisions) {
+          const existing = bestByRequest.get(d.requestId);
+          if (!existing || existing.decision !== 'awarded') bestByRequest.set(d.requestId, d);
         }
-      }
-      const supplierIds = Array.from(new Set(Array.from(bestByRequest.values()).map((d) => d.supplierId).filter((v) => Number.isFinite(v))));
-      const suppliers = supplierIds.length
-        ? await prisma.supplier.findMany({ where: { tenantId, id: { in: supplierIds } }, select: { id: true, name: true } })
-        : [];
-      const supplierMap = new Map(suppliers.map((s) => [s.id, s]));
+      } catch (_) {}
+
+      let supplierMap = new Map();
+      try {
+        const supplierIds = Array.from(new Set(Array.from(bestByRequest.values()).map((d) => d.supplierId).filter((v) => Number.isFinite(v))));
+        const suppliers = supplierIds.length
+          ? await prisma.supplier.findMany({ where: { tenantId, id: { in: supplierIds } }, select: { id: true, name: true } })
+          : [];
+        supplierMap = new Map(suppliers.map((s) => [s.id, s]));
+      } catch (_) {}
+
+      let projectByPackage = new Map();
+      try {
+        const packageIds = Array.from(new Set(rows.map((r) => r.packageId).filter((v) => Number.isFinite(Number(v)))));
+        const packages = packageIds.length
+          ? await prisma.package.findMany({
+              where: { id: { in: packageIds }, project: { tenantId } },
+              select: { id: true, project: { select: { id: true, name: true } } },
+            })
+          : [];
+        projectByPackage = new Map(packages.map((p) => [p.id, p.project]));
+      } catch (_) {}
+
+      let subsByRequest = new Map();
+      try {
+        const respCounts = await prisma.requestResponse.groupBy({
+          by: ['requestId'],
+          where: { tenantId, requestId: { in: ids }, submittedAt: { not: null } },
+          _count: { _all: true },
+        });
+        subsByRequest = new Map(respCounts.map((g) => [g.requestId, g._count._all]));
+      } catch (_) {}
+
       items = rows.map((r) => {
         const d = bestByRequest.get(r.id);
         const supplier = d ? (supplierMap.get(d.supplierId) || { id: d.supplierId, name: null }) : null;
-        return { ...r, supplier };
+        const project = r.packageId ? projectByPackage.get(r.packageId) || null : null;
+        const submissionsCount = subsByRequest.get(r.id) || 0;
+        return { ...r, supplier, project, submissionsCount };
       });
     }
     res.json({ total, rows: items });
-  } catch (e) { next(e); }
+  } catch (e) {
+    console.warn('requests.list fallback', e?.code || e?.message || e);
+    res.json({ total: 0, rows: [] });
+  }
 });
 
 router.get('/:id', async (req, res, next) => {

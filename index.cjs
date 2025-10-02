@@ -55,7 +55,10 @@ const financeInvoicesRouter = require('./routes/finance.invoices.cjs');
 const financeMatchRouter = require('./routes/finance.match.cjs');
 const financeOcrRouter = require('./routes/finance.ocr.cjs');
 const financeInboundRouter = require('./routes/finance.inbound.cjs');
+const financeReceiptsRouter = require('./routes/finance.receipts.cjs');
+const documentLinksRouter = require('./routes/document.links.cjs');
 const { attachUser } = require('./middleware/auth.cjs');
+const { demoGuard } = require('./middleware/demo.cjs');
 const requireAuth = require('./middleware/requireAuth.cjs');
 const devAuth = require('./middleware/devAuth.cjs');
 const devRbac = require('./middleware/devRbac.cjs');
@@ -102,6 +105,8 @@ app.use(attachUser);
 app.use(devAuth); // must be before routes that use requireAuth
 // DEV-ONLY RBAC helper to ensure admin role and project membership
 app.use(devRbac);
+// Demo guard rails (block destructive or protected operations)
+app.use(demoGuard);
 
 // Rewrite common malformed URLs where the frontend missed the '?' before query params
 // Example: /api/projectslimit=10&offset=0 -> /api/projects?limit=10&offset=0
@@ -183,7 +188,10 @@ app.use('/api/requests', requireAuth, requestsRouter);
 app.use('/api/spm', requireAuth, spmRouter);
 app.use('/api/search', requireAuth, searchRouter);
 app.use('/api', requireAuth, lookupsRouter);
+app.use('/api', requireAuth, documentLinksRouter);
 app.use('/api/integrations', requireAuth, integrationsRouter());
+// Demo reset route (top-level)
+app.use(require('./routes/demo.cjs'));
 app.use('/api/rfis', requireAuth, rfisRouter);
 app.use('/api/qa', requireAuth, qaRouter);
 app.use('/api/hs', requireAuth, hsRouter);
@@ -195,6 +203,7 @@ app.use('/api', requireAuth, financePoRouter);
 app.use('/api', requireAuth, financeInvoicesRouter);
 app.use('/api', requireAuth, financeMatchRouter);
 app.use('/api', requireAuth, financeOcrRouter);
+app.use('/api', requireAuth, financeReceiptsRouter);
 app.use('/api', financeInboundRouter);
 // Public, no auth routes (e.g., supplier onboarding)
 app.use('/public', publicRoutes);
@@ -217,6 +226,121 @@ app.get('/api/finance/snapshot', requireAuth, (req, res) => {
   const qsIndex = req.url.indexOf('?');
   const qs = qsIndex !== -1 ? req.url.slice(qsIndex) : '';
   res.redirect(307, '/api/financials/snapshot' + qs);
+});
+
+// Compatibility: provide a minimal finance settings endpoint for FE variants
+app.get('/api/settings/finance', requireAuth, (_req, res) => {
+  res.json({
+    vatRateDefault: 0.2,
+    matchTolerance: 5,
+    currency: 'GBP',
+    inboundEmailEnabled: true,
+  });
+});
+
+// Serve a no-op favicon to avoid 404 noise in dev
+app.get('/favicon.ico', (_req, res) => res.status(204).end());
+
+// --------- Additional compatibility routes expected by some FE variants ---------
+// Project-scoped POs: GET /api/projects/:id/pos -> mirrors /api/finance/pos with implicit projectId
+app.get('/api/projects/:id/pos', requireAuth, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'Invalid project id' });
+    const limit = Math.min(Number(req.query.limit || 25), 100);
+    const offset = Math.max(Number(req.query.offset || 0), 0);
+    const q = req.query.q ? String(req.query.q) : '';
+    const where = {
+      tenantId,
+      projectId,
+      ...(q ? { OR: [{ code: { contains: q, mode: 'insensitive' } }, { supplier: { contains: q, mode: 'insensitive' } }] } : {}),
+    };
+    const [items, total] = await Promise.all([
+      prisma.purchaseOrder.findMany({ where, skip: offset, take: limit, orderBy: { orderDate: 'desc' } }),
+      prisma.purchaseOrder.count({ where }),
+    ]);
+    res.json({ items, total });
+  } catch (e) {
+    res.json({ items: [], total: 0 });
+  }
+});
+
+// Project CVR: return an empty stub to avoid 404s when CVR module is not enabled
+app.get('/api/projects/:id/cvr', requireAuth, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'Invalid project id' });
+    // Try fetch minimal if tables exist, otherwise return empty
+    let periods = [];
+    try { periods = await prisma.cVRPeriod?.findMany?.({ where: { tenantId, projectId } }).catch(()=>[]); } catch(_) {}
+    res.json({ periods: periods || [], entries: [] });
+  } catch (_) { res.json({ periods: [], entries: [] }); }
+});
+
+// --------- Compatibility routes for FE variants expecting nested project endpoints ---------
+// Financials summary/transactions under /api/projects/:id/financials/*
+app.get('/api/projects/:id/financials/summary', requireAuth, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'Invalid project id' });
+    // Basic aggregates from invoices and POs if present
+    const [invAgg, poAgg] = await Promise.all([
+      prisma.invoice?.aggregate?.({ where: { tenantId, projectId }, _sum: { gross: true } }).catch(()=>({ _sum: { gross: 0 } })),
+      prisma.purchaseOrder?.aggregate?.({ where: { tenantId, projectId }, _sum: { total: true } }).catch(()=>({ _sum: { total: 0 } })),
+    ]);
+    res.json({
+      totals: {
+        invoices: Number(invAgg?._sum?.gross || 0),
+        purchaseOrders: Number(poAgg?._sum?.total || 0),
+      },
+      months: [],
+    });
+  } catch (_) { res.json({ totals: { invoices: 0, purchaseOrders: 0 }, months: [] }); }
+});
+
+app.get('/api/projects/:id/financials/transactions', requireAuth, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'Invalid project id' });
+    // Return a simple union view: invoices + POs as transactions
+    const [invoices, pos] = await Promise.all([
+      prisma.invoice?.findMany?.({ where: { tenantId, projectId }, select: { id: true, number: true, issueDate: true, gross: true } }).catch(()=>[]),
+      prisma.purchaseOrder?.findMany?.({ where: { tenantId, projectId }, select: { id: true, code: true, orderDate: true, total: true } }).catch(()=>[]),
+    ]);
+    const items = [
+      ...invoices.map((i) => ({ id: `inv:${i.id}`, type: 'invoice', date: i.issueDate, ref: i.number, amount: i.gross })),
+      ...pos.map((p) => ({ id: `po:${p.id}`, type: 'po', date: p.orderDate, ref: p.code, amount: p.total })),
+    ].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    res.json({ items, total: items.length });
+  } catch (_) { res.json({ items: [], total: 0 }); }
+});
+
+// Programme data under /api/projects/:id/programme
+app.get('/api/projects/:id/programme', requireAuth, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'Invalid project id' });
+    const tasks = await prisma.programmeTask?.findMany?.({ where: { tenantId, projectId } }).catch(()=>[]);
+    // Return an array directly — some FE hooks expect an array and call .filter on it
+    res.json(Array.isArray(tasks) ? tasks : []);
+  } catch (_) { res.json([]); }
+});
+
+// Carbon summary under /api/projects/:id/carbon/summary
+app.get('/api/projects/:id/carbon/summary', requireAuth, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'Invalid project id' });
+    const rows = await prisma.carbon?.findMany?.({ where: { tenantId, projectId } }).catch(()=>[]);
+    const total = (rows || []).reduce((s, r) => s + Number(r.tco2e || 0), 0);
+    res.json({ total, byScope: [], byMonth: [] });
+  } catch (_) { res.json({ total: 0, byScope: [], byMonth: [] }); }
 });
 
 if (isDevEnv()) {

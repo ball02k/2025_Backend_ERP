@@ -7,21 +7,21 @@ function getTenantId(req) {
   return req.user && req.user.tenantId;
 }
 
-// Prisma-based distinct helper on Project string columns
+// Safe distinct helper using findMany + JS de-duplication (avoids engine-specific quirks)
 async function distinctFromProjects(column, tenantId) {
   const rows = await prisma.project.findMany({
-    where: {
-      tenantId,
-      NOT: [{ [column]: null }, { [column]: '' }],
-    },
+    where: { tenantId },
     select: { [column]: true },
-    distinct: [column],
-    orderBy: { [column]: 'asc' },
   });
-  return rows
-    .map((r) => r[column])
-    .filter((s) => typeof s === 'string' && s.trim().length)
-    .map((s) => s.trim());
+  const set = new Set();
+  for (const r of rows) {
+    const v = r[column];
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (s) set.add(s);
+    }
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
 
 // GET /api/lookups/project-statuses -> { items: string[] }
@@ -61,4 +61,3 @@ router.get('/lookups/projects', async (req, res) => {
 });
 
 module.exports = router;
-

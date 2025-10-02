@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { apiGet, apiPost } from '@/lib/api';
+import { apiGet, apiPost, toastOk, toastErr } from '@/lib/api';
+import FinanceBreadcrumb from '@/components/finance/FinanceBreadcrumb';
 
 export default function PoDetail() {
-  const { id } = useParams();
+  const params = useParams();
+  const projectParam = params.id && params.poId ? params.id : undefined; // under /projects/:id/finance/pos/:poId
+  const id = params.poId || params.id; // works for both /finance/pos/:id and nested
   const [po, setPo] = useState<any>(null);
 
   async function load() {
@@ -12,14 +15,27 @@ export default function PoDetail() {
   }
   useEffect(() => { if (id) load(); }, [id]);
 
-  async function issue() { await apiPost(`/api/finance/pos/${id}/issue`); await load(); }
-  async function receipt() { await apiPost(`/api/finance/pos/${id}/receipt`, { note: 'Received' }); await load(); }
-  async function close() { await apiPost(`/api/finance/pos/${id}/close`); await load(); }
-  async function genPdf() { await apiPost(`/api/finance/pos/${id}/generate-pdf`); await load(); }
+  async function issue() {
+    try { await apiPost(`/api/finance/pos/${id}/issue`); toastOk('PO issued'); await load(); }
+    catch (e) { toastErr(e, 'Failed to issue PO'); }
+  }
+  async function receipt() {
+    try { await apiPost(`/api/finance/pos/${id}/receipt`, { note: 'Received' }); toastOk('Receipt recorded'); await load(); }
+    catch (e) { toastErr(e, 'Failed to receipt'); }
+  }
+  async function close() {
+    try { await apiPost(`/api/finance/pos/${id}/close`); toastOk('PO closed'); await load(); }
+    catch (e) { toastErr(e, 'Failed to close PO'); }
+  }
+  async function genPdf() {
+    try { await apiPost(`/api/finance/pos/${id}/generate-pdf`); toastOk('PDF generated'); }
+    catch (e) { toastErr(e, 'Failed to generate PDF'); }
+  }
 
   if (!po) return <div className="p-4">Loading…</div>;
   return (
     <div className="p-4 space-y-3">
+      <FinanceBreadcrumb section="pos" />
       <h1 className="text-xl font-semibold">PO {po.code}</h1>
       <div className="text-sm text-slate-600">Supplier: {po.supplier || '—'}</div>
       <div className="text-sm text-slate-600">Status: {po.status}</div>

@@ -8,6 +8,11 @@ const requireAuth = require('../middleware/requireAuth.cjs');
 
 const requireFinanceRole = require('../middleware/requireFinanceRole.cjs');
 
+router.get('/finance/inbound', requireAuth, requireFinanceRole, async (req, res) => {
+  // Lightweight compatibility list endpoint
+  res.json({ items: [], total: 0 });
+});
+
 router.get('/finance/inbound/email/aliases', requireAuth, requireFinanceRole, async (req, res) => {
   // Placeholder: derive alias from tenant; in production this would come from a Tenant table.
   const tenant = String(req.user?.tenantId || 'demo');

@@ -1,24 +1,37 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
+import { useProjectFinance } from '@/pages/project/FinanceContext';
 import { apiGet, apiPost } from '@/lib/api';
+import FinanceBreadcrumb from '@/components/finance/FinanceBreadcrumb';
 
 type Inv = { id: number; number: string; status?: string; issueDate?: string; gross?: number; ocrStatus?: string };
 
 export default function InvoicesList() {
+  const { id: projectParam } = useParams();
+  const ctx = useProjectFinance?.() || {} as any;
+  const projectId = Number.isFinite(ctx.projectId) ? Number(ctx.projectId) : (projectParam ? Number(projectParam) : undefined);
   const [rows, setRows] = useState<Inv[]>([]);
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState('');
 
   async function load() {
-    const data = await apiGet<{ items: Inv[]; total: number }>(`/api/finance/invoices`, { q });
-    setRows(data.items || []);
-    setTotal(data.total || 0);
+    const query: any = { q };
+    if (Number.isFinite(projectId)) query.projectId = projectId;
+    const data = await apiGet<any>(`/api/finance/invoices`, query);
+    const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+    setRows(items);
+    setTotal(Number(data?.total ?? items.length ?? 0));
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [projectId]);
 
   return (
     <div className="p-4">
-      <h1 className="text-xl font-semibold mb-3">Invoices</h1>
+      <div className="flex items-center justify-between mb-2">
+        <h1 className="text-xl font-semibold">Invoices</h1>
+        <a href={Number.isFinite(projectId) ? `/projects/${projectId}/finance/invoices/new` : `/finance/invoices/new`}
+           className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700">New Invoice</a>
+      </div>
+      <FinanceBreadcrumb section="invoices" />
       <div className="flex gap-2 mb-3">
         <input className="border rounded px-3 py-2" placeholder="Search" value={q} onChange={e=>setQ(e.target.value)} />
         <button className="border rounded px-3 py-2" onClick={load}>Search</button>
@@ -37,9 +50,9 @@ export default function InvoicesList() {
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
+            {(Array.isArray(rows) ? rows : []).map(r => (
               <tr key={r.id} className="hover:bg-slate-50">
-                <td className="p-2 border"><Link className="text-blue-700" to={`/finance/invoices/${r.id}`}>{r.number}</Link></td>
+                <td className="p-2 border"><Link className="text-blue-700" to={Number.isFinite(projectId) ? `/projects/${projectId}/finance/invoices/${r.id}` : `/finance/invoices/${r.id}`}>{r.number}</Link></td>
                 <td className="p-2 border">{r.status || '—'}</td>
                 <td className="p-2 border">{r.ocrStatus || '—'}</td>
                 <td className="p-2 border">{r.issueDate ? new Date(r.issueDate).toLocaleDateString() : '—'}</td>

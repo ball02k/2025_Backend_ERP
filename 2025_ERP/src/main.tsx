@@ -16,6 +16,28 @@ try {
   localStorage.setItem('lastSeenCatalogHash', 'fd991defffbf66f246c284c083f901ebf38763b6');
 } catch {}
 
+// Simple demo-mode link guard: if on /demo, keep navigation within /demo
+try {
+  const isDemo = window.location.pathname.startsWith('/demo');
+  if (isDemo) {
+    document.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      const a = (t.closest && t.closest('a')) as HTMLAnchorElement | null;
+      if (!a) return;
+      const href = a.getAttribute('href') || '';
+      if (!href || href.startsWith('http') || href.startsWith('mailto:') || href.startsWith('#')) return;
+      if (href.startsWith('/demo')) return; // already prefixed
+      if (!href.startsWith('/')) return; // relative links fine
+      e.preventDefault();
+      const url = `/demo${href}`;
+      window.history.pushState({}, '', url);
+      // Trigger popstate so Router picks up navigation if needed
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, true);
+  }
+} catch {}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>

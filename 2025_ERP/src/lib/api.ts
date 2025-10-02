@@ -1,8 +1,12 @@
 // Unified API helpers for the ERP FE
 // - Attaches JWT + X-Tenant-Id headers
-// - Consistent error handling with 401 redirect
+// - Consistent error handling with 401 redirect (clears session)
 // - Helpers: apiGet/Post/Put/Patch/Delete + apiUpload + apiCsvPost
 // - Query-string builder with proper encoding
+import { pushToast } from '@/components/Toaster';
+import { getFinanceProjectId } from '@/lib/financeScope';
+import { isDemo } from '@/lib/demo';
+import { clearSession, getTenant, getToken } from '@/lib/auth';
 
 export type Query = Record<string, any>;
 
@@ -20,21 +24,14 @@ function qs(query?: Query): string {
   return parts.length ? `?${parts.join("&")}` : "";
 }
 
-// If you already have an auth module, prefer importing getToken/isAuthed/tenant getters.
-// We keep a safe fallback to localStorage to avoid coupling.
-function getToken(): string | null {
-  try {
-    return localStorage.getItem("token");
-  } catch {
-    return null;
-  }
-}
-function getTenantId(): string | null {
-  try {
-    return localStorage.getItem("tenantId");
-  } catch {
-    return null;
-  }
+// Headers helper using central session
+function withAuthHeaders(init: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = { ...init };
+  const t = getToken();
+  const tenant = getTenant();
+  if (t) headers['Authorization'] = `Bearer ${t}`;
+  if (tenant && !headers['X-Tenant-Id']) headers['X-Tenant-Id'] = tenant;
+  return headers;
 }
 
 function apiBase(): string {
@@ -43,12 +40,15 @@ function apiBase(): string {
   return String(b || "").replace(/\/+$/, "");
 }
 
-function loginRedirect() {
+let _handling401 = false;
+function handle401() {
+  if (_handling401) return;
+  _handling401 = true;
+  try { clearSession(); } catch {}
   const loc = window.location;
   const here = `${loc.pathname}${loc.search}${loc.hash}`;
-  const url = `/login?return=${encodeURIComponent(here)}`;
   if (!/\/login/.test(loc.pathname)) {
-    window.location.replace(url);
+    window.location.href = `/login?return=${encodeURIComponent(here)}`;
   }
 }
 
@@ -58,7 +58,7 @@ async function handleResponse(resp: Response) {
   const body = isJson ? await resp.json().catch(() => ({})) : await resp.text().catch(() => "");
 
   if (!resp.ok) {
-    if (resp.status === 401) loginRedirect();
+    if (resp.status === 401) handle401();
     const errMsg =
       (isJson && (body?.error || body?.message)) ||
       (typeof body === "string" && body) ||
@@ -66,6 +66,9 @@ async function handleResponse(resp: Response) {
     const error = new Error(errMsg) as any;
     error.status = resp.status;
     error.body = body;
+    if (isJson && body && typeof body === 'object' && (body as any).errors) {
+      error.fieldErrors = (body as any).errors; // { field: message }
+    }
     throw error;
   }
   return body;
@@ -83,13 +86,16 @@ type FetchOpts = {
 
 async function apiFetch(path: string, opts: FetchOpts = {}) {
   const base = apiBase();
-  const url = `${base}${path}${qs(opts.query)}`;
-  const token = getToken();
-  const tenantId = getTenantId();
-
-  const headers: Record<string, string> = { ...(opts.headers || {}) };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  if (tenantId) headers["X-Tenant-Id"] = tenantId;
+  // Auto-inject projectId for finance GET requests when a project scope is active
+  let effectiveQuery = { ...(opts.query || {}) } as Record<string, any>;
+  try {
+    if (typeof path === 'string' && path.startsWith('/api/finance/') && (!effectiveQuery || effectiveQuery.projectId == null || effectiveQuery.projectId === '')) {
+      const scopedId = getFinanceProjectId();
+      if (Number.isFinite(Number(scopedId))) effectiveQuery.projectId = Number(scopedId);
+    }
+  } catch {}
+  const url = `${base}${path}${qs(effectiveQuery)}`;
+  const headers: Record<string, string> = withAuthHeaders({ ...(opts.headers || {}) });
 
   let body: BodyInit | undefined;
   if (opts.formData) {
@@ -117,15 +123,23 @@ export async function apiGet<T = any>(path: string, query?: Query): Promise<T> {
   return apiFetch(path, { method: "GET", query });
 }
 export async function apiPost<T = any>(path: string, body?: any, query?: Query): Promise<T> {
+  const blockMsg = demoBlock(path, 'POST');
+  if (blockMsg) { try { pushToast(blockMsg); } catch {} throw new Error(blockMsg); }
   return apiFetch(path, { method: "POST", body, query });
 }
 export async function apiPut<T = any>(path: string, body?: any, query?: Query): Promise<T> {
+  const blockMsg = demoBlock(path, 'PUT');
+  if (blockMsg) { try { pushToast(blockMsg); } catch {} throw new Error(blockMsg); }
   return apiFetch(path, { method: "PUT", body, query });
 }
 export async function apiPatch<T = any>(path: string, body?: any, query?: Query): Promise<T> {
+  const blockMsg = demoBlock(path, 'PATCH');
+  if (blockMsg) { try { pushToast(blockMsg); } catch {} throw new Error(blockMsg); }
   return apiFetch(path, { method: "PATCH", body, query });
 }
 export async function apiDelete<T = any>(path: string, query?: Query): Promise<T> {
+  const blockMsg = demoBlock(path, 'DELETE');
+  if (blockMsg) { try { pushToast(blockMsg); } catch {} throw new Error(blockMsg); }
   return apiFetch(path, { method: "DELETE", query });
 }
 export async function apiUpload<T = any>(path: string, formData: FormData, query?: Query): Promise<T> {
@@ -133,4 +147,24 @@ export async function apiUpload<T = any>(path: string, formData: FormData, query
 }
 export async function apiCsvPost<T = any>(path: string, csvText: string, query?: Query): Promise<T> {
   return apiFetch(path, { method: "POST", csv: true, body: csvText, query });
+}
+
+// Toast helpers (standardised)
+export function toastOk(message: string) { try { pushToast(message, 'success'); } catch { console.log(message); } }
+export function toastErr(e: any, fallback = 'Something went wrong') {
+  const msg = e?.message || fallback;
+  try { pushToast(msg, 'error'); } catch { console.error(msg); }
+  // Preserve original error in console for debugging
+  // eslint-disable-next-line no-console
+  console.error(e);
+}
+
+// --- Demo guard ---
+function demoBlock(path: string, method: string) {
+  if (!isDemo()) return null;
+  const m = method.toUpperCase();
+  if (m === 'DELETE') return 'Delete is disabled in demo mode.';
+  const protectedRe = /(users|tenants|auth|secrets|billing|plans)/i;
+  if (m !== 'GET' && protectedRe.test(path)) return 'Changes to protected resources are disabled in demo mode.';
+  return null;
 }

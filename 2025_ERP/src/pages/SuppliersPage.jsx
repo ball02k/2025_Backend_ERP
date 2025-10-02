@@ -84,6 +84,10 @@ export default function SuppliersPage() {
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between py-4">
           <h1 className="text-xl font-semibold text-slate-900">Suppliers</h1>
+          <a
+            href="/suppliers/new"
+            className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
+          >New Supplier</a>
         </div>
 
         {loading && <div className="text-sm text-slate-500">Loading…</div>}

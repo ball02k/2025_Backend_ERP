@@ -436,6 +436,12 @@ model DocumentLink {
   carbonEntryId Int?
   poId          Int?
   linkType    String
+  // Polymorphic linking (additive)
+  // Allows generic linking to any entity type without adding columns per type
+  entityType  String?
+  entityId    Int?
+  // Optional category for further grouping (e.g. 'spec', 'photo')
+  category    String?
   createdAt   DateTime @default(now())
 
   document Document @relation(fields: [documentId], references: [id])
@@ -443,6 +449,7 @@ model DocumentLink {
   @@index([tenantId, projectId])
   @@index([tenantId, variationId])
   @@index([tenantId, documentId])
+  @@index([tenantId, entityType, entityId])
   @@index([projectId])
   @@index([variationId])
   @@index([tenantId, rfiId])

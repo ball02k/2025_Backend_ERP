@@ -1,24 +1,48 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
+import { useProjectFinance } from '@/pages/project/FinanceContext';
 import { apiGet, apiPost } from '@/lib/api';
+import FinanceBreadcrumb from '@/components/finance/FinanceBreadcrumb';
 
 type PO = { id: number; code: string; supplier?: string; status?: string; orderDate?: string; total?: number; documentId?: number; documentUrl?: string|null };
 
 export default function PosList() {
+  const { id: projectParam } = useParams();
+  const ctx = useProjectFinance?.() || ({} as any);
+  const projectId = Number.isFinite(ctx.projectId) ? Number(ctx.projectId) : (projectParam ? Number(projectParam) : undefined);
   const [rows, setRows] = useState<PO[]>([]);
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState('');
 
   async function load() {
-    const data = await apiGet<{ items: PO[]; total: number }>(`/api/finance/pos`, { q });
-    setRows(data.items || []);
-    setTotal(data.total || 0);
+    const query: any = { q };
+    if (Number.isFinite(projectId)) query.projectId = projectId;
+    const data = await apiGet<any>(`/api/finance/pos`, query);
+    const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+    setRows(items);
+    setTotal(Number(data?.total ?? items.length ?? 0));
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [projectId]);
 
   return (
     <div className="p-4">
-      <h1 className="text-xl font-semibold mb-3">Purchase Orders</h1>
+      <div className="flex items-center justify-between mb-2">
+        <h1 className="text-xl font-semibold">Purchase Orders</h1>
+        {Number.isFinite(projectId) && (
+          <button
+            className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
+            onClick={async () => {
+              try {
+                const po = await apiPost('/api/finance/pos', { projectId });
+                location.href = Number.isFinite(projectId) ? `/projects/${projectId}/finance/pos/${po.id}` : `/finance/pos/${po.id}`;
+              } catch (_) { /* ignore, DataGrid pages already show errors */ }
+            }}
+          >
+            New PO
+          </button>
+        )}
+      </div>
+      <FinanceBreadcrumb section="pos" />
       <div className="flex gap-2 mb-3">
         <input className="border rounded px-3 py-2" placeholder="Search" value={q} onChange={e=>setQ(e.target.value)} />
         <button className="border rounded px-3 py-2" onClick={load}>Search</button>
@@ -38,9 +62,9 @@ export default function PosList() {
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
+            {(Array.isArray(rows) ? rows : []).map(r => (
               <tr key={r.id} className="hover:bg-slate-50">
-                <td className="p-2 border"><Link className="text-blue-700" to={`/finance/pos/${r.id}`}>{r.code}</Link></td>
+                <td className="p-2 border"><Link className="text-blue-700" to={Number.isFinite(projectId) ? `/projects/${projectId}/finance/pos/${r.id}` : `/finance/pos/${r.id}`}>{r.code}</Link></td>
                 <td className="p-2 border">{r.supplier || '—'}</td>
                 <td className="p-2 border">{r.status || '—'}</td>
                 <td className="p-2 border">{r.orderDate ? new Date(r.orderDate).toLocaleDateString() : '—'}</td>

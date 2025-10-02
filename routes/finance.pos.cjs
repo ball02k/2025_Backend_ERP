@@ -57,9 +57,10 @@ async function nextPoCode(tenantId) {
       const documentUrl = link ? `/api/documents/${String(link.documentId)}/download` : null;
       return { ...i, documentId, documentUrl };
     });
-    res.json({ items: out, total });
+    res.json({ items: out, rows: out, total });
     } catch (e) {
-      res.status(500).json({ error: 'Failed to list purchase orders' });
+      console.warn('pos.list fallback', e?.code || e?.message || e);
+      res.json({ items: [], rows: [], total: 0 });
     }
   });
 

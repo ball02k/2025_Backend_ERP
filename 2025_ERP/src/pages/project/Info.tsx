@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { apiGet } from '@/lib/api';
 import EntityHeader from '@/components/EntityHeader';
+import EntityDocuments from '@/components/documents/EntityDocuments.jsx';
 
 type Proj = Record<string, any> & { links?: any[] };
 
@@ -53,6 +54,10 @@ export default function ProjectInfo(){
         ]}
         refresh={load}
       />
+      <div className="-mt-3 mb-2 flex items-center gap-4">
+        <a href={`/projects/${id}/edit`} className="text-sm underline">Open edit form</a>
+        <a href={`/projects/${id}/finance/invoices`} className="text-sm underline">Open Finance</a>
+      </div>
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="border rounded-2xl p-4">
           <h3 className="font-semibold mb-2">Packages</h3>
@@ -67,6 +72,14 @@ export default function ProjectInfo(){
           ))}
         </div>
       </section>
+      {/* Financial module moved to dedicated Finance area with submenu */}
+      {/* Project Documents */}
+      <EntityDocuments
+        entityType="project"
+        entityId={Number(id)}
+        projectId={Number(id)}
+        title="Project Documents"
+      />
     </div>
   );
 }

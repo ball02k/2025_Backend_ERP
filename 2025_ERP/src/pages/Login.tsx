@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { isAuthed, setToken, setTenantId } from '@/lib/auth';
+import { getToken, getTenant, setSession } from '@/lib/auth';
+import { toastErr } from '@/lib/api';
 
 export default function Login() {
   const [email, setEmail] = useState('admin@demo.local');
   const [password, setPassword] = useState('demo1234');
-  const [tenant, setTenant] = useState(localStorage.getItem('tenantId') || 'demo');
+  const [tenant, setTenant] = useState(getTenant() || 'demo');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const nav = useNavigate();
@@ -14,7 +15,7 @@ export default function Login() {
   const ret = sp.get('return') || '/';
 
   useEffect(() => {
-    if (isAuthed()) nav(ret, { replace: true });
+    if (getToken()) nav(ret, { replace: true });
   }, [nav, ret]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -26,17 +27,16 @@ export default function Login() {
       const resp = await fetch('/api/dev-token');
       const data = await resp.json().catch(()=>({}));
       if (resp.ok && data?.token) {
-        setToken(data.token);
-        setTenantId(data?.user?.tenantId || tenant || 'demo');
+        setSession({ token: data.token, tenant: data?.user?.tenantId || tenant || 'demo', user: data?.user || null });
         nav(ret, { replace: true });
         return;
       }
       // Fallback stub if dev-token not available
-      setToken('dev_local_token');
-      setTenantId(tenant || 'demo');
+      setSession({ token: 'dev_local_token', tenant: tenant || 'demo' });
       nav(ret, { replace: true });
     } catch (e: any) {
       setErr(e?.message || 'Login failed');
+      try { toastErr(e, 'Login failed'); } catch {}
     } finally {
       setBusy(false);
     }
