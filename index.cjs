@@ -56,6 +56,8 @@ const financeMatchRouter = require('./routes/finance.match.cjs');
 const financeOcrRouter = require('./routes/finance.ocr.cjs');
 const financeInboundRouter = require('./routes/finance.inbound.cjs');
 const financeReceiptsRouter = require('./routes/finance.receipts.cjs');
+const afpRouter = require('./routes/afp.cjs');
+const { ensureFeature } = require('./middleware/featureGuard.js');
 const documentLinksRouter = require('./routes/document.links.cjs');
 const { attachUser } = require('./middleware/auth.cjs');
 const { demoGuard } = require('./middleware/demo.cjs');
@@ -103,6 +105,8 @@ app.use(morgan('dev'));
 app.use(attachUser);
 // In dev, allow bypass to attach a demo user when no token is provided
 app.use(devAuth); // must be before routes that use requireAuth
+// Dev feature toggles via env (ENABLE_AFP=1 or ENABLE_FINANCE=1)
+app.use(require('./middleware/devFeatures.cjs'));
 // DEV-ONLY RBAC helper to ensure admin role and project membership
 app.use(devRbac);
 // Demo guard rails (block destructive or protected operations)
@@ -198,6 +202,8 @@ app.use('/api/hs', requireAuth, hsRouter);
 app.use('/api/carbon', requireAuth, carbonRouter);
 app.use('/api/analytics', requireAuth, analyticsRouter(prisma));
 app.use('/api', homeRoutes(prisma, { requireAuth }));
+// Applications for Payment (AfP)
+app.use('/api/applications', requireAuth, ensureFeature('afp'), afpRouter);
 // Finance (additive, gated by auth; consider role checks 'finance'|'admin' in production)
 app.use('/api', requireAuth, financePoRouter);
 app.use('/api', requireAuth, financeInvoicesRouter);

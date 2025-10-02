@@ -14,6 +14,7 @@
     "dev-seed": "node scripts/dev-seed.cjs",
     "seed:demo": "node scripts/dev-seed.cjs",
     "seed:reset": "prisma migrate reset --force && node scripts/dev-seed.cjs",
+    "seed:afp": "node prisma/seed-afp.cjs",
     "postinstall": "prisma generate",
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",

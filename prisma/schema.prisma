@@ -181,10 +181,11 @@ model Project {
   invoices       Invoice[]
 
   // Additive relations to new modules
-  rfis           Rfi[]
-  qaRecords      QaRecord[]
-  hsEvents       HsEvent[]
-  carbonEntries  CarbonEntry[]
+  rfis                  Rfi[]
+  qaRecords             QaRecord[]
+  hsEvents              HsEvent[]
+  carbonEntries         CarbonEntry[]
+  ApplicationForPayment ApplicationForPayment[]
 
   @@index([tenantId, status])
   @@index([tenantId, name])
@@ -424,25 +425,25 @@ model Document {
 }
 
 model DocumentLink {
-  id          Int      @id @default(autoincrement())
-  tenantId    String
-  documentId  BigInt
-  projectId   Int?
-  variationId Int?
+  id            Int      @id @default(autoincrement())
+  tenantId      String
+  documentId    BigInt
+  projectId     Int?
+  variationId   Int?
   // NEW optional link targets (additive)
   rfiId         Int?
   qaRecordId    Int?
   hsEventId     Int?
   carbonEntryId Int?
   poId          Int?
-  linkType    String
+  linkType      String
   // Polymorphic linking (additive)
   // Allows generic linking to any entity type without adding columns per type
-  entityType  String?
-  entityId    Int?
+  entityType    String?
+  entityId      Int?
   // Optional category for further grouping (e.g. 'spec', 'photo')
-  category    String?
-  createdAt   DateTime @default(now())
+  category      String?
+  createdAt     DateTime @default(now())
 
   document Document @relation(fields: [documentId], references: [id])
 
@@ -466,14 +467,14 @@ model DocumentLink {
 /// NEW MODELS (Additive): RFI, QA/QC, H&S, Carbon
 
 model Rfi {
-  id                Int      @id @default(autoincrement())
+  id                Int       @id @default(autoincrement())
   tenantId          String
   projectId         Int
   rfiNumber         String
   subject           String
   question          String
-  status            String   @default("open")
-  priority          String   @default("med")
+  status            String    @default("open")
+  priority          String    @default("med")
   discipline        String?
   packageId         Int?
   requestedByUserId String?
@@ -494,9 +495,9 @@ model Rfi {
   voidReason        String?
   createdByUserId   String?
   updatedByUserId   String?
-  isDeleted         Boolean  @default(false)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  isDeleted         Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   project Project @relation(fields: [projectId], references: [id])
 
@@ -505,7 +506,7 @@ model Rfi {
 }
 
 model QaRecord {
-  id                 Int      @id @default(autoincrement())
+  id                 Int       @id @default(autoincrement())
   tenantId           String
   projectId          Int
   type               String
@@ -514,7 +515,7 @@ model QaRecord {
   trade              String?
   location           String?
   lot                String?
-  status             String   @default("open")
+  status             String    @default("open")
   raisedByUserId     String?
   assignedToUserId   String?
   dueDate            DateTime?
@@ -528,28 +529,28 @@ model QaRecord {
   reference          String?
   createdByUserId    String?
   updatedByUserId    String?
-  isDeleted          Boolean  @default(false)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  isDeleted          Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id])
+  project Project  @relation(fields: [projectId], references: [id])
   items   QaItem[]
 
   @@index([tenantId, projectId, status, type])
 }
 
 model QaItem {
-  id               Int      @id @default(autoincrement())
+  id               Int       @id @default(autoincrement())
   tenantId         String
   qaRecordId       Int
   item             String
-  result           String   @default("open")
+  result           String    @default("open")
   notes            String?
   responsibleParty String?
   dueDate          DateTime?
   closedAt         DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   record QaRecord @relation(fields: [qaRecordId], references: [id])
 
@@ -557,38 +558,38 @@ model QaItem {
 }
 
 model HsEvent {
-  id                  Int      @id @default(autoincrement())
-  tenantId            String
-  projectId           Int
-  type                String
-  title               String
-  description         String
-  eventDate           DateTime
-  location            String?
-  reportedByUserId    String?
-  assignedToUserId    String?
-  status              String   @default("open")
-  severity            String?
-  initialRiskRating   String?
-  residualRiskRating  String?
-  personsInvolved     Json?
-  lostTimeHours       Int?
-  isRIDDOR            Boolean?
-  riddorRef           String?
-  regulatorNotified   Boolean?
-  regulatorName       String?
-  notificationDate    DateTime?
-  immediateAction     String?
-  rootCause           String?
-  correctiveActions   String?
-  targetClose         DateTime?
-  closedAt            DateTime?
-  tags                String?
-  createdByUserId     String?
-  updatedByUserId     String?
-  isDeleted           Boolean  @default(false)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                 Int       @id @default(autoincrement())
+  tenantId           String
+  projectId          Int
+  type               String
+  title              String
+  description        String
+  eventDate          DateTime
+  location           String?
+  reportedByUserId   String?
+  assignedToUserId   String?
+  status             String    @default("open")
+  severity           String?
+  initialRiskRating  String?
+  residualRiskRating String?
+  personsInvolved    Json?
+  lostTimeHours      Int?
+  isRIDDOR           Boolean?
+  riddorRef          String?
+  regulatorNotified  Boolean?
+  regulatorName      String?
+  notificationDate   DateTime?
+  immediateAction    String?
+  rootCause          String?
+  correctiveActions  String?
+  targetClose        DateTime?
+  closedAt           DateTime?
+  tags               String?
+  createdByUserId    String?
+  updatedByUserId    String?
+  isDeleted          Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   project Project @relation(fields: [projectId], references: [id])
 
@@ -700,30 +701,31 @@ model RolePermission {
 
 // Supplier Management
 model Supplier {
-  id               Int       @id @default(autoincrement())
-  tenantId         String
-  name             String
-  status           String    @default("active")
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  name                  String
+  status                String    @default("active")
   // Contact details (additive)
-  email            String?
-  phone            String?
-  companyRegNo     String?
-  vatNo            String?
+  email                 String?
+  phone                 String?
+  companyRegNo          String?
+  vatNo                 String?
   // Insurance details (additive)
   insurancePolicyNumber String?
-  insuranceExpiry  DateTime?
-  hsAccreditations String?
-  performanceScore Decimal?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  insuranceExpiry       DateTime?
+  hsAccreditations      String?
+  performanceScore      Decimal?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  capabilities    SupplierCapability[]
-  invites         TenderInvite[]       @relation("SupplierInvites")
-  submissions     Submission[]         @relation("SupplierSubmissions")
-  contracts       Contract[]           @relation("SupplierContracts")
-  awardedPackages Package[]            @relation("PackageAwardSupplier")
-  invoices        Invoice[]
-  onboardingTokens SupplierOnboardingToken[]
+  capabilities          SupplierCapability[]
+  invites               TenderInvite[]            @relation("SupplierInvites")
+  submissions           Submission[]              @relation("SupplierSubmissions")
+  contracts             Contract[]                @relation("SupplierContracts")
+  awardedPackages       Package[]                 @relation("PackageAwardSupplier")
+  invoices              Invoice[]
+  onboardingTokens      SupplierOnboardingToken[]
+  ApplicationForPayment ApplicationForPayment[]
 
   @@index([tenantId, name])
   @@index([tenantId, status])
@@ -738,7 +740,7 @@ model SupplierOnboardingToken {
   expiresAt  DateTime
   createdAt  DateTime @default(now())
 
-  supplier   Supplier @relation(fields: [supplierId], references: [id])
+  supplier Supplier @relation(fields: [supplierId], references: [id])
 
   @@index([supplierId])
   @@index([tenantId])
@@ -834,8 +836,8 @@ model Request {
   updatedAt   DateTime  @updatedAt
 
   // Optional link to a procurement package when RFx is created from/for a package
-  packageId   Int?
-  package     Package?  @relation(fields: [packageId], references: [id])
+  packageId Int?
+  package   Package? @relation(fields: [packageId], references: [id])
 
   @@index([tenantId, status, deadline])
   @@index([tenantId, packageId, status])
@@ -1046,28 +1048,28 @@ model FinancialItem {
 
 // Invoices (project-scoped)
 model Invoice {
-  id         Int       @id @default(autoincrement())
-  tenantId   String
-  projectId  Int
-  project    Project   @relation(fields: [projectId], references: [id])
-  supplierId Int?
-  supplier   Supplier? @relation(fields: [supplierId], references: [id])
-  number     String
-  issueDate  DateTime?
-  dueDate    DateTime?
-  net        Decimal   @default(0)
-  vat        Decimal   @default(0)
-  gross      Decimal   @default(0)
-  status     String    @default("Open")
+  id            Int       @id @default(autoincrement())
+  tenantId      String
+  projectId     Int
+  project       Project   @relation(fields: [projectId], references: [id])
+  supplierId    Int?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id])
+  number        String
+  issueDate     DateTime?
+  dueDate       DateTime?
+  net           Decimal   @default(0)
+  vat           Decimal   @default(0)
+  gross         Decimal   @default(0)
+  status        String    @default("Open")
   // Additive finance fields
-  documentId   BigInt?
-  ocrStatus    String?
+  documentId    BigInt?
+  ocrStatus     String?
   ocrResultJson Json?
-  poNumberRef  String?
-  matchStatus  String?
-  matchedPoId  Int?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  poNumberRef   String?
+  matchStatus   String?
+  matchedPoId   Int?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([tenantId, projectId, status])
   @@index([tenantId, supplierId])
@@ -1076,19 +1078,19 @@ model Invoice {
 
 /// Finance: Invoice line items (additive)
 model InvoiceLine {
-  id          Int      @id @default(autoincrement())
-  tenantId    String   @default("demo")
+  id          Int     @id @default(autoincrement())
+  tenantId    String  @default("demo")
   invoiceId   Int
   lineNo      Int
   description String
   costCode    String?
-  qty         Decimal  @default(0)
+  qty         Decimal @default(0)
   unit        String?
-  rate        Decimal  @default(0)
+  rate        Decimal @default(0)
   vatRatePct  Float?
-  totalExVat  Decimal  @default(0)
-  totalVat    Decimal  @default(0)
-  totalIncVat Decimal  @default(0)
+  totalExVat  Decimal @default(0)
+  totalVat    Decimal @default(0)
+  totalIncVat Decimal @default(0)
 
   @@index([tenantId, invoiceId])
 }
@@ -1097,8 +1099,8 @@ model InvoiceLine {
 model FinanceMatch {
   id            Int      @id @default(autoincrement())
   tenantId      String   @default("demo")
-  type          String   // po_invoice|po_receipt|invoice_receipt|three_way
-  status        String   // proposed|accepted|rejected
+  type          String // po_invoice|po_receipt|invoice_receipt|three_way
+  status        String // proposed|accepted|rejected
   reason        String?
   varianceExVat Decimal? @default(0)
   varianceVat   Decimal? @default(0)
@@ -1135,7 +1137,7 @@ model InboundEmail {
 }
 
 model EmailAttachment {
-  id             Int      @id @default(autoincrement())
+  id             Int          @id @default(autoincrement())
   inboundEmailId Int
   inboundEmail   InboundEmail @relation(fields: [inboundEmailId], references: [id])
   filename       String
@@ -1144,13 +1146,78 @@ model EmailAttachment {
   documentId     BigInt?
 }
 
+// --- Applications for Payment (AfP) ---
+model ApplicationForPayment {
+  id              Int       @id @default(autoincrement())
+  tenantId        String
+  projectId       Int
+  supplierId      Int?
+  contractId      BigInt?
+  applicationNo   String // e.g. "AFP-2025-00012", unique per tenant
+  applicationDate DateTime // date submitted
+  periodStart     DateTime
+  periodEnd       DateTime
+  assessmentDate  DateTime? // JCT IVD / NEC assessment date
+  dueDate         DateTime? // contractual due date for payment
+  currency        String // "GBP" default
+  // Claimed
+  grossToDate     Decimal   @db.Decimal(18, 2)
+  variationsValue Decimal   @db.Decimal(18, 2)
+  prelimsValue    Decimal   @db.Decimal(18, 2)
+  retentionValue  Decimal   @db.Decimal(18, 2)
+  mosValue        Decimal   @db.Decimal(18, 2) // materials on site
+  offsiteValue    Decimal   @db.Decimal(18, 2) // materials off site
+  deductionsValue Decimal   @db.Decimal(18, 2) // contra charges etc.
+  netClaimed      Decimal   @db.Decimal(18, 2)
+
+  // Certification
+  certifiedAmount    Decimal?  @db.Decimal(18, 2)
+  certifiedDate      DateTime?
+  certifiedByUserId  Int?
+  certificationNotes String?
+
+  // Notices timeline
+  paymentNoticeIssuedAt DateTime?
+  payLessNoticeIssuedAt DateTime?
+  payLessReason         String?
+
+  status    String // draft | submitted | payment_notice | pay_less_notice | certified | rejected | paid
+  reference String? // free text: invoice ref, CA note etc.
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project       Project         @relation(fields: [projectId], references: [id])
+  supplier      Supplier?       @relation(fields: [supplierId], references: [id])
+  contract      Contract?       @relation(fields: [contractId], references: [id])
+  AfpAttachment AfpAttachment[]
+
+  @@unique([tenantId, applicationNo])
+  @@index([tenantId, projectId, applicationDate])
+  @@index([tenantId, supplierId])
+  @@index([tenantId, status])
+}
+
+model AfpAttachment {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  afpId      Int
+  documentId BigInt
+  label      String?
+  createdAt  DateTime @default(now())
+
+  afp ApplicationForPayment @relation(fields: [afpId], references: [id])
+  // Document.id remains BigInt elsewhere
+}
+
 /// Finance: OCR job queue (additive)
 model OcrJob {
   id         Int      @id @default(autoincrement())
   tenantId   String   @default("demo")
   documentId BigInt
   kind       String   @default("invoice") // invoice|po
-  status     String   @default("queued")   // queued|processing|done|failed
+  status     String   @default("queued") // queued|processing|done|failed
   provider   String?
   resultJson Json?
   error      String?
@@ -1228,23 +1295,24 @@ model Submission {
 }
 
 model Contract {
-  id             BigInt    @id @default(autoincrement())
-  projectId      Int
-  project        Project   @relation(fields: [projectId], references: [id])
-  packageId      Int?      @unique
-  package        Package?  @relation(name: "PackageContract", fields: [packageId], references: [id])
-  supplierId     Int
-  supplier       Supplier  @relation("SupplierContracts", fields: [supplierId], references: [id])
-  title          String
-  contractNumber String?
-  value          Decimal
-  status         String    @default("Pending")
-  signedAt       DateTime?
-  startDate      DateTime?
-  endDate        DateTime?
-  retentionPct   Float?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                    BigInt                  @id @default(autoincrement())
+  projectId             Int
+  project               Project                 @relation(fields: [projectId], references: [id])
+  packageId             Int?                    @unique
+  package               Package?                @relation(name: "PackageContract", fields: [packageId], references: [id])
+  supplierId            Int
+  supplier              Supplier                @relation("SupplierContracts", fields: [supplierId], references: [id])
+  title                 String
+  contractNumber        String?
+  value                 Decimal
+  status                String                  @default("Pending")
+  signedAt              DateTime?
+  startDate             DateTime?
+  endDate               DateTime?
+  retentionPct          Float?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  ApplicationForPayment ApplicationForPayment[]
 
   @@index([projectId])
   @@index([supplierId])
