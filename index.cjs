@@ -204,6 +204,8 @@ app.use('/api/analytics', requireAuth, analyticsRouter(prisma));
 app.use('/api', homeRoutes(prisma, { requireAuth }));
 // Applications for Payment (AfP)
 app.use('/api/applications', requireAuth, ensureFeature('afp'), afpRouter);
+// Back-compat alias: some clients may call /api/afp; route to applications
+app.use('/api/afp', requireAuth, ensureFeature('afp'), afpRouter);
 // Finance (additive, gated by auth; consider role checks 'finance'|'admin' in production)
 app.use('/api', requireAuth, financePoRouter);
 app.use('/api', requireAuth, financeInvoicesRouter);
