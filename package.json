@@ -34,7 +34,8 @@
     "api:catalog": "node scripts/api_inventory.js --write-md",
     "api:openapi": "node scripts/api_inventory.js --write-openapi",
     "ocr:once": "node -e \"require('./workers/ocrWorker.cjs').runOcrWorkerOnce().then(()=>console.log('ocr:done')).catch(e=>{console.error(e);process.exit(1)})\"",
-    "ocr:loop": "node scripts/ocr-loop.cjs"
+    "ocr:loop": "node scripts/ocr-loop.cjs",
+    "seed:mvp": "node scripts/seed_project_mvp.cjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.617.0",
