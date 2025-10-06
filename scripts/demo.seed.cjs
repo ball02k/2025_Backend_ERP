@@ -7,7 +7,8 @@
  *   DEMO_TOKEN=<jwt for a demo user>  (or rely on your dev auth bypass if present)
  *   DEMO_TENANT=demo
  */
-const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
+// Default to backend dev port 3001 (project standard)
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
 const TENANT = process.env.DEMO_TENANT || 'demo';
 const TOKEN = process.env.DEMO_TOKEN || '';
 

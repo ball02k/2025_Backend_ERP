@@ -4,8 +4,9 @@ const { prisma } = require('../utils/prisma.cjs');
 // Mounted after attachUser/devAuth. Removes easily for production.
 module.exports = async function devRbac(req, _res, next) {
   try {
-    // Only run in development and when a user is attached
-    if (process.env.NODE_ENV !== 'development' || !req.user) return next();
+    // Only run in non-production and when a user is attached
+    const { isDevEnv } = require('../utils/devFlags.cjs');
+    if (!isDevEnv() || !req.user) return next();
 
     // Force admin role on the request user (in-memory)
     req.user.role = 'admin';

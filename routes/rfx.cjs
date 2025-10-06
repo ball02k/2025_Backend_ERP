@@ -1,9 +1,35 @@
 const express = require('express');
 const { requireProjectMember } = require('../middleware/membership.cjs');
 const { linkOf } = require('../lib/links.cjs');
+const { prisma: prismaUtil } = require('../utils/prisma.cjs');
 
 module.exports = (prisma) => {
   const router = express.Router();
+
+  function getTenantId(req) { return req.user && req.user.tenantId; }
+
+  // GET /api/projects/:projectId/rfx — list RFx (Requests) for a project
+  router.get('/:projectId/rfx', requireProjectMember, async (req, res) => {
+    try {
+      const tenantId = getTenantId(req);
+      const projectId = Number(req.params.projectId);
+      if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'Invalid projectId' });
+      const rows = await prisma.request.findMany({
+        where: { tenantId, package: { projectId } },
+        orderBy: { updatedAt: 'desc' },
+      });
+      const items = rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        status: r.status,
+        links: [linkOf('rfx', r.id, r.title)],
+      }));
+      res.json({ items, total: items.length });
+    } catch (err) {
+      console.error('list rfx error', err);
+      res.status(500).json({ error: 'Failed to list RFx' });
+    }
+  });
 
   // POST /api/projects/:projectId/packages/:packageId/push-to-rfx
   router.post(
@@ -83,6 +109,34 @@ module.exports = (prisma) => {
       }
     }
   );
+
+  // POST /api/projects/:projectId/packages/:packageId/rfx — alias used by some FE variants
+  router.post('/:projectId/packages/:packageId/rfx', requireProjectMember, async (req, res) => {
+    req.params = { ...req.params }; // shallow copy safety
+    return router.handle({ ...req, url: `/${req.params.projectId}/packages/${req.params.packageId}/push-to-rfx`, method: 'POST' }, res);
+  });
+
+  // POST /api/packages/:packageId/rfx — compatibility without explicit projectId
+  router.post('/packages/:packageId/rfx', requireProjectMember, async (req, res) => {
+    try {
+      const tenantId = getTenantId(req);
+      const packageId = Number(req.params.packageId);
+      if (!Number.isFinite(packageId)) return res.status(400).json({ error: 'Invalid packageId' });
+      const pkg = await prisma.package.findFirst({ where: { id: packageId, project: { tenantId } }, select: { id: true, projectId: true } });
+      if (!pkg) return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
+      // Delegate to primary handler
+      const mockReq = {
+        ...req,
+        params: { projectId: String(pkg.projectId), packageId: String(packageId) },
+        method: 'POST',
+        url: `/${pkg.projectId}/packages/${packageId}/push-to-rfx`,
+      };
+      return router.handle(mockReq, res);
+    } catch (err) {
+      console.error('create rfx (package) error', err);
+      res.status(500).json({ error: 'Failed to create RFx' });
+    }
+  });
 
   return router;
 };

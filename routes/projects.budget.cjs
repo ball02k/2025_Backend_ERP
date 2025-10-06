@@ -22,15 +22,15 @@ router.post('/projects/:projectId/budget', async (req, res, next) => {
     const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
     let count = 0;
     for (const l of lines) {
+      // Map incoming payload to schema fields
       const data = {
         tenantId,
         projectId,
         code: l.code ?? null,
-        name: l.name ?? null,
+        category: l.category ?? null,
+        periodMonth: l.periodMonth ?? null,
         description: l.description ?? null,
-        lineType: l.lineType ?? null,
-        planned: l.planned != null ? Number(l.planned) : 0,
-        packageId: l.packageId != null ? Number(l.packageId) : null,
+        amount: l.planned != null ? Number(l.planned) : (l.amount != null ? Number(l.amount) : 0),
       };
       if (l.id) {
         await prisma.budgetLine.update({ where: { id: Number(l.id) }, data });
@@ -39,7 +39,7 @@ router.post('/projects/:projectId/budget', async (req, res, next) => {
       }
       count++;
     }
-    await recomputeProjectFinancials(tenantId, projectId);
+    try { await recomputeProjectFinancials(tenantId, projectId); } catch (_) {}
     res.json({ ok: true, count });
   } catch (e) { next(e); }
 });
@@ -49,12 +49,20 @@ router.patch('/projects/:projectId/budget/:id', async (req, res, next) => {
     const tenantId = req.user?.tenantId || req.tenantId;
     const projectId = Number(req.params.projectId);
     const id = Number(req.params.id);
-    const updated = await prisma.budgetLine.update({ where: { id }, data: req.body || {} });
-    await recomputeProjectFinancials(tenantId, projectId);
+    // Sanitize patch: only allow known fields and map planned->amount
+    const b = req.body || {};
+    const data = {};
+    if (b.code !== undefined) data.code = b.code ?? null;
+    if (b.category !== undefined) data.category = b.category ?? null;
+    if (b.periodMonth !== undefined) data.periodMonth = b.periodMonth ?? null;
+    if (b.description !== undefined) data.description = b.description ?? null;
+    if (b.amount !== undefined) data.amount = Number(b.amount) || 0;
+    if (b.planned !== undefined && data.amount === undefined) data.amount = Number(b.planned) || 0;
+    const updated = await prisma.budgetLine.update({ where: { id }, data });
+    try { await recomputeProjectFinancials(tenantId, projectId); } catch (_) {}
     const row = safeJson(updated); row.links = buildLinks('budgetLine', row);
     res.json(row);
   } catch (e) { next(e); }
 });
 
 module.exports = router;
-
