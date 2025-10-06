@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "ee5e2d7"
+    "version": "3f1e38c"
   },
   "paths": {
     "*": {
@@ -1346,32 +1346,6 @@
       }
     },
     "//api/projects/{projectId}/cvr": {
-      "post": {
-        "summary": "POST //api/projects/:projectId/cvr",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
-      },
       "get": {
         "summary": "GET //api/projects/:projectId/cvr",
         "parameters": [
@@ -1399,40 +1373,20 @@
         }
       }
     },
-    "//api/projects/cvr/{id}/lines/import": {
-      "post": {
-        "summary": "POST //api/projects/cvr/:id/lines/import",
+    "//api/projects/{projectId}/cvr/lines/{lineId}": {
+      "patch": {
+        "summary": "PATCH //api/projects/:projectId/cvr/lines/:lineId",
         "parameters": [
           {
-            "name": "id",
+            "name": "projectId",
             "in": "path",
             "required": true,
             "schema": {
               "type": "number"
             }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/projects/cvr/{id}": {
-      "patch": {
-        "summary": "PATCH //api/projects/cvr/:id",
-        "parameters": [
+          },
           {
-            "name": "id",
+            "name": "lineId",
             "in": "path",
             "required": true,
             "schema": {
@@ -1455,12 +1409,68 @@
         }
       }
     },
-    "//api/projects/cvr/{id}/publish": {
+    "//api/projects/{projectId}/cvr/refresh": {
       "post": {
-        "summary": "POST //api/projects/cvr/:id/publish",
+        "summary": "POST //api/projects/:projectId/cvr/refresh",
         "parameters": [
           {
-            "name": "id",
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/cvr/submit": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/cvr/submit",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/cvr/approve": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/cvr/approve",
+        "parameters": [
+          {
+            "name": "projectId",
             "in": "path",
             "required": true,
             "schema": {
@@ -2929,144 +2939,6 @@
         "parameters": [
           {
             "name": "packageId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/{projectId}/cvr": {
-      "post": {
-        "summary": "POST //api/:projectId/cvr",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "GET //api/:projectId/cvr",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 1,
-                  "_example": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/cvr/{id}/lines/import": {
-      "post": {
-        "summary": "POST //api/cvr/:id/lines/import",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/cvr/{id}": {
-      "patch": {
-        "summary": "PATCH //api/cvr/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 1,
-                  "updated": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/cvr/{id}/publish": {
-      "post": {
-        "summary": "POST //api/cvr/:id/publish",
-        "parameters": [
-          {
-            "name": "id",
             "in": "path",
             "required": true,
             "schema": {
