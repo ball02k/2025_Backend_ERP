@@ -1069,11 +1069,17 @@ model Invoice {
   matchStatus   String?
   matchedPoId   Int?
   source        String?
+  // Additive links to tie into budget/contract rollups
+  packageId     Int?
+  contractId    BigInt?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   @@index([tenantId, projectId, status])
   @@index([tenantId, supplierId])
+  @@index([tenantId, projectId])
+  @@index([tenantId, packageId])
+  @@index([tenantId, contractId])
   @@index([tenantId, projectId, dueDate])
   @@index([tenantId, projectId, source])
 }

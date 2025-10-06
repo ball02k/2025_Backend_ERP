@@ -243,6 +243,8 @@ module.exports = (prisma) => {
           gross: b.gross != null ? b.gross : (Number(b.net || 0) + Number(b.vat || 0)),
           status: b.status ? String(b.status) : 'Open',
           source: b.source ? String(b.source) : null,
+          packageId: b.packageId != null ? Number(b.packageId) : null,
+          contractId: b.contractId != null ? BigInt(b.contractId) : null,
         },
         select: {
           id: true,
@@ -254,10 +256,16 @@ module.exports = (prisma) => {
           net: true,
           vat: true,
           gross: true,
+          packageId: true,
+          contractId: true,
           supplier: { select: { id: true, name: true } },
         },
       });
-      return res.status(201).json(created);
+      try { const { recomputeActualsForProject } = require('./hooks.recompute.cjs'); await recomputeActualsForProject(tenantId, projectId); } catch (_e) {}
+      const { buildLinks } = require('../lib/buildLinks.cjs');
+      const row = { ...created, projectId };
+      row.links = buildLinks('invoice', row);
+      return res.status(201).json(row);
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: err.message || 'Failed to create invoice' });
@@ -300,6 +308,7 @@ module.exports = (prisma) => {
           skipped++; skippedRows.push({ rowIndex: idx+2, reason: 'ERROR:' + (e.code || e.message || 'UNKNOWN') });
         }
       }
+      try { const { recomputeActualsForProject } = require('./hooks.recompute.cjs'); await recomputeActualsForProject(tenantId, projectId); } catch (_e) {}
       res.json({ imported, skipped, skippedRows });
     } catch (err) {
       console.error(err);
