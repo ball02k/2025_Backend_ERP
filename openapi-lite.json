@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "62e97b3"
+    "version": "ee5e2d7"
   },
   "paths": {
     "*": {
@@ -1936,120 +1936,12 @@
         }
       }
     },
-    "//api/variations": {
+    "//api/variations/projects/{projectId}/variations": {
       "get": {
-        "summary": "GET //api/variations",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "total": 1,
-                  "items": [
-                    {
-                      "id": 1,
-                      "_example": true
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "summary": "POST //api/variations",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/variations/csv/export": {
-      "get": {
-        "summary": "GET //api/variations/csv/export",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "total": 1,
-                  "items": [
-                    {
-                      "id": 1,
-                      "_example": true
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/variations/csv/template": {
-      "get": {
-        "summary": "GET //api/variations/csv/template",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "total": 1,
-                  "items": [
-                    {
-                      "id": 1,
-                      "_example": true
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/variations/csv/import": {
-      "post": {
-        "summary": "POST //api/variations/csv/import",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/variations/{id}": {
-      "get": {
-        "summary": "GET //api/variations/:id",
+        "summary": "GET //api/variations/projects/:projectId/variations",
         "parameters": [
           {
-            "name": "id",
+            "name": "projectId",
             "in": "path",
             "required": true,
             "schema": {
@@ -2071,8 +1963,36 @@
           }
         }
       },
-      "put": {
-        "summary": "PUT //api/variations/:id",
+      "post": {
+        "summary": "POST //api/variations/projects/:projectId/variations",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/variations/variations/{id}/approve": {
+      "patch": {
+        "summary": "PATCH //api/variations/variations/:id/approve",
         "parameters": [
           {
             "name": "id",
@@ -2096,36 +2016,11 @@
             }
           }
         }
-      },
-      "delete": {
-        "summary": "DELETE //api/variations/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "ok": true
-                }
-              }
-            }
-          }
-        }
       }
     },
-    "//api/variations/{id}/status": {
+    "//api/variations/variations/{id}/reject": {
       "patch": {
-        "summary": "PATCH //api/variations/:id/status",
+        "summary": "PATCH //api/variations/variations/:id/reject",
         "parameters": [
           {
             "name": "id",
