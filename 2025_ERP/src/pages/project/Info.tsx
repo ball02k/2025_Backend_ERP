@@ -8,12 +8,26 @@ type Proj = Record<string, any> & { links?: any[] };
 
 export default function ProjectInfo(){
   const { id } = useParams();
-  const [overview, setOverview] = useState<{ project: Proj } | null>(null);
+  // Keep a single state object to avoid changing hook order during HMR
+  const [state, setState] = useState<{ project: Proj | null; links?: any[]; loading: boolean; error: string }>({ project: null, links: [], loading: true, error: '' });
   const [lookups, setLookups] = useState<{ statuses: string[]; types: string[] }>({ statuses: [], types: [] });
 
   async function load(){
-    const data = await apiGet(`/api/projects/${id}/overview`);
-    setOverview(data);
+    setState((s) => ({ ...s, loading: true, error: '' }));
+    try {
+      const data = await apiGet(`/api/projects/${id}/overview`);
+      const proj = data?.project || data?.data || data;
+      setState({ project: proj?.project || proj, links: data?.links || [], loading: false, error: '' });
+    } catch (e: any) {
+      // Fallback: fetch basic project payload so the page can still render
+      try {
+        const basic = await apiGet(`/api/projects/${id}`);
+        const proj = basic?.project || basic?.data || basic;
+        setState({ project: proj || null, links: [], loading: false, error: '' });
+      } catch (e2: any) {
+        setState({ project: null, links: [], loading: false, error: e2?.message || 'Failed to load project' });
+      }
+    }
   }
   useEffect(()=>{ if(id) load(); }, [id]);
 
@@ -32,8 +46,10 @@ export default function ProjectInfo(){
     loadLookups();
   }, []);
 
-  if(!overview) return null;
-  const proj = overview.project;
+  if (state.loading) return <div className="text-sm text-slate-500">Loading project…</div>;
+  if (state.error) return <div className="text-sm text-red-600">{state.error}</div>;
+  if(!state.project) return null;
+  const proj = state.project;
 
   return (
     <div className="space-y-4">
@@ -43,7 +59,7 @@ export default function ProjectInfo(){
         entityType="projects"
         entityId={Number(id)}
         data={proj}
-        links={overview.links || []}
+        links={state.links || []}
         fields={[
           { name:'status', label:'Status', listId:'project-statuses', options: lookups.statuses },
           { name:'type', label:'Type', listId:'project-types', options: lookups.types },

@@ -1,4 +1,5 @@
 import React, { Suspense, lazy } from "react";
+import ErrorBoundary from '@/components/ErrorBoundary.jsx';
 import RecoveryBanner from '@/components/RecoveryBanner';
 import RequireAuth from '@/components/RequireAuth';
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
@@ -19,7 +20,7 @@ const HealthPage = lazy(() => import('./pages/dev/Health'));
 const OnboardPublic = lazy(() => import("./pages/public/OnboardPublic.jsx"));
 const LoginPage = lazy(() => import("./pages/Login"));
 const DocumentsHub = lazy(() => import('./pages/DocumentsHub.jsx'));
-const ProjectInfo = lazy(() => import('./pages/project/Info'));
+const ProjectInfo = lazy(() => import('./pages/project/InfoStable.jsx'));
 const ProjectFinanceShell = lazy(() => import('./pages/project/Finance'));
 const RfiShow = lazy(() => import('./pages/RfiShow.jsx'));
 const QaShow = lazy(() => import('./pages/QaShow.jsx'));
@@ -76,7 +77,7 @@ export default function App() {
           <Route path="/audit" element={<RequireAuth><AuditList /></RequireAuth>} />
           <Route path="/reports" element={<RequireAuth><ReportList /></RequireAuth>} />
           {/* Projects and entity detail routes */}
-          <Route path="/projects/:id" element={<RequireAuth><ProjectInfo /></RequireAuth>} />
+          <Route path="/projects/:id" element={<RequireAuth><ErrorBoundary><ProjectInfo /></ErrorBoundary></RequireAuth>} />
           {/* Project-scoped Finance (reusing global finance pages with implicit projectId filter) */}
           <Route path="/projects/:id/finance" element={<RequireAuth><ProjectFinanceShell /></RequireAuth>}>
             <Route path="invoices" element={<RequireAuth><InvoicesList /></RequireAuth>} />
