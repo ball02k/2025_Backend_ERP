@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "8784b91"
+    "version": "44fba14"
   },
   "paths": {
     "*": {
@@ -1169,6 +1169,124 @@
         "parameters": [
           {
             "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/budget": {
+      "get": {
+        "summary": "GET //api/projects/:projectId/budget",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //api/projects/:projectId/budget",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/budget/{id}": {
+      "patch": {
+        "summary": "PATCH //api/projects/:projectId/budget/:id",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/overview": {
+      "get": {
+        "summary": "GET //api/projects/:projectId/overview",
+        "parameters": [
+          {
+            "name": "projectId",
             "in": "path",
             "required": true,
             "schema": {
