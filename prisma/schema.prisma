@@ -1417,3 +1417,50 @@ model AuditLog {
   @@index([entity, entityId])
 }
 
+
+model CVRSnapshot {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  projectId  Int
+  period     String   // "YYYY-MM"
+  status     String?  // "draft" | "submitted" | "approved" (string, not enum)
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  lines      CVRSnapshotLine[]
+
+  @@index([tenantId, projectId, period])
+  @@index([tenantId, status])
+}
+
+model CVRSnapshotLine {
+  id            Int      @id @default(autoincrement())
+  tenantId      String
+  snapshotId    Int
+  projectId     Int
+  budgetLineId  Int?
+  packageId     Int?
+  contractId    BigInt?
+  code          String?
+  name          String?
+
+  planned       Decimal  @db.Decimal(18,2) @default(0) // from BudgetLine.planned at seed
+  estimate      Decimal  @db.Decimal(18,2) @default(0) // from Contract value (sum per package)
+  actualToDate  Decimal  @db.Decimal(18,2) @default(0) // sum of invoices up to period end
+
+  progressPct   Decimal  @db.Decimal(5,2)  @default(0) // editable % complete this period (0-100)
+  notes         String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  snapshot      CVRSnapshot @relation(fields: [snapshotId], references: [id])
+
+  @@index([tenantId, snapshotId])
+  @@index([tenantId, projectId])
+  @@index([tenantId, packageId])
+  @@index([tenantId, budgetLineId])
+  @@index([tenantId, contractId])
+}
+
