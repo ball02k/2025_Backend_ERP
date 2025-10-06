@@ -37,7 +37,7 @@ async function nextPoCode(tenantId) {
     if (dateFrom || dateTo) where.orderDate = { gte: dateFrom ? new Date(String(dateFrom)) : undefined, lte: dateTo ? new Date(String(dateTo)) : undefined };
 
     const [items, total] = await Promise.all([
-      prisma.purchaseOrder.findMany({ where, skip: Number(offset), take: Math.min(Number(limit) || 25, 100), orderBy: toOrderBy(String(orderBy)), include: { lines: true } }),
+      prisma.purchaseOrder.findMany({ where, skip: Number(offset), take: Math.min(Number(limit) || 25, 100), orderBy: toOrderBy(String(orderBy)), include: { lines: false, project: { select: { id: true, code: true, name: true } } } }),
       prisma.purchaseOrder.count({ where }),
     ]);
     // Fetch latest document link per PO
@@ -51,11 +51,14 @@ async function nextPoCode(tenantId) {
     }
     const linkMap = new Map();
     for (const l of links) if (!linkMap.has(l.poId)) linkMap.set(l.poId, l);
+    const { buildLinks } = require('../lib/buildLinks.cjs');
     const out = items.map((i) => {
       const link = linkMap.get(i.id);
       const documentId = link ? link.documentId : null;
       const documentUrl = link ? `/api/documents/${String(link.documentId)}/download` : null;
-      return { ...i, documentId, documentUrl };
+      const row = { ...i, documentId, documentUrl };
+      row.links = buildLinks('po', { ...row, project: row.project });
+      return row;
     });
     res.json({ items: out, rows: out, total });
     } catch (e) {

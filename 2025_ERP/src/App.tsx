@@ -15,12 +15,13 @@ const PoDetail = lazy(() => import("./pages/finance/PoDetail"));
 const InvoicesList = lazy(() => import("./pages/finance/InvoicesList"));
 const MatchingQueue = lazy(() => import('./pages/finance/MatchingQueue.jsx'));
 const MatchingTriage = lazy(() => import('./pages/finance/MatchingTriage.jsx'));
+const AfpPanel = lazy(() => import('./pages/project/financials/AfpPanel.jsx'));
 const InvoiceDetail = lazy(() => import("./pages/finance/InvoiceDetail"));
 const HealthPage = lazy(() => import('./pages/dev/Health'));
 const OnboardPublic = lazy(() => import("./pages/public/OnboardPublic.jsx"));
 const LoginPage = lazy(() => import("./pages/Login"));
 const DocumentsHub = lazy(() => import('./pages/DocumentsHub.jsx'));
-const ProjectInfo = lazy(() => import('./pages/project/InfoStable.jsx'));
+const ProjectInfo = lazy(() => import('./pages/project/Info.jsx'));
 const ProjectFinanceShell = lazy(() => import('./pages/project/Finance'));
 const RfiShow = lazy(() => import('./pages/RfiShow.jsx'));
 const QaShow = lazy(() => import('./pages/QaShow.jsx'));
@@ -85,6 +86,7 @@ export default function App() {
             <Route path="pos" element={<RequireAuth><PosList /></RequireAuth>} />
             <Route path="receipts" element={<RequireAuth><ReceiptList /></RequireAuth>} />
             <Route path="matching" element={<RequireAuth><MatchingQueue /></RequireAuth>} />
+            <Route path="afp" element={<RequireAuth><AfpPanel /></RequireAuth>} />
             <Route path="matching/:invoiceId" element={<RequireAuth><MatchingTriage /></RequireAuth>} />
             <Route path="settings" element={<RequireAuth><FinanceSettings /></RequireAuth>} />
             <Route path="invoices/:invoiceId" element={<RequireAuth><InvoiceDetail /></RequireAuth>} />

@@ -1068,12 +1068,14 @@ model Invoice {
   poNumberRef   String?
   matchStatus   String?
   matchedPoId   Int?
+  source        String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   @@index([tenantId, projectId, status])
   @@index([tenantId, supplierId])
   @@index([tenantId, projectId, dueDate])
+  @@index([tenantId, projectId, source])
 }
 
 /// Finance: Invoice line items (additive)
@@ -1316,6 +1318,68 @@ model Contract {
 
   @@index([projectId])
   @@index([supplierId])
+}
+
+// --- Cost Value Reconciliation (additive) ---
+model CostValueReconciliation {
+  id             Int      @id @default(autoincrement())
+  tenantId       String
+  projectId      Int
+  period         String   // YYYY-MM
+  budget         Decimal  @db.Decimal(18, 2) @default(0)
+  committed      Decimal  @db.Decimal(18, 2) @default(0)
+  actual         Decimal  @db.Decimal(18, 2) @default(0)
+  earnedValue    Decimal  @db.Decimal(18, 2) @default(0)
+  costVariance   Decimal  @db.Decimal(18, 2) @default(0)
+  costToComplete Decimal  @db.Decimal(18, 2) @default(0)
+  marginPct      Decimal  @db.Decimal(9, 4)  @default(0)
+  notes          String?
+  justification  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  lines CVRLine[]
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, period])
+}
+
+model CVRLine {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  cvrId       Int
+  packageId   Int?
+  costCode    String?
+  budget      Decimal  @db.Decimal(18, 2) @default(0)
+  committed   Decimal  @db.Decimal(18, 2) @default(0)
+  actual      Decimal  @db.Decimal(18, 2) @default(0)
+  earnedValue Decimal  @db.Decimal(18, 2) @default(0)
+  variance    Decimal  @db.Decimal(18, 2) @default(0)
+  adjustment  Decimal  @db.Decimal(18, 2) @default(0)
+  variationId Int?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cvr CostValueReconciliation @relation(fields: [cvrId], references: [id])
+
+  @@index([tenantId, cvrId])
+  @@index([tenantId, packageId])
+}
+
+// --- Project Diary (additive) ---
+model DiaryEntry {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  projectId  Int
+  date       DateTime
+  description String
+  issues     String?
+  createdBy  Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([tenantId, projectId, date])
 }
 
 model AuditLog {

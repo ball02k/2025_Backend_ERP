@@ -191,7 +191,20 @@ router.get('/', async (req, res) => {
         }),
         prisma.document.count({ where }),
       ]);
-      data = rows;
+      // Enrich with cross-links to parents
+      const { buildLinks } = require('../lib/buildLinks.cjs');
+      data = rows.map(d => {
+        const out = { ...d, id: d.id.toString() };
+        // links entries may include projectId/variationId; build pills
+        const parent = {};
+        const anyLink = Array.isArray(d.links) ? d.links[0] : null;
+        if (anyLink) {
+          if (anyLink.projectId) parent.projectId = anyLink.projectId;
+          if (anyLink.variationId) parent.variationId = anyLink.variationId;
+        }
+        out.links = buildLinks('document', parent);
+        return out;
+      });
       total = Number(cnt || 0);
     } catch (e) {
       // Graceful fallback in dev when tables not present or migrations pending
@@ -221,7 +234,17 @@ router.get('/:id', async (req, res) => {
     const id = BigInt(req.params.id);
     const doc = await prisma.document.findFirst({ where: { id, tenantId }, include: { links: true } });
     if (!doc) return res.status(404).json({ error: 'Not found' });
-    res.json({ data: doc });
+    const { buildLinks } = require('../lib/buildLinks.cjs');
+    const out = { ...doc, id: doc.id.toString() };
+    const parent = {};
+    if (Array.isArray(doc.links)) {
+      for (const l of doc.links) {
+        if (l.projectId) parent.projectId = l.projectId;
+        if (l.variationId) parent.variationId = l.variationId;
+      }
+    }
+    out.links = buildLinks('document', parent);
+    res.json({ data: out });
   } catch (err) {
     res.status(400).json({ error: 'Invalid id' });
   }

@@ -148,11 +148,12 @@ module.exports = (prisma) => {
           },
         }),
       ]);
-      const projects = rows.map((p) => ({
-        ...p,
-        clientName: p.client ? p.client.name : null,
-      }));
-      // Include compatibility aliases for FE variants expecting different shapes
+      const { buildLinks } = require('../lib/buildLinks.cjs');
+      const projects = rows.map((p) => {
+        const row = { ...p, clientName: p.client ? p.client.name : null };
+        row.links = buildLinks('project', { ...row, client: p.client });
+        return row;
+      });
       res.json({ total, projects, items: projects, data: { items: projects, total } });
     } catch (err) {
       console.error(err);

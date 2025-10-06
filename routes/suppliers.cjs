@@ -39,12 +39,14 @@ router.get('/', async (req, res, next) => {
       where,
       orderBy: [{ name: 'asc' }],
       include: { capabilities: true },
+      take: Math.min(Number(req.query.limit) || 200, 500),
+      skip: Math.max(Number(req.query.offset) || 0, 0),
     });
 
     const data = rows.map((s) => {
       const capabilityTags = s.capabilities.map((c) => c.tag);
       const category = capabilityTags.find((t) => t.toLowerCase().startsWith('category:'))?.split(':', 2)?.[1] || null;
-      return {
+      const row = {
         id: s.id,
         name: s.name,
         status: s.status,
@@ -59,9 +61,12 @@ router.get('/', async (req, res, next) => {
               .filter(Boolean)
           : [],
       };
+      // Standardise links field
+      row.links = [];
+      return row;
     });
 
-    res.json({ data });
+    res.json({ data, items: data, total: data.length });
   } catch (err) {
     next(err);
   }

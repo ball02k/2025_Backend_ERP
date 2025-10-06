@@ -23,6 +23,7 @@ export default function ProjectFinanceShell() {
           <NavLink to={`${base}/pos`} className={({isActive})=>`${linkBase} ${isActive?linkActive:''}`}>Purchase Orders</NavLink>
           <NavLink to={`${base}/receipts`} className={({isActive})=>`${linkBase} ${isActive?linkActive:''}`}>Receipts</NavLink>
           <NavLink to={`${base}/matching`} className={({isActive})=>`${linkBase} ${isActive?linkActive:''}`}>Matching</NavLink>
+          <NavLink to={`${base}/afp`} className={({isActive})=>`${linkBase} ${isActive?linkActive:''}`}>AFP</NavLink>
           <NavLink to={`${base}/settings`} className={({isActive})=>`${linkBase} ${isActive?linkActive:''}`}>Settings</NavLink>
         </nav>
       </aside>

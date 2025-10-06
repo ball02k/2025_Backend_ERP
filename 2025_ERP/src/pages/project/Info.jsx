@@ -1,3 +1,2 @@
-// DO NOT put any hooks in here.
-export { default } from "./InfoStable.jsx";
-
+// Wrapper. Do not add hooks here.
+export { default } from "./InfoFixed.jsx";

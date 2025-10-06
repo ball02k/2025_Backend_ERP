@@ -57,6 +57,9 @@ const financeOcrRouter = require('./routes/finance.ocr.cjs');
 const financeInboundRouter = require('./routes/finance.inbound.cjs');
 const financeReceiptsRouter = require('./routes/finance.receipts.cjs');
 const afpRouter = require('./routes/afp.cjs');
+const afpOpenRouter = require('./routes/afp.open.cjs');
+const cvrRouter = require('./routes/financials.cvr.cjs');
+const diaryRouter = require('./routes/diary.cjs');
 const { ensureFeature } = require('./middleware/featureGuard.js');
 const documentLinksRouter = require('./routes/document.links.cjs');
 const { attachUser } = require('./middleware/auth.cjs');
@@ -175,6 +178,8 @@ app.use('/api/projects', requireAuth, require('./routes/project_alerts.cjs')(pri
 // app.use('/api/projects', projectsOverviewRouter);
 app.use('/api/projects', requireAuth, projectsOverviewRouter);
 app.use('/api/projects', requireAuth, rfxRouter(prisma));
+app.use('/api/projects', requireAuth, cvrRouter(prisma));
+app.use('/api/projects', requireAuth, diaryRouter(prisma));
 app.use('/api/projects', requireAuth, projectInvoicesRouter(prisma));
 app.use('/api/projects', requireAuth, projectDocumentsRouter);
 app.use('/api/health', requireAuth, healthRouter);
@@ -184,6 +189,7 @@ app.use('/api/documents', requireAuth, documentsRouter);
 app.use('/api/onboarding', requireAuth, onboardingRouter);
 app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
 app.use('/api', requireAuth, procurementRoutes);
+app.use('/api', requireAuth, cvrRouter(prisma));
 app.use('/api/financials', requireAuth, financialsRouter);
 // Also expose financials under /api/projects/financials for compatibility
 app.use('/api/projects/financials', requireAuth, financialsRouter);
@@ -205,6 +211,8 @@ app.use('/api', homeRoutes(prisma, { requireAuth }));
 // Applications for Payment (AfP)
 app.use('/api/applications', requireAuth, ensureFeature('afp'), afpRouter);
 // Back-compat alias: some clients may call /api/afp; route to applications
+// Additive: expose basic GET list without feature gate to enable FE AFP listing
+app.use('/api/afp', requireAuth, afpOpenRouter);
 app.use('/api/afp', requireAuth, ensureFeature('afp'), afpRouter);
 // Finance (additive, gated by auth; consider role checks 'finance'|'admin' in production)
 app.use('/api', requireAuth, financePoRouter);

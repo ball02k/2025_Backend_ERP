@@ -110,16 +110,21 @@ router.get("/", requireProjectMember, async (req, res) => {
       }),
       prisma.variation.count({ where }),
     ]);
-    const items = rows.map((r) => ({
-      id: r.id,
-      projectId: r.projectId,
-      ref: r.reference,
-      title: r.title,
-      status: r.status,
-      value: r.value,
-      createdAt: r.createdAt,
-      project: r.project ? { id: r.project.id, name: r.project.name } : null,
-    }));
+    const { buildLinks } = require('../lib/buildLinks.cjs');
+    const items = rows.map((r) => {
+      const row = {
+        id: r.id,
+        projectId: r.projectId,
+        ref: r.reference,
+        title: r.title,
+        status: r.status,
+        value: r.value,
+        createdAt: r.createdAt,
+        project: r.project ? { id: r.project.id, name: r.project.name } : null,
+      };
+      row.links = buildLinks('variation', { ...row, project: row.project });
+      return row;
+    });
     res.json({ total, items });
   } catch (err) {
     console.error(err);
