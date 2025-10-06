@@ -245,10 +245,13 @@ model Contact {
 }
 
 model Variation {
-  id        Int     @id @default(autoincrement())
-  projectId Int
-  tenantId  String
-  project   Project @relation(fields: [projectId], references: [id])
+  id          Int     @id @default(autoincrement())
+  projectId   Int
+  tenantId    String
+  project     Project @relation(fields: [projectId], references: [id])
+  packageId   Int?
+  budgetLineId Int?
+  contractId  Int?
 
   // Core identifiers
   reference     String? @db.VarChar(64)
@@ -265,10 +268,12 @@ model Variation {
 
   // Commercials
   // New spec fields
-  value          Decimal @db.Decimal(18, 2)
+  amount         Decimal  @db.Decimal(18, 2) @default(0)
+  value          Decimal  @db.Decimal(18, 2)
   costImpact     Decimal @db.Decimal(18, 2)
   timeImpactDays Int?
   notes          String?
+  justification  String?
 
   // Legacy/computed fields retained for compatibility
   estimated_cost Decimal? @db.Decimal(18, 2)
@@ -283,12 +288,14 @@ model Variation {
   decisionDate   DateTime?
   reviewedDate   DateTime?
   approvedDate   DateTime?
+  approvedAt     DateTime?
   rejectedDate   DateTime?
   instructedDate DateTime?
   pricedDate     DateTime?
   agreedDate     DateTime?
   voIssuedDate   DateTime?
   voAcceptedDate DateTime?
+  approvedBy     Int?
 
   // Meta
   is_deleted Boolean  @default(false)
@@ -305,8 +312,12 @@ model Variation {
   @@index([reference])
   @@index([referenceCode])
   @@index([tenantId, projectId])
+  @@index([tenantId, status])
   @@index([tenantId, projectId, status])
   @@index([tenantId, projectId, status, updatedAt])
+  @@index([tenantId, contractId])
+  @@index([tenantId, budgetLineId])
+  @@index([tenantId, packageId])
   @@index([createdAt])
   @@index([updatedAt])
   @@index([tenantId, title])
@@ -964,6 +975,9 @@ model BudgetLine {
   periodMonth String?
   description String?
   amount      Decimal  @default(0)
+  planned     Decimal? @db.Decimal(18, 2)
+  estimated   Decimal? @db.Decimal(18, 2)
+  actual      Decimal? @db.Decimal(18, 2)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1313,6 +1327,7 @@ model Contract {
   title                 String
   contractNumber        String?
   value                 Decimal
+  originalValue         Decimal?                @db.Decimal(18, 2)
   status                String                  @default("Pending")
   signedAt              DateTime?
   startDate             DateTime?
@@ -1401,3 +1416,4 @@ model AuditLog {
 
   @@index([entity, entityId])
 }
+

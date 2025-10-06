@@ -14,7 +14,11 @@ router.get('/projects/:projectId/overview', async (req, res, next) => {
       estimate += Number(b.estimated || 0);
       actual += Number(b.actual || 0);
     }
-    const contracts = await prisma.contract.count({ where: { projectId } });
+    const [contracts, openVars, approvedVars] = await Promise.all([
+      prisma.contract.count({ where: { projectId } }),
+      prisma.variation.count({ where: { tenantId, projectId, status: 'submitted' } }),
+      prisma.variation.count({ where: { tenantId, projectId, status: 'approved' } }),
+    ]);
     const data = {
       projectId,
       totals: {
@@ -24,7 +28,11 @@ router.get('/projects/:projectId/overview', async (req, res, next) => {
         varianceVsBaseline: estimate - baseline,
         varianceVsEstimate: actual - estimate,
       },
-      counts: { contracts },
+      counts: {
+        contracts,
+        variationsOpen: openVars,
+        variationsApproved: approvedVars,
+      },
       updatedAt: new Date().toISOString(),
     };
     res.json(safeJson(data));
