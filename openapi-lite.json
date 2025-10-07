@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "f0a564d"
+    "version": "5255411"
   },
   "paths": {
     "*": {
@@ -6744,6 +6744,174 @@
                 "example": {
                   "id": 1,
                   "updated": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/rfx/{rfxId}/template": {
+      "post": {
+        "summary": "POST //api/rfx/:rfxId/template",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/rfx/{rfxId}/upload-response": {
+      "post": {
+        "summary": "POST //api/rfx/:rfxId/upload-response",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/rfx/{rfxId}/submissions": {
+      "get": {
+        "summary": "GET //api/rfx/:rfxId/submissions",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/rfx/submissions/{submissionId}": {
+      "patch": {
+        "summary": "PATCH //api/rfx/submissions/:submissionId",
+        "parameters": [
+          {
+            "name": "submissionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/rfx/{rfxId}/analysis.xlsx.xml": {
+      "get": {
+        "summary": "GET //api/rfx/:rfxId/analysis.xlsx.xml",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/rfx/{rfxId}/send": {
+      "post": {
+        "summary": "POST //api/rfx/:rfxId/send",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
                 }
               }
             }
