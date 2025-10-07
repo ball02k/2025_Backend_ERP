@@ -217,6 +217,8 @@ app.use('/api/integrations', requireAuth, integrationsRouter());
 app.use('/api', requireAuth, require('./routes/meta.cjs'));
 app.use('/api', requireAuth, require('./routes/geo.cjs'));
 app.use('/api', requireAuth, require('./routes/projects.info.cjs'));
+// MVP namespace (isolated under /mvp)
+app.use('/mvp', requireAuth, require('./src/mvp/index.cjs'));
 // RFx Excel/email flows (additive)
 app.use('/api', requireAuth, require('./routes/rfx.templates.cjs'));
 app.use('/api', requireAuth, require('./routes/rfx.responses.cjs'));

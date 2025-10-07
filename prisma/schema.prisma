@@ -1405,6 +1405,8 @@ model Contract {
   signedAt              DateTime?
   startDate             DateTime?
   endDate               DateTime?
+  managedByUserId       Int?
+  pdfUrl                String?
   retentionPct          Float?
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
