@@ -149,6 +149,19 @@ model Project {
   unitSystem       String?
   taxScheme        String?
   contractForm     String?
+  // Additive project info fields
+  clientContactId        Int?
+  sitePostcode           String?
+  siteLat                Decimal?  @db.Decimal(10, 7)
+  siteLng                Decimal?  @db.Decimal(10, 7)
+  // commercial basics (additive)
+  contractType           String?
+  paymentTermsDays       Int?
+  retentionPct           Decimal?  @db.Decimal(5, 2)
+
+  // internal roles (additive)
+  projectManagerUserId   Int?
+  quantitySurveyorUserId Int?
   startPlanned     DateTime?
   endPlanned       DateTime?
   startActual      DateTime?
@@ -187,11 +200,21 @@ model Project {
   carbonEntries         CarbonEntry[]
   ApplicationForPayment ApplicationForPayment[]
 
+  // Additive relations for new info fields
+  clientContact    Contact? @relation("Project_ClientContact", fields: [clientContactId], references: [id])
+  // Disambiguate multiple relations to User
+  projectManager   User?    @relation("Project_ProjectManager", fields: [projectManagerUserId], references: [id])
+  quantitySurveyor User?    @relation("Project_QuantitySurveyor", fields: [quantitySurveyorUserId], references: [id])
+
   @@index([tenantId, status])
   @@index([tenantId, name])
   // Hot paths: client-filtered project lists and planned end sorting
   @@index([tenantId, clientId])
   @@index([tenantId, endPlanned])
+  // Additive indexes for new info fields
+  @@index([tenantId, clientContactId])
+  @@index([tenantId, projectManagerUserId])
+  @@index([tenantId, quantitySurveyorUserId])
 }
 
 model Task {
@@ -236,6 +259,9 @@ model Contact {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Back-relation to projects where this contact is the client contact
+  projectsAsClientContact Project[] @relation("Project_ClientContact")
 
   @@unique([clientId, email])
   @@index([tenantId, clientId])
@@ -654,6 +680,10 @@ model User {
   memberships ProjectMembership[]
   userRoles   UserRole[]
   auditLogs   AuditLog[]
+
+  // Back-relations to projects for role assignments
+  projectsManaged        Project[] @relation("Project_ProjectManager")
+  projectsQuantitySurvey Project[] @relation("Project_QuantitySurveyor")
 
   @@index([tenantId, email])
 }
@@ -1463,4 +1493,3 @@ model CVRSnapshotLine {
   @@index([tenantId, budgetLineId])
   @@index([tenantId, contractId])
 }
-

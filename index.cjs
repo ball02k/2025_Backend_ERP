@@ -211,6 +211,10 @@ app.use('/api/search', requireAuth, searchRouter);
 app.use('/api', requireAuth, lookupsRouter);
 app.use('/api', requireAuth, documentLinksRouter);
 app.use('/api/integrations', requireAuth, integrationsRouter());
+// Meta, Geo, and Project Info (additive)
+app.use('/api', requireAuth, require('./routes/meta.cjs'));
+app.use('/api', requireAuth, require('./routes/geo.cjs'));
+app.use('/api', requireAuth, require('./routes/projects.info.cjs'));
 // Demo reset route (top-level)
 app.use(require('./routes/demo.cjs'));
 app.use('/api/rfis', requireAuth, rfisRouter);
