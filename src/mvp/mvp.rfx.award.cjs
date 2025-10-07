@@ -3,8 +3,12 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 function sumPricing(pricing = []) {
-  // Prefer explicit total, else qty*rate
-  return pricing.reduce((a, p) => a + Number(p.total ?? (Number(p.qty || 0) * Number(p.rate || 0)) || 0), 0);
+  // Prefer explicit total, else qty*rate (avoid mixing ?? and || without grouping)
+  return pricing.reduce((a, p) => {
+    const hasTotal = p && p.total !== undefined && p.total !== null;
+    const v = hasTotal ? Number(p.total) : (Number(p?.qty || 0) * Number(p?.rate || 0));
+    return a + (Number.isFinite(v) ? v : 0);
+  }, 0);
 }
 
 // POST /mvp/rfx/:rfxId/award { submissionId?, supplierId?, email?, createContract?, endDate?, managedByUserId? }
@@ -74,4 +78,3 @@ router.post('/mvp/rfx/:rfxId/award', async (req, res, next) => {
 });
 
 module.exports = router;
-

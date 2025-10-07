@@ -3,7 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // GET /mvp/cost-codes?search=&parentId=
-router.get('/mvp/cost-codes', async (req, res, next) => {
+router.get('/cost-codes', async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
     const { search, parentId } = req.query;
@@ -16,7 +16,7 @@ router.get('/mvp/cost-codes', async (req, res, next) => {
 });
 
 // POST /mvp/cost-codes
-router.post('/mvp/cost-codes', async (req, res, next) => {
+router.post('/cost-codes', async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
     const { code, description, parentId } = req.body || {};
@@ -26,7 +26,7 @@ router.post('/mvp/cost-codes', async (req, res, next) => {
 });
 
 // POST /mvp/cost-codes/import  { rows:[{code,description,parentCode?}]}
-router.post('/mvp/cost-codes/import', async (req, res, next) => {
+router.post('/cost-codes/import', async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
@@ -49,4 +49,3 @@ router.post('/mvp/cost-codes/import', async (req, res, next) => {
 });
 
 module.exports = router;
-

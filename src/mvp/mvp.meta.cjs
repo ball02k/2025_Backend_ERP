@@ -3,7 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // GET /mvp/meta/projects/:projectId/contracts/active
-router.get('/mvp/meta/projects/:projectId/contracts/active', async (req, res, next) => {
+router.get('/meta/projects/:projectId/contracts/active', async (req, res, next) => {
   try {
     const projectId = Number(req.params.projectId);
     const now = new Date();
@@ -14,4 +14,3 @@ router.get('/mvp/meta/projects/:projectId/contracts/active', async (req, res, ne
 });
 
 module.exports = router;
-

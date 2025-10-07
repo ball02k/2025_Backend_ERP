@@ -3,7 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { workbookOpen, workbookClose, sheet } = require('./mvp.xmlExcel.cjs');
 
-router.get('/mvp/rfx/:rfxId/analysis.xlsx.xml', async (req, res, next) => {
+router.get('/rfx/:rfxId/analysis.xlsx.xml', async (req, res, next) => {
   try {
     const tenantId = req.tenantId; const rfxId = Number(req.params.rfxId);
     const rfx = await prisma.request.findFirst({ where: { id: rfxId } }).catch(() => null);
@@ -22,9 +22,9 @@ router.get('/mvp/rfx/:rfxId/analysis.xlsx.xml', async (req, res, next) => {
     const xml = [workbookOpen(), sheet('Request Details', reqRows), sheet('Pricing Data', pricingData), sheet('Non Price Data', nonPriceData), sheet('Bid Analysis', analysis), sheet('Final Scores', [['SupplierId', 'OverallScore', 'Rank'], ...analysis.slice(1).map((row) => [row[0], row[4], row[5]])]), workbookClose()].join('');
     res.setHeader('Content-Type', 'application/vnd.ms-excel');
     res.setHeader('Content-Disposition', `attachment; filename="RFx_${rfxId}_Bid_Analysis.xml"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.send(xml);
   } catch (e) { next(e); }
 });
 
 module.exports = router;
-

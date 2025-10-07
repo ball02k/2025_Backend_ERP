@@ -1,7 +1,7 @@
 const router = require('express').Router({ mergeParams: true });
 const net = require('net');
 
-router.post('/mvp/rfx/:rfxId/send', async (req, res) => {
+router.post('/rfx/:rfxId/send', async (req, res) => {
   const { to, subject, body } = req.body || {};
   const host = process.env.SMTP_HOST; const from = process.env.SMTP_FROM || 'noreply@example.com';
   if (!host) return res.json({ queued: true, note: 'SMTP not configured' });
@@ -16,4 +16,3 @@ router.post('/mvp/rfx/:rfxId/send', async (req, res) => {
 });
 
 module.exports = router;
-

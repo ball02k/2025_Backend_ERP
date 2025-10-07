@@ -2,7 +2,7 @@ const router = require('express').Router({ mergeParams: true });
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-router.get('/mvp/projects/:projectId/overview', async (req, res, next) => {
+router.get('/projects/:projectId/overview', async (req, res, next) => {
   try {
     const tenantId = req.tenantId; const projectId = Number(req.params.projectId);
     const [bl, cs, vs, inv, openRfx, awarded] = await Promise.all([
@@ -23,4 +23,3 @@ router.get('/mvp/projects/:projectId/overview', async (req, res, next) => {
 });
 
 module.exports = router;
-

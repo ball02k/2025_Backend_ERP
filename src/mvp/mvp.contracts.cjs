@@ -5,7 +5,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // Upload a contract PDF (base64) and store file URL
-router.post('/mvp/contracts/:id/upload', async (req, res, next) => {
+router.post('/contracts/:id/upload', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const { filename, base64 } = req.body || {};
@@ -22,7 +22,7 @@ router.post('/mvp/contracts/:id/upload', async (req, res, next) => {
 });
 
 // List contracts for a project with computed status
-router.get('/mvp/projects/:projectId/contracts', async (req, res, next) => {
+router.get('/projects/:projectId/contracts', async (req, res, next) => {
   try {
     const projectId = Number(req.params.projectId);
     const rows = await prisma.contract.findMany({ where: { projectId }, orderBy: { updatedAt: 'desc' } });
@@ -37,4 +37,3 @@ router.get('/mvp/projects/:projectId/contracts', async (req, res, next) => {
 });
 
 module.exports = router;
-

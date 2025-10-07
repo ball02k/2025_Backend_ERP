@@ -3,7 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // Upload parsed response
-router.post('/mvp/rfx/:rfxId/upload-response', async (req, res, next) => {
+router.post('/rfx/:rfxId/upload-response', async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
     const rfxId = Number(req.params.rfxId);
@@ -25,14 +25,13 @@ router.post('/mvp/rfx/:rfxId/upload-response', async (req, res, next) => {
 });
 
 // List submissions (id/supplierId/score)
-router.get('/mvp/rfx/:rfxId/submissions', async (req, res, next) => {
+router.get('/rfx/:rfxId/submissions', async (req, res, next) => {
   try { const tenantId = req.tenantId; const rfxId = Number(req.params.rfxId); const rows = await prisma.rFxSubmission.findMany({ where: { tenantId, rfxId }, orderBy: { updatedAt: 'desc' }, select: { id: true, supplierId: true, score: true, createdAt: true, updatedAt: true } }); res.json(rows); } catch (e) { next(e); }
 });
 
 // Save manual score
-router.patch('/mvp/rfx/submissions/:submissionId', async (req, res, next) => {
+router.patch('/rfx/submissions/:submissionId', async (req, res, next) => {
   try { const id = Number(req.params.submissionId); const { score } = req.body || {}; const upd = await prisma.rFxSubmission.update({ where: { id }, data: { score: score == null ? null : Number(score) } }); res.json({ id: upd.id, score: upd.score }); } catch (e) { next(e); }
 });
 
 module.exports = router;
-

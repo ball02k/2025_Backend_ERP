@@ -3,7 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // GET /mvp/projects/:id/cvr?period=YYYY-MM
-router.get('/mvp/projects/:projectId/cvr', async (req, res, next) => {
+router.get('/projects/:projectId/cvr', async (req, res, next) => {
   try {
     const tenantId = req.tenantId; const projectId = Number(req.params.projectId); const period = String(req.query.period || '').trim();
     const where = { tenantId, projectId, ...(period ? { period } : {}) };
@@ -15,7 +15,7 @@ router.get('/mvp/projects/:projectId/cvr', async (req, res, next) => {
 });
 
 // POST /mvp/projects/:id/cvr/seed-from-packages { period }
-router.post('/mvp/projects/:projectId/cvr/seed-from-packages', async (req, res, next) => {
+router.post('/projects/:projectId/cvr/seed-from-packages', async (req, res, next) => {
   try {
     const tenantId = req.tenantId; const projectId = Number(req.params.projectId); const period = String(req.body?.period || '').trim();
     const pkg = await prisma.package.findMany({ where: { projectId } });
@@ -36,7 +36,7 @@ router.post('/mvp/projects/:projectId/cvr/seed-from-packages', async (req, res, 
 });
 
 // POST /mvp/projects/:id/cvr/seed-from-previous { period, fromPeriod }
-router.post('/mvp/projects/:projectId/cvr/seed-from-previous', async (req, res, next) => {
+router.post('/projects/:projectId/cvr/seed-from-previous', async (req, res, next) => {
   try {
     const tenantId = req.tenantId; const projectId = Number(req.params.projectId); const period = String(req.body?.period || '').trim(); const fromPeriod = String(req.body?.fromPeriod || '').trim();
     const prev = await prisma.costValueReconciliation.findFirst({ where: { tenantId, projectId, period: fromPeriod } });
@@ -52,4 +52,3 @@ router.post('/mvp/projects/:projectId/cvr/seed-from-previous', async (req, res, 
 });
 
 module.exports = router;
-

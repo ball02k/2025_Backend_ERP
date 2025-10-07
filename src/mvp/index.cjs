@@ -7,6 +7,10 @@ router.use((req, _res, next) => {
   next();
 });
 
+// MVP logging + diagnostics first
+router.use(require('./mw.log.cjs'));
+router.use(require('./diag.routes.cjs'));
+
 // Mount MVP routes
 router.use(require('./mvp.costCodes.cjs'));
 router.use(require('./mvp.rfx.templates.cjs'));
