@@ -199,6 +199,8 @@ model Project {
   hsEvents              HsEvent[]
   carbonEntries         CarbonEntry[]
   ApplicationForPayment ApplicationForPayment[]
+  // MVP additive
+  tenders              Tender[]
 
   // Additive relations for new info fields
   clientContact    Contact? @relation("Project_ClientContact", fields: [clientContactId], references: [id])
@@ -1344,10 +1346,45 @@ model Package {
   invites     TenderInvite[] @relation("PackageInvites")
   contract    Contract?      @relation("PackageContract")
   requests    Request[]
+  tenders     Tender[]
   costCode    CostCode?      @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
   @@index([projectId, costCodeId])
+}
+
+// Additive lightweight tendering models (separate from existing Request/Submission)
+model Tender {
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  projectId   Int
+  packageId   Int?
+  title       String
+  description String?
+  status      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+  package Package? @relation(fields: [packageId], references: [id])
+  bids    TenderBid[]
+
+  @@unique([id, tenantId], name: "id_tenantId")
+  @@index([tenantId, projectId])
+}
+
+model TenderBid {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  tenderId   Int
+  supplierId Int
+  price      Decimal  @db.Decimal(18, 2)
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  tender Tender @relation(fields: [tenderId], references: [id])
+
+  @@index([tenantId, tenderId])
 }
 
 model TenderInvite {

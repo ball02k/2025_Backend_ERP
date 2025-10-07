@@ -409,7 +409,7 @@ app.use((err, _req, res, _next) => {
 
 // Start server with friendly EADDRINUSE handling during development
 function startServer(port, allowRetry) {
-  const host = '127.0.0.1';
+  const host = '0.0.0.0';
   const server = app
     .listen(port, host, () => {
       console.log(`API on ${host}:${port}`);

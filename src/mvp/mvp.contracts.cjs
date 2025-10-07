@@ -28,7 +28,7 @@ router.get('/projects/:projectId/contracts', async (req, res, next) => {
     const rows = await prisma.contract.findMany({ where: { projectId }, orderBy: { updatedAt: 'desc' } });
     const now = new Date();
     const items = rows.map((c) => ({
-      id: c.id, projectId: c.projectId, title: c.title, value: c.value, originalValue: c.originalValue,
+      id: c.id, projectId: c.projectId, supplierId: c.supplierId, title: c.title, value: c.value, originalValue: c.originalValue,
       endDate: c.endDate, managedByUserId: c.managedByUserId, pdfUrl: c.pdfUrl,
       status: (!c.endDate || new Date(c.endDate) >= now) ? 'Active' : 'Expired',
     }));

@@ -286,4 +286,26 @@ router.post('/:id/onboarding-link', async (req, res) => {
   }
 });
 
+// GET /api/suppliers/:id/overview — supplier with related POs, contracts, tenders (tenant-scoped)
+router.get('/:id/overview', async (req, res, next) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const supplierId = Number(req.params.id);
+    const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, tenantId } });
+    if (!supplier) return res.status(404).json({ error: 'Not found' });
+    const [purchaseOrders, contracts, tenderBids] = await Promise.all([
+      prisma.purchaseOrder.findMany({ where: { tenantId, supplierId }, select: { id: true, code: true, poNumber: true, total: true, projectId: true } }),
+      prisma.contract.findMany({ where: { supplierId, project: { tenantId } }, select: { id: true, title: true, contractNumber: true, value: true, projectId: true } }),
+      prisma.tenderBid.findMany({ where: { tenantId, supplierId }, include: { tender: { select: { id: true, title: true, projectId: true } } } }).catch(() => []),
+    ]);
+    res.json({
+      id: supplier.id,
+      name: supplier.name,
+      purchaseOrders,
+      contracts,
+      tenders: (tenderBids || []).map((b) => ({ id: b.tender?.id, title: b.tender?.title, projectId: b.tender?.projectId, bidId: b.id, price: b.price })),
+    });
+  } catch (e) { next(e); }
+});
+
 module.exports = router;

@@ -161,6 +161,69 @@ module.exports = (prisma) => {
     }
   });
 
+  // --- MVP additive: Packages & Tenders (lightweight) ---
+  // POST /api/projects/:projectId/packages → Create package
+  router.post('/:projectId/packages', requireProjectMember, async (req, res) => {
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const projectId = Number(req.params.projectId);
+      const { name, description, budget } = req.body || {};
+      const pkg = await prisma.package.create({ data: { name, scope: description || null, projectId, status: 'Draft', budgetEstimate: budget ?? null } });
+      res.status(201).json(pkg);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // GET /api/projects/:projectId/packages → List packages (incl. tenders)
+  router.get('/:projectId/packages', requireProjectMember, async (req, res) => {
+    const tenantId = req.user && req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+    const packages = await prisma.package.findMany({ where: { projectId }, include: { tenders: true } });
+    res.json(packages);
+  });
+
+  // POST /api/projects/:projectId/tenders → Create tender
+  router.post('/:projectId/tenders', requireProjectMember, async (req, res) => {
+    const tenantId = req.user && req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+    const { packageId, title, description, status } = req.body || {};
+    const tender = await prisma.tender.create({ data: { tenantId, projectId, packageId: packageId ? Number(packageId) : null, title, description: description || null, status: status || 'draft' } });
+    res.status(201).json(tender);
+  });
+
+  // GET /api/projects/:projectId/tenders → List tenders
+  router.get('/:projectId/tenders', requireProjectMember, async (req, res) => {
+    const tenantId = req.user && req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+    const tenders = await prisma.tender.findMany({ where: { tenantId, projectId }, include: { bids: true, package: true } });
+    res.json(tenders);
+  });
+
+  // GET /api/projects/tenders/:tenderId → tender with bids
+  router.get('/tenders/:tenderId', requireProjectMember, async (req, res) => {
+    const tenantId = req.user && req.user.tenantId;
+    const tenderId = Number(req.params.tenderId);
+    const tender = await prisma.tender.findFirst({ where: { id: tenderId, tenantId }, include: { bids: true, package: true, project: true } });
+    if (!tender) return res.status(404).json({ error: 'Tender not found' });
+    res.json(tender);
+  });
+
+  // POST /api/projects/:projectId/tenders/:tenderId/bids → add bid
+  router.post('/:projectId/tenders/:tenderId/bids', requireProjectMember, async (req, res) => {
+    const tenantId = req.user && req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+    const tenderId = Number(req.params.tenderId);
+    const { supplierId, price, notes } = req.body || {};
+    try {
+      // ensure tender belongs to project + tenant
+      const t = await prisma.tender.findFirst({ where: { id: tenderId, tenantId, projectId }, select: { id: true } });
+      if (!t) return res.status(404).json({ error: 'Tender not found' });
+      const bid = await prisma.tenderBid.create({ data: { tenantId, tenderId, supplierId: Number(supplierId), price: price ?? 0, notes: notes || null } });
+      res.status(201).json(bid);
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
   // GET /api/projects/csv/export
   router.get('/csv/export', async (req, res) => {
     try {
