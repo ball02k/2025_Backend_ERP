@@ -1452,6 +1452,7 @@ model CVRLine {
   earnedValue Decimal  @db.Decimal(18, 2) @default(0)
   variance    Decimal  @db.Decimal(18, 2) @default(0)
   adjustment  Decimal  @db.Decimal(18, 2) @default(0)
+  adjusted    Decimal  @db.Decimal(18, 2) @default(0)
   variationId Int?
   note        String?
   createdAt   DateTime @default(now())

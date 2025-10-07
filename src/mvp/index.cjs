@@ -13,8 +13,10 @@ router.use(require('./mvp.rfx.templates.cjs'));
 router.use(require('./mvp.rfx.responses.cjs'));
 router.use(require('./mvp.rfx.analysis.cjs'));
 router.use(require('./mvp.rfx.email.cjs'));
+router.use(require('./mvp.rfx.award.cjs'));
 router.use(require('./mvp.contracts.cjs'));
 router.use(require('./mvp.overview.cjs'));
+router.use(require('./mvp.meta.cjs'));
+router.use(require('./mvp.cvr.cjs'));
 
 module.exports = router;
-
