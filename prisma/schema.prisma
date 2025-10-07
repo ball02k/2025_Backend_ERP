@@ -902,6 +902,25 @@ model Request {
   @@index([tenantId, packageId, status])
 }
 
+// Additive: RFx submission payloads for XML flows (Spreadsheet import)
+model RFxSubmission {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  rfxId      Int
+  supplierId Int
+  // Parsed payloads
+  pricing    Json?
+  answers    Json?
+  score      Decimal? @db.Decimal(8, 2)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([tenantId, rfxId])
+  @@index([tenantId, supplierId])
+  @@unique([tenantId, rfxId, supplierId], name: "tenantId_rfxId_supplierId")
+}
+
 model RequestSection {
   id        Int      @id @default(autoincrement())
   tenantId  String

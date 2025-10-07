@@ -217,6 +217,11 @@ app.use('/api/integrations', requireAuth, integrationsRouter());
 app.use('/api', requireAuth, require('./routes/meta.cjs'));
 app.use('/api', requireAuth, require('./routes/geo.cjs'));
 app.use('/api', requireAuth, require('./routes/projects.info.cjs'));
+// RFx Excel/email flows (additive)
+app.use('/api', requireAuth, require('./routes/rfx.templates.cjs'));
+app.use('/api', requireAuth, require('./routes/rfx.responses.cjs'));
+app.use('/api', requireAuth, require('./routes/rfx.analysis.cjs'));
+app.use('/api', requireAuth, require('./routes/rfx.email.cjs'));
 // Demo reset route (top-level)
 app.use(require('./routes/demo.cjs'));
 app.use('/api/rfis', requireAuth, rfisRouter);
