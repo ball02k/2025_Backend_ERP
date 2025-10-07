@@ -217,6 +217,24 @@ model Project {
   @@index([tenantId, quantitySurveyorUserId])
 }
 
+model CostCode {
+  id          Int        @id @default(autoincrement())
+  tenantId    String
+  code        String
+  description String?
+  parentId    Int?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  parent      CostCode?   @relation("CostCodeHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children    CostCode[]  @relation("CostCodeHierarchy")
+  budgetLines BudgetLine[]
+  packages    Package[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, parentId])
+}
+
 model Task {
   id        Int     @id @default(autoincrement())
   projectId Int
@@ -1010,11 +1028,14 @@ model BudgetLine {
   actual      Decimal? @db.Decimal(18, 2)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  costCodeId  Int?
 
   project Project @relation(fields: [projectId], references: [id])
+  costCode CostCode? @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, projectId])
   @@index([tenantId, projectId, periodMonth])
+  @@index([tenantId, costCodeId])
 }
 
 model Commitment {
@@ -1298,13 +1319,16 @@ model Package {
   awardSupplier   Supplier? @relation("PackageAwardSupplier", fields: [awardSupplierId], references: [id])
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+  costCodeId      Int?
 
   submissions Submission[]   @relation("PackageSubmissions")
   invites     TenderInvite[] @relation("PackageInvites")
   contract    Contract?      @relation("PackageContract")
   requests    Request[]
+  costCode    CostCode?      @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
+  @@index([projectId, costCodeId])
 }
 
 model TenderInvite {
