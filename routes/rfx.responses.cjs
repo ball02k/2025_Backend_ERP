@@ -54,5 +54,28 @@ router.post('/rfx/:rfxId/upload-response', async (req, res, next) => {
   }
 });
 
-module.exports = router;
+// GET /rfx/:rfxId/submissions — list parsed submissions (id, supplierId, score)
+router.get('/rfx/:rfxId/submissions', async (req, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId || req.tenantId;
+    const rfxId = Number(req.params.rfxId);
+    const rows = await prisma.rFxSubmission.findMany({
+      where: { tenantId, rfxId },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true, supplierId: true, score: true, createdAt: true, updatedAt: true },
+    });
+    res.json(rows);
+  } catch (e) { next(e); }
+});
 
+// PATCH /rfx/submissions/:submissionId — save manual score
+router.patch('/rfx/submissions/:submissionId', async (req, res, next) => {
+  try {
+    const id = Number(req.params.submissionId);
+    const { score } = req.body || {};
+    const upd = await prisma.rFxSubmission.update({ where: { id }, data: { score: score == null ? null : Number(score) } });
+    res.json({ id: upd.id, score: upd.score });
+  } catch (e) { next(e); }
+});
+
+module.exports = router;
