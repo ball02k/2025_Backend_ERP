@@ -37,6 +37,25 @@ module.exports = (prisma, { requireAuth }) => {
     }
   });
 
+  // GET /api/tenders/:tenderId/invites — list existing invites with tokens
+  router.get('/:tenderId/invites', requireAuth, async (req, res) => {
+    try {
+      const tenantId = getTenantId(req);
+      const tenderId = Number(req.params.tenderId);
+      if (!Number.isFinite(tenderId)) return res.status(400).json({ error: 'Invalid tenderId' });
+      const t = await prisma.tender.findFirst({ where: { id: tenderId, tenantId } });
+      if (!t) return res.status(404).json({ error: 'Tender not found' });
+      const invites = await prisma.tenderSupplierInvite.findMany({
+        where: { tenantId, tenderId },
+        orderBy: [{ id: 'desc' }],
+      });
+      res.json(invites);
+    } catch (err) {
+      console.error('list invites error', err);
+      res.status(500).json({ error: 'Failed to list invites' });
+    }
+  });
+
   // PUBLIC: GET /public/rfx/:token → tender + questions
   router.get('/public/rfx/:token', async (req, res) => {
     try {
@@ -84,6 +103,8 @@ module.exports = (prisma, { requireAuth }) => {
           leadTimeDays: leadTimeDays != null ? Number(leadTimeDays) : null,
           answers: Array.isArray(answers) ? answers : [],
           autoScore,
+          source: 'supplier',
+          attachments: req.body?.attachments || null,
         },
       });
       await prisma.tenderSupplierInvite.update({ where: { id: invite.id }, data: { status: 'responded' } });
@@ -91,6 +112,79 @@ module.exports = (prisma, { requireAuth }) => {
     } catch (err) {
       console.error('public rfx submit error', err);
       res.status(500).json({ error: 'Failed to submit response' });
+    }
+  });
+
+  // POST /api/tenders/:tenderId/manual-response — buyer-entered response
+  router.post('/:tenderId/manual-response', requireAuth, express.json({ limit: '5mb' }), async (req, res) => {
+    try {
+      const tenantId = getTenantId(req);
+      const tenderId = Number(req.params.tenderId);
+      const { supplierId, supplierName, priceTotal, manualScore, notes, attachments } = req.body || {};
+      if (!Number.isFinite(tenderId)) return res.status(400).json({ error: 'Invalid tenderId' });
+      const tender = await prisma.tender.findFirst({ where: { id: tenderId, tenantId } });
+      if (!tender) return res.status(404).json({ error: 'Tender not found' });
+
+      let sid = Number(supplierId || 0);
+      if (!sid && supplierName) {
+        const s = await prisma.supplier.create({ data: { tenantId, name: String(supplierName) } });
+        sid = s.id;
+      }
+      if (!sid) return res.status(400).json({ error: 'supplierId or supplierName required' });
+
+      const created = await prisma.tenderResponse.create({
+        data: {
+          tenantId,
+          tenderId,
+          supplierId: sid,
+          priceTotal: Number(priceTotal || 0),
+          answers: [],
+          autoScore: 0,
+          manualScore: Number(manualScore || 0),
+          notes: notes || null,
+          source: 'buyer',
+          attachments: Array.isArray(attachments) ? attachments : attachments ? [attachments] : null,
+        },
+      });
+      res.status(201).json(created);
+    } catch (err) {
+      console.error('manual response error', err);
+      res.status(500).json({ error: 'Failed to add manual response' });
+    }
+  });
+
+  // PATCH /api/tenders/:tenderId/responses/:responseId/reject — mark as rejected
+  router.patch('/:tenderId/responses/:responseId/reject', requireAuth, async (req, res) => {
+    try {
+      const tenantId = getTenantId(req);
+      const tenderId = Number(req.params.tenderId);
+      const id = Number(req.params.responseId);
+      const r = await prisma.tenderResponse.findFirst({ where: { id, tenderId, tenantId } });
+      if (!r) return res.status(404).json({ error: 'Not found' });
+      const updated = await prisma.tenderResponse.update({ where: { id }, data: { notes: r.notes ? `${r.notes} | REJECTED` : 'REJECTED' } });
+      res.json(updated);
+    } catch (err) {
+      console.error('reject response error', err);
+      res.status(500).json({ error: 'Failed to reject response' });
+    }
+  });
+
+  // POST /api/tenders/:tenderId/invites — return public share URL
+  // (already implemented above). Also compute share URL for convenience.
+  const origInvitesPost = router.stack.find(l => l.route && l.route.path === '/:tenderId/invites' && l.route.methods.post);
+  // No-op: route exists. Add a lightweight GET that includes share URLs as well.
+  router.get('/:tenderId/invites/with-links', requireAuth, async (req, res) => {
+    try {
+      const tenantId = getTenantId(req);
+      const tenderId = Number(req.params.tenderId);
+      if (!Number.isFinite(tenderId)) return res.status(400).json({ error: 'Invalid tenderId' });
+      const list = await prisma.tenderSupplierInvite.findMany({ where: { tenantId, tenderId }, orderBy: [{ id: 'desc' }] });
+      const base = process.env.PUBLIC_BASE_URL || 'http://localhost:5173';
+      const rows = list.map(i => ({ ...i, publicUrl: `${base}/rfx-public/${i.inviteToken}` }));
+      res.json(rows);
+    } catch (err) {
+      console.error('invites with-links error', err);
+      res.status(500).json({ error: 'Failed to list invites' });
     }
   });
 

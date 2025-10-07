@@ -1448,6 +1448,10 @@ model TenderResponse {
   manualScore  Float    @default(0)
   notes        String?
 
+  // Additive fields for buyer-entered responses and file attachments
+  source      String   @default("supplier") // 'supplier' | 'buyer'
+  attachments Json?
+
   tender   Tender   @relation(fields: [tenderId], references: [id])
   supplier Supplier @relation(fields: [supplierId], references: [id])
 
