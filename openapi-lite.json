@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "5255411"
+    "version": "16b1bab"
   },
   "paths": {
     "*": {
@@ -6744,6 +6744,318 @@
                 "example": {
                   "id": 1,
                   "updated": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//mvp//?/i/mvp/cost-codes": {
+      "get": {
+        "summary": "GET //mvp//?/i/mvp/cost-codes",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "total": 1,
+                  "items": [
+                    {
+                      "id": 1,
+                      "_example": true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //mvp//?/i/mvp/cost-codes",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//mvp//?/i/mvp/cost-codes/import": {
+      "post": {
+        "summary": "POST //mvp//?/i/mvp/cost-codes/import",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//mvp//?/i/mvp/rfx/{rfxId}/template": {
+      "post": {
+        "summary": "POST //mvp//?/i/mvp/rfx/:rfxId/template",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//mvp//?/i/mvp/rfx/{rfxId}/upload-response": {
+      "post": {
+        "summary": "POST //mvp//?/i/mvp/rfx/:rfxId/upload-response",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//mvp//?/i/mvp/rfx/{rfxId}/submissions": {
+      "get": {
+        "summary": "GET //mvp//?/i/mvp/rfx/:rfxId/submissions",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//mvp//?/i/mvp/rfx/submissions/{submissionId}": {
+      "patch": {
+        "summary": "PATCH //mvp//?/i/mvp/rfx/submissions/:submissionId",
+        "parameters": [
+          {
+            "name": "submissionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//mvp//?/i/mvp/rfx/{rfxId}/analysis.xlsx.xml": {
+      "get": {
+        "summary": "GET //mvp//?/i/mvp/rfx/:rfxId/analysis.xlsx.xml",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//mvp//?/i/mvp/rfx/{rfxId}/send": {
+      "post": {
+        "summary": "POST //mvp//?/i/mvp/rfx/:rfxId/send",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//mvp//?/i/mvp/contracts/{id}/upload": {
+      "post": {
+        "summary": "POST //mvp//?/i/mvp/contracts/:id/upload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//mvp//?/i/mvp/projects/{projectId}/contracts": {
+      "get": {
+        "summary": "GET //mvp//?/i/mvp/projects/:projectId/contracts",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//mvp//?/i/mvp/projects/{projectId}/overview": {
+      "get": {
+        "summary": "GET //mvp//?/i/mvp/projects/:projectId/overview",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
                 }
               }
             }
