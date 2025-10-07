@@ -7,13 +7,17 @@ router.get('/projects/:projectId/overview', async (req, res, next) => {
   try {
     const tenantId = req.user?.tenantId || req.tenantId;
     const projectId = Number(req.params.projectId);
-    const bl = await prisma.budgetLine.findMany({ where: { tenantId, projectId }, select: { planned: true, estimated: true, actual: true } });
-    let baseline = 0, estimate = 0, actual = 0;
-    for (const b of bl) {
-      baseline += Number(b.planned || 0);
-      estimate += Number(b.estimated || 0);
-      actual += Number(b.actual || 0);
-    }
+    const [bl, cs, vs, inv] = await Promise.all([
+      prisma.budgetLine.findMany({ where: { tenantId, projectId }, select: { planned: true } }),
+      prisma.contract.findMany({ where: { tenantId, projectId }, select: { value: true } }),
+      prisma.variation.findMany({ where: { tenantId, projectId, status: 'approved', type: 'CONTRACT_VARIATION' }, select: { amount: true } }),
+      prisma.invoice.findMany({ where: { tenantId, projectId }, select: { amount: true } }),
+    ]);
+    const baseline = bl.reduce((a, x) => a + Number(x.planned || 0), 0);
+    const committed = cs.reduce((a, x) => a + Number(x.value || 0), 0);
+    const adjusted = vs.reduce((a, x) => a + Number(x.amount || 0), 0);
+    const estimate = committed + adjusted;
+    const actual = inv.reduce((a, x) => a + Number(x.amount || 0), 0);
     const [contracts, openVars, approvedVars] = await Promise.all([
       prisma.contract.count({ where: { projectId } }),
       prisma.variation.count({ where: { tenantId, projectId, status: 'submitted' } }),
@@ -23,6 +27,8 @@ router.get('/projects/:projectId/overview', async (req, res, next) => {
       projectId,
       totals: {
         baseline,
+        committed,
+        adjusted,
         estimate,
         actual,
         varianceVsBaseline: estimate - baseline,
