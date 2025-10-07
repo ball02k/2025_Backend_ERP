@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "16b1bab"
+    "version": "57ff844"
   },
   "paths": {
     "*": {
@@ -6751,9 +6751,93 @@
         }
       }
     },
-    "//mvp//?/i/mvp/cost-codes": {
+    "//api/mvp//?/i/diag/projects/{projectId}": {
       "get": {
-        "summary": "GET //mvp//?/i/mvp/cost-codes",
+        "summary": "GET //api/mvp//?/i/diag/projects/:projectId",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/mvp//?/i/diag/projects/{projectId}/recompute": {
+      "post": {
+        "summary": "POST //api/mvp//?/i/diag/projects/:projectId/recompute",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/mvp//?/i/projects/{projectId}/recompute": {
+      "post": {
+        "summary": "POST //api/mvp//?/i/projects/:projectId/recompute",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/mvp//?/i/cost-codes": {
+      "get": {
+        "summary": "GET //api/mvp//?/i/cost-codes",
         "parameters": [],
         "responses": {
           "200": {
@@ -6775,7 +6859,7 @@
         }
       },
       "post": {
-        "summary": "POST //mvp//?/i/mvp/cost-codes",
+        "summary": "POST //api/mvp//?/i/cost-codes",
         "parameters": [],
         "responses": {
           "200": {
@@ -6792,9 +6876,9 @@
         }
       }
     },
-    "//mvp//?/i/mvp/cost-codes/import": {
+    "//api/mvp//?/i/cost-codes/import": {
       "post": {
-        "summary": "POST //mvp//?/i/mvp/cost-codes/import",
+        "summary": "POST //api/mvp//?/i/cost-codes/import",
         "parameters": [],
         "responses": {
           "200": {
@@ -6811,9 +6895,9 @@
         }
       }
     },
-    "//mvp//?/i/mvp/rfx/{rfxId}/template": {
+    "//api/mvp//?/i/rfx/{rfxId}/template": {
       "post": {
-        "summary": "POST //mvp//?/i/mvp/rfx/:rfxId/template",
+        "summary": "POST //api/mvp//?/i/rfx/:rfxId/template",
         "parameters": [
           {
             "name": "rfxId",
@@ -6839,9 +6923,9 @@
         }
       }
     },
-    "//mvp//?/i/mvp/rfx/{rfxId}/upload-response": {
+    "//api/mvp//?/i/rfx/{rfxId}/upload-response": {
       "post": {
-        "summary": "POST //mvp//?/i/mvp/rfx/:rfxId/upload-response",
+        "summary": "POST //api/mvp//?/i/rfx/:rfxId/upload-response",
         "parameters": [
           {
             "name": "rfxId",
@@ -6867,9 +6951,9 @@
         }
       }
     },
-    "//mvp//?/i/mvp/rfx/{rfxId}/submissions": {
+    "//api/mvp//?/i/rfx/{rfxId}/submissions": {
       "get": {
-        "summary": "GET //mvp//?/i/mvp/rfx/:rfxId/submissions",
+        "summary": "GET //api/mvp//?/i/rfx/:rfxId/submissions",
         "parameters": [
           {
             "name": "rfxId",
@@ -6895,9 +6979,9 @@
         }
       }
     },
-    "//mvp//?/i/mvp/rfx/submissions/{submissionId}": {
+    "//api/mvp//?/i/rfx/submissions/{submissionId}": {
       "patch": {
-        "summary": "PATCH //mvp//?/i/mvp/rfx/submissions/:submissionId",
+        "summary": "PATCH //api/mvp//?/i/rfx/submissions/:submissionId",
         "parameters": [
           {
             "name": "submissionId",
@@ -6923,9 +7007,9 @@
         }
       }
     },
-    "//mvp//?/i/mvp/rfx/{rfxId}/analysis.xlsx.xml": {
+    "//api/mvp//?/i/rfx/{rfxId}/analysis.xlsx.xml": {
       "get": {
-        "summary": "GET //mvp//?/i/mvp/rfx/:rfxId/analysis.xlsx.xml",
+        "summary": "GET //api/mvp//?/i/rfx/:rfxId/analysis.xlsx.xml",
         "parameters": [
           {
             "name": "rfxId",
@@ -6951,9 +7035,9 @@
         }
       }
     },
-    "//mvp//?/i/mvp/rfx/{rfxId}/send": {
+    "//api/mvp//?/i/rfx/{rfxId}/send": {
       "post": {
-        "summary": "POST //mvp//?/i/mvp/rfx/:rfxId/send",
+        "summary": "POST //api/mvp//?/i/rfx/:rfxId/send",
         "parameters": [
           {
             "name": "rfxId",
@@ -6979,9 +7063,37 @@
         }
       }
     },
-    "//mvp//?/i/mvp/contracts/{id}/upload": {
+    "//api/mvp//?/i/mvp/rfx/{rfxId}/award": {
       "post": {
-        "summary": "POST //mvp//?/i/mvp/contracts/:id/upload",
+        "summary": "POST //api/mvp//?/i/mvp/rfx/:rfxId/award",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/mvp//?/i/contracts/{id}/upload": {
+      "post": {
+        "summary": "POST //api/mvp//?/i/contracts/:id/upload",
         "parameters": [
           {
             "name": "id",
@@ -7007,9 +7119,9 @@
         }
       }
     },
-    "//mvp//?/i/mvp/projects/{projectId}/contracts": {
+    "//api/mvp//?/i/projects/{projectId}/contracts": {
       "get": {
-        "summary": "GET //mvp//?/i/mvp/projects/:projectId/contracts",
+        "summary": "GET //api/mvp//?/i/projects/:projectId/contracts",
         "parameters": [
           {
             "name": "projectId",
@@ -7035,9 +7147,9 @@
         }
       }
     },
-    "//mvp//?/i/mvp/projects/{projectId}/overview": {
+    "//api/mvp//?/i/projects/{projectId}/overview": {
       "get": {
-        "summary": "GET //mvp//?/i/mvp/projects/:projectId/overview",
+        "summary": "GET //api/mvp//?/i/projects/:projectId/overview",
         "parameters": [
           {
             "name": "projectId",
@@ -7056,6 +7168,118 @@
                 "example": {
                   "id": 1,
                   "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/mvp//?/i/meta/projects/{projectId}/contracts/active": {
+      "get": {
+        "summary": "GET //api/mvp//?/i/meta/projects/:projectId/contracts/active",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/mvp//?/i/projects/{projectId}/cvr": {
+      "get": {
+        "summary": "GET //api/mvp//?/i/projects/:projectId/cvr",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/mvp//?/i/projects/{projectId}/cvr/seed-from-packages": {
+      "post": {
+        "summary": "POST //api/mvp//?/i/projects/:projectId/cvr/seed-from-packages",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/mvp//?/i/projects/{projectId}/cvr/seed-from-previous": {
+      "post": {
+        "summary": "POST //api/mvp//?/i/projects/:projectId/cvr/seed-from-previous",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
                 }
               }
             }
