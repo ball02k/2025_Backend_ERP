@@ -11,6 +11,8 @@ export default function ProjectInfo(){
   // Keep a single state object to avoid changing hook order during HMR
   const [state, setState] = useState<{ project: Proj | null; links?: any[]; loading: boolean; error: string }>({ project: null, links: [], loading: true, error: '' });
   const [lookups, setLookups] = useState<{ statuses: string[]; types: string[] }>({ statuses: [], types: [] });
+  const [pkgList, setPkgList] = useState<any[]>([]);
+  const [rfx, setRfx] = useState<any[]>([]);
 
   async function load(){
     setState((s) => ({ ...s, loading: true, error: '' }));
@@ -30,6 +32,24 @@ export default function ProjectInfo(){
     }
   }
   useEffect(()=>{ if(id) load(); }, [id]);
+
+  // Load Packages + Tenders explicitly so they are visible even if project payload doesn’t embed them
+  useEffect(() => {
+    async function fetchExtras() {
+      if (!id) return;
+      try {
+        const pkgs = await apiGet(`/api/projects/${id}/packages`);
+        const items = Array.isArray(pkgs?.items) ? pkgs.items : (Array.isArray(pkgs) ? pkgs : []);
+        setPkgList(items);
+      } catch { setPkgList([]); }
+      try {
+        const t = await apiGet(`/api/projects/${id}/rfx`);
+        const items = Array.isArray(t?.items) ? t.items : (Array.isArray(t) ? t : []);
+        setRfx(items);
+      } catch { setRfx([]); }
+    }
+    fetchExtras();
+  }, [id]);
 
   useEffect(() => {
     async function loadLookups(){
@@ -76,15 +96,20 @@ export default function ProjectInfo(){
       </div>
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="border rounded-2xl p-4">
-          <h3 className="font-semibold mb-2">Packages</h3>
-          {(proj.packages || []).map((p: any) => (
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold">Packages</h3>
+            <Link className="text-sm underline" to={`/projects/${id}/packages`}>Open list</Link>
+          </div>
+          {pkgList.length === 0 && <div className="text-sm text-slate-600">No packages yet.</div>}
+          {pkgList.map((p: any) => (
             <Link key={p.id} className="block text-blue-700 hover:underline" to={`/projects/${id}/packages/${p.id}`}>{p.name}</Link>
           ))}
         </div>
         <div className="border rounded-2xl p-4">
           <h3 className="font-semibold mb-2">RFx</h3>
-          {(proj.rfx || []).map((r: any) => (
-            <Link key={r.id} className="block text-blue-700 hover:underline" to={`/rfx/${r.id}`}>{r.title}</Link>
+          {rfx.length === 0 && <div className="text-sm text-slate-600">No RFx yet.</div>}
+          {rfx.map((r: any) => (
+            <Link key={r.id} className="block text-blue-700 hover:underline" to={`/rfx/${r.id}`}>{r.title || `RFx #${r.id}`}</Link>
           ))}
         </div>
       </section>

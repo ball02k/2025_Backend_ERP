@@ -20,6 +20,12 @@ const budgetLineSelect = {
   createdAt: true,
   updatedAt: true,
   costCodeId: true,
+  packageItems: {
+    select: {
+      packageId: true,
+      package: { select: { id: true, name: true } },
+    },
+  },
 };
 
 router.get('/projects/:projectId/budget', async (req, res, next) => {
@@ -31,7 +37,15 @@ router.get('/projects/:projectId/budget', async (req, res, next) => {
       orderBy: [{ code: 'asc' }, { id: 'asc' }],
       select: budgetLineSelect,
     });
-    const data = rows.map(r => { const row = safeJson(r); row.links = buildLinks('budgetLine', row); return row; });
+    const data = rows.map(r => {
+      const row = safeJson(r);
+      // Flatten package indicators for FE convenience
+      row.packages = Array.isArray(row.packageItems)
+        ? row.packageItems.map((pi) => ({ id: pi?.package?.id || pi.packageId, name: pi?.package?.name || `#${pi.packageId}` }))
+        : [];
+      row.links = buildLinks('budgetLine', row);
+      return row;
+    });
     res.json({ items: data, total: data.length });
   } catch (e) { next(e); }
 });

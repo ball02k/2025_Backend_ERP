@@ -782,6 +782,9 @@ model Supplier {
   capabilities          SupplierCapability[]
   invites               TenderInvite[]            @relation("SupplierInvites")
   submissions           Submission[]              @relation("SupplierSubmissions")
+  // Additive relations for tendering module
+  tenderInvites         TenderSupplierInvite[]
+  tenderResponses       TenderResponse[]
   contracts             Contract[]                @relation("SupplierContracts")
   awardedPackages       Package[]                 @relation("PackageAwardSupplier")
   invoices              Invoice[]
@@ -1053,6 +1056,8 @@ model BudgetLine {
 
   project Project @relation(fields: [projectId], references: [id])
   costCode CostCode? @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  // Link budget lines to procurement packages
+  packageItems PackageItem[]
 
   @@index([tenantId, projectId])
   @@index([tenantId, projectId, periodMonth])
@@ -1341,6 +1346,10 @@ model Package {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   costCodeId      Int?
+  // New additive fields for tender packaging
+  attachments     Json?
+  // Optional: explicitly store a trade category label
+  tradeCategory   String?
 
   submissions Submission[]   @relation("PackageSubmissions")
   invites     TenderInvite[] @relation("PackageInvites")
@@ -1348,9 +1357,26 @@ model Package {
   requests    Request[]
   tenders     Tender[]
   costCode    CostCode?      @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  // Link to selected budget lines
+  budgetItems PackageItem[]
 
   @@index([projectId])
   @@index([projectId, costCodeId])
+}
+
+// Join model linking packages to budget lines
+model PackageItem {
+  id           Int        @id @default(autoincrement())
+  tenantId     String     @default("demo")
+  packageId    Int
+  budgetLineId Int
+  createdAt    DateTime   @default(now())
+
+  package    Package    @relation(fields: [packageId], references: [id])
+  budgetLine BudgetLine @relation(fields: [budgetLineId], references: [id])
+
+  @@index([tenantId, packageId])
+  @@index([tenantId, budgetLineId])
 }
 
 // Additive lightweight tendering models (separate from existing Request/Submission)
@@ -1368,9 +1394,64 @@ model Tender {
   project Project @relation(fields: [projectId], references: [id])
   package Package? @relation(fields: [packageId], references: [id])
   bids    TenderBid[]
+  // Additive relations for questions, responses, and invites
+  questions TenderQuestion[]
+  responses TenderResponse[]
+  invites   TenderSupplierInvite[]
 
   @@unique([id, tenantId], name: "id_tenantId")
   @@index([tenantId, projectId])
+}
+
+// Additive: questions for tender scoring
+model TenderQuestion {
+  id        Int      @id @default(autoincrement())
+  tenantId  String   @default("demo")
+  tenderId  Int
+  text      String
+  type      String   // 'text' | 'number' | 'single' | 'multi' | 'file'
+  weight    Float
+  options   Json?
+
+  tender Tender @relation(fields: [tenderId], references: [id])
+
+  @@index([tenantId, tenderId])
+}
+
+// Additive: token-based invites per tender (distinct from legacy package invites)
+model TenderSupplierInvite {
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  tenderId    Int
+  supplierId  Int
+  inviteToken String   @unique
+  status      String   @default("invited") // invited | responded | withdrawn
+  createdAt   DateTime @default(now())
+
+  tender   Tender   @relation(fields: [tenderId], references: [id])
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([tenantId, tenderId, supplierId])
+}
+
+// Additive: supplier response to a tender
+model TenderResponse {
+  id           Int      @id @default(autoincrement())
+  tenantId     String   @default("demo")
+  tenderId     Int
+  supplierId   Int
+  priceTotal   Decimal  @db.Decimal(18, 2)
+  leadTimeDays Int?
+  submittedAt  DateTime @default(now())
+  answers      Json
+  autoScore    Float    @default(0)
+  manualScore  Float    @default(0)
+  notes        String?
+
+  tender   Tender   @relation(fields: [tenderId], references: [id])
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([tenantId, tenderId, supplierId])
 }
 
 model TenderBid {

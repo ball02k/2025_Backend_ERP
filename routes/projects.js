@@ -162,24 +162,39 @@ module.exports = (prisma) => {
   });
 
   // --- MVP additive: Packages & Tenders (lightweight) ---
-  // POST /api/projects/:projectId/packages → Create package
+  // POST /api/projects/:projectId/packages → Create package (extended)
   router.post('/:projectId/packages', requireProjectMember, async (req, res) => {
     try {
-      const tenantId = req.user && req.user.tenantId;
       const projectId = Number(req.params.projectId);
-      const { name, description, budget } = req.body || {};
-      const pkg = await prisma.package.create({ data: { name, scope: description || null, projectId, status: 'Draft', budgetEstimate: budget ?? null } });
+      const { name, description, scope, trade, tradeCategory, budget, attachments, costCodeId, budgetIds } = req.body || {};
+      if (!name) return res.status(400).json({ error: 'Name is required' });
+      const pkg = await prisma.package.create({
+        data: {
+          projectId,
+          name,
+          // map description to scope (legacy)
+          scope: (scope ?? description) || null,
+          trade: (trade || tradeCategory) ?? null,
+          status: 'Draft',
+          budgetEstimate: budget ?? null,
+          costCodeId: costCodeId ?? null,
+        },
+        select: { id: true, projectId: true, name: true, scope: true, trade: true, status: true, budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true, createdAt: true, updatedAt: true, costCodeId: true },
+      });
+      // Link budget lines if table exists
+      if (Array.isArray(budgetIds) && budgetIds.length) {
+        try { await prisma.packageItem.createMany({ data: budgetIds.map((id) => ({ packageId: pkg.id, budgetLineId: Number(id) })) }); } catch (_) {}
+      }
       res.status(201).json(pkg);
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
   });
 
-  // GET /api/projects/:projectId/packages → List packages (incl. tenders)
+  // GET /api/projects/:projectId/packages → List packages (incl. budget items & tenders)
   router.get('/:projectId/packages', requireProjectMember, async (req, res) => {
-    const tenantId = req.user && req.user.tenantId;
     const projectId = Number(req.params.projectId);
-    const packages = await prisma.package.findMany({ where: { projectId }, include: { tenders: true } });
+    const packages = await prisma.package.findMany({ where: { projectId }, orderBy: [{ name: 'asc' }, { id: 'asc' }], select: { id: true, projectId: true, name: true, scope: true, trade: true, status: true, budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true, createdAt: true, updatedAt: true, costCodeId: true, tenders: true } });
     res.json(packages);
   });
 

@@ -56,3 +56,24 @@ export async function awardRequest(requestId: number | string, supplierId: numbe
   }
 }
 
+// New: tender award helper mirroring request award semantics
+export async function awardTender(tenderId: number | string, body: { responseId: number|string; contractRef?: string; startDate?: string; endDate?: string }) {
+  const allowed = await hasAwardPermission();
+  if (!allowed) {
+    const err: any = new Error('Missing permission: procurement:award');
+    err.status = 403;
+    err.body = { error: { code: 'FORBIDDEN', message: 'Missing permission: procurement:award' } };
+    throw err;
+  }
+  try {
+    return await apiPost(`/api/tenders/${tenderId}/award`, body);
+  } catch (e: any) {
+    if (e?.status === 403 && e?.body?.error?.code === 'FORBIDDEN') {
+      const err: any = new Error(e.body.error.message || 'Forbidden');
+      err.status = 403;
+      err.body = e.body;
+      throw err;
+    }
+    throw e;
+  }
+}

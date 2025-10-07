@@ -13,7 +13,7 @@ if (!rootEl) {
 
 // Bump local API catalog hash to current to acknowledge latest changes
 try {
-  localStorage.setItem('lastSeenCatalogHash', 'fd991defffbf66f246c284c083f901ebf38763b6');
+  localStorage.setItem('lastSeenCatalogHash', '4c21fbecfae0a8e21a1332757ed5e706c380c320');
 } catch {}
 
 // Simple demo-mode link guard: if on /demo, keep navigation within /demo

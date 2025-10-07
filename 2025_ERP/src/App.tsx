@@ -21,7 +21,7 @@ const HealthPage = lazy(() => import('./pages/dev/Health'));
 const OnboardPublic = lazy(() => import("./pages/public/OnboardPublic.jsx"));
 const LoginPage = lazy(() => import("./pages/Login"));
 const DocumentsHub = lazy(() => import('./pages/DocumentsHub.jsx'));
-const ProjectInfo = lazy(() => import('./pages/project/Info.jsx'));
+const ProjectInfo = lazy(() => import('./pages/project/Info'));
 const ProjectFinanceShell = lazy(() => import('./pages/project/Finance'));
 const RfiShow = lazy(() => import('./pages/RfiShow.jsx'));
 const QaShow = lazy(() => import('./pages/QaShow.jsx'));
@@ -42,6 +42,11 @@ const MeetingList = lazy(() => import('./pages/meetings/MeetingList.jsx'));
 const AuditList = lazy(() => import('./pages/audit/AuditList.jsx'));
 const ReportList = lazy(() => import('./pages/reports/ReportList.jsx'));
 const DemoTour = lazy(() => import('./pages/demo/Tour.jsx'));
+const PackagesPage = lazy(() => import('./pages/projects/PackagesPage.jsx'));
+const PackageDetail = lazy(() => import('./pages/projects/PackageDetail.jsx'));
+const TenderCreateFromPackage = lazy(() => import('./pages/rfx/TenderCreateFromPackage.jsx'));
+const TenderResponses = lazy(() => import('./pages/rfx/TenderResponses.jsx'));
+const PublicRFx = lazy(() => import('./pages/public/PublicRFx.jsx'));
 
 export default function App() {
   const loc = useLocation();
@@ -79,6 +84,12 @@ export default function App() {
           <Route path="/reports" element={<RequireAuth><ReportList /></RequireAuth>} />
           {/* Projects and entity detail routes */}
           <Route path="/projects/:id" element={<RequireAuth><ErrorBoundary><ProjectInfo /></ErrorBoundary></RequireAuth>} />
+          <Route path="/projects/:id/packages" element={<RequireAuth><PackagesPage /></RequireAuth>} />
+          <Route path="/projects/:id/packages/:packageId" element={<RequireAuth><PackageDetail /></RequireAuth>} />
+          <Route path="/projects/:id/packages/:packageId/tender/new" element={<RequireAuth><TenderCreateFromPackage /></RequireAuth>} />
+          <Route path="/tenders/:id/responses" element={<RequireAuth><TenderResponses /></RequireAuth>} />
+          {/* Public supplier portal */}
+          <Route path="/public/rfx/:token" element={<PublicRFx />} />
           {/* Project-scoped Finance (reusing global finance pages with implicit projectId filter) */}
           <Route path="/projects/:id/finance" element={<RequireAuth><ProjectFinanceShell /></RequireAuth>}>
             <Route path="invoices" element={<RequireAuth><InvoicesList /></RequireAuth>} />

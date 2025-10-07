@@ -49,6 +49,7 @@ const homeRoutes = require('./routes/home.cjs');
 const procurementRoutes = require('./routes/procurement');
 const analyticsRouter = require('./routes/analytics.cjs');
 const rfxRouter = require('./routes/rfx.cjs');
+const tendersRouter = require('./routes/tenders.cjs');
 const projectInvoicesRouter = require('./routes/project_invoices.cjs');
 const projectBudgetRouter = require('./routes/projects.budget.cjs');
 const projectPackagesRouter = require('./routes/projects.packages.cjs');
@@ -189,6 +190,10 @@ app.use('/api', requireAuth, projectOverviewRouter2);
 app.use('/api', requireAuth, costCodesRouter);
   app.use('/api/projects', requireAuth, rfxRouter(prisma));
   app.use('/api', requireAuth, rfxRouter(prisma));
+// Tenders routes (additive)
+app.use('/api/tenders', tendersRouter(prisma, { requireAuth }));
+// Public RFx submission
+app.use('/', tendersRouter(prisma, { requireAuth }));
 app.use('/api/projects', requireAuth, cvrRouter(prisma));
 app.use('/api/projects', requireAuth, diaryRouter(prisma));
 app.use('/api/projects', requireAuth, projectInvoicesRouter(prisma));
