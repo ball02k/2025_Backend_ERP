@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "57ff844"
+    "version": "0c3265e"
   },
   "paths": {
     "*": {
@@ -792,6 +792,178 @@
         }
       }
     },
+    "//api/projects/{projectId}/packages": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/packages",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "GET //api/projects/:projectId/packages",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/tenders": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/tenders",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "GET //api/projects/:projectId/tenders",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/tenders/{tenderId}": {
+      "get": {
+        "summary": "GET //api/projects/tenders/:tenderId",
+        "parameters": [
+          {
+            "name": "tenderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/tenders/{tenderId}/bids": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/tenders/:tenderId/bids",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "tenderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/projects/csv/export": {
       "get": {
         "summary": "GET //api/projects/csv/export",
@@ -844,60 +1016,6 @@
       "post": {
         "summary": "POST //api/projects/csv/import",
         "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/projects/{projectId}/packages": {
-      "get": {
-        "summary": "GET //api/projects/:projectId/packages",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 1,
-                  "_example": true
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "summary": "POST //api/projects/:projectId/packages",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -5016,6 +5134,34 @@
                 "example": {
                   "id": 101,
                   "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/suppliers/{id}/overview": {
+      "get": {
+        "summary": "GET //api/suppliers/:id/overview",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
                 }
               }
             }
