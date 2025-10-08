@@ -8,6 +8,23 @@ module.exports = (prisma, { requireAuth }) => {
 
   function getTenantId(req) { return req.user && req.user.tenantId; }
 
+  // GET /api/tenders?projectId=&packageId=&status=
+  // List tenders for current tenant with optional filters. Useful when project-scoped route is unavailable.
+  router.get('/', requireAuth, async (req, res) => {
+    try {
+      const tenantId = getTenantId(req);
+      const where = { tenantId };
+      if (req.query.projectId) where.projectId = Number(req.query.projectId);
+      if (req.query.packageId) where.packageId = Number(req.query.packageId);
+      if (req.query.status) where.status = String(req.query.status);
+      const rows = await prisma.tender.findMany({ where, orderBy: [{ updatedAt: 'desc' }], include: { package: true } });
+      res.json(rows);
+    } catch (err) {
+      console.error('list tenders error', err);
+      res.status(500).json({ error: 'Failed to list tenders' });
+    }
+  });
+
   // POST /api/tenders/:tenderId/invites
   router.post('/:tenderId/invites', requireAuth, async (req, res) => {
     try {
