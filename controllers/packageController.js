@@ -8,8 +8,8 @@ exports.listPackages = async (req, res) => {
       where: { projectId },
       include: {
         awardSupplier: { select: { name: true, id: true } },
-        tenders: { select: { id: true, status: true, title: true } },
-        _count: { select: { submissions: true } },
+        tenders: { select: { id: true } },
+        _count: { select: { submissions: true, tenders: true } },
       },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
     });

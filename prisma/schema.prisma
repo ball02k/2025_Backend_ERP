@@ -141,8 +141,8 @@ model Project {
   typeRel   ProjectType?   @relation("ProjectTypeRel", fields: [typeId], references: [id])
 
   // Simple string fields for lean project
-  status           String    @default("Active")
-  type             String    @default("General")
+  status           String   @default("Active")
+  type             String   @default("General")
   projectManagerId Int?
   country          String?
   currency         String?
@@ -150,23 +150,23 @@ model Project {
   taxScheme        String?
   contractForm     String?
   // Additive project info fields
-  clientContactId        Int?
-  sitePostcode           String?
-  siteLat                Decimal?  @db.Decimal(10, 7)
-  siteLng                Decimal?  @db.Decimal(10, 7)
+  clientContactId  Int?
+  sitePostcode     String?
+  siteLat          Decimal? @db.Decimal(10, 7)
+  siteLng          Decimal? @db.Decimal(10, 7)
   // commercial basics (additive)
-  contractType           String?
-  paymentTermsDays       Int?
-  retentionPct           Decimal?  @db.Decimal(5, 2)
+  contractType     String?
+  paymentTermsDays Int?
+  retentionPct     Decimal? @db.Decimal(5, 2)
 
   // internal roles (additive)
   projectManagerUserId   Int?
   quantitySurveyorUserId Int?
-  startPlanned     DateTime?
-  endPlanned       DateTime?
-  startActual      DateTime?
-  endActual        DateTime?
-  labels           Json?
+  startPlanned           DateTime?
+  endPlanned             DateTime?
+  startActual            DateTime?
+  endActual              DateTime?
+  labels                 Json?
 
   // Existing financial/schedule fields retained
   budget      Decimal?  @db.Decimal(18, 2)
@@ -200,7 +200,7 @@ model Project {
   carbonEntries         CarbonEntry[]
   ApplicationForPayment ApplicationForPayment[]
   // MVP additive
-  tenders              Tender[]
+  tenders               Tender[]
 
   // Additive relations for new info fields
   clientContact    Contact? @relation("Project_ClientContact", fields: [clientContactId], references: [id])
@@ -220,16 +220,16 @@ model Project {
 }
 
 model CostCode {
-  id          Int        @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   tenantId    String
   code        String
   description String?
   parentId    Int?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  parent      CostCode?   @relation("CostCodeHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children    CostCode[]  @relation("CostCodeHierarchy")
+  parent      CostCode?    @relation("CostCodeHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children    CostCode[]   @relation("CostCodeHierarchy")
   budgetLines BudgetLine[]
   packages    Package[]
 
@@ -291,13 +291,13 @@ model Contact {
 }
 
 model Variation {
-  id          Int     @id @default(autoincrement())
-  projectId   Int
-  tenantId    String
-  project     Project @relation(fields: [projectId], references: [id])
-  packageId   Int?
+  id           Int     @id @default(autoincrement())
+  projectId    Int
+  tenantId     String
+  project      Project @relation(fields: [projectId], references: [id])
+  packageId    Int?
   budgetLineId Int?
-  contractId  Int?
+  contractId   Int?
 
   // Core identifiers
   reference     String? @db.VarChar(64)
@@ -314,8 +314,8 @@ model Variation {
 
   // Commercials
   // New spec fields
-  amount         Decimal  @db.Decimal(18, 2) @default(0)
-  value          Decimal  @db.Decimal(18, 2)
+  amount         Decimal @default(0) @db.Decimal(18, 2)
+  value          Decimal @db.Decimal(18, 2)
   costImpact     Decimal @db.Decimal(18, 2)
   timeImpactDays Int?
   notes          String?
@@ -921,9 +921,9 @@ model RFxSubmission {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  @@unique([tenantId, rfxId, supplierId], name: "tenantId_rfxId_supplierId")
   @@index([tenantId, rfxId])
   @@index([tenantId, supplierId])
-  @@unique([tenantId, rfxId, supplierId], name: "tenantId_rfxId_supplierId")
 }
 
 model RequestSection {
@@ -1053,15 +1053,37 @@ model BudgetLine {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   costCodeId  Int?
+  // Grouping (additive)
+  groupId     Int?
+  sortOrder   Int?     @default(0)
 
-  project Project @relation(fields: [projectId], references: [id])
-  costCode CostCode? @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  project      Project       @relation(fields: [projectId], references: [id])
+  costCode     CostCode?     @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  group        BudgetGroup?  @relation(fields: [groupId], references: [id])
   // Link budget lines to procurement packages
   packageItems PackageItem[]
 
   @@index([tenantId, projectId])
   @@index([tenantId, projectId, periodMonth])
   @@index([tenantId, costCodeId])
+  @@index([tenantId, groupId])
+}
+
+// Budget line grouping (system/user groups)
+model BudgetGroup {
+  id        Int      @id @default(autoincrement())
+  tenantId  String   @default("demo")
+  projectId Int
+  name      String
+  sortOrder Int      @default(0)
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Opposite relation for BudgetLine.group
+  budgetLines BudgetLine[]
+
+  @@index([tenantId, projectId])
 }
 
 model Commitment {
@@ -1366,11 +1388,11 @@ model Package {
 
 // Join model linking packages to budget lines
 model PackageItem {
-  id           Int        @id @default(autoincrement())
-  tenantId     String     @default("demo")
+  id           Int      @id @default(autoincrement())
+  tenantId     String   @default("demo")
   packageId    Int
   budgetLineId Int
-  createdAt    DateTime   @default(now())
+  createdAt    DateTime @default(now())
 
   package    Package    @relation(fields: [packageId], references: [id])
   budgetLine BudgetLine @relation(fields: [budgetLineId], references: [id])
@@ -1381,19 +1403,23 @@ model PackageItem {
 
 // Additive lightweight tendering models (separate from existing Request/Submission)
 model Tender {
-  id          Int      @id @default(autoincrement())
-  tenantId    String   @default("demo")
-  projectId   Int
-  packageId   Int?
-  title       String
-  description String?
-  status      String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              Int       @id @default(autoincrement())
+  tenantId        String    @default("demo")
+  projectId       Int
+  packageId       Int?
+  title           String
+  description     String?
+  status          String
+  // Additive fields for consolidated tenders list
+  deadlineAt      DateTime?
+  invitedCount    Int       @default(0)
+  submissionCount Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id])
-  package Package? @relation(fields: [packageId], references: [id])
-  bids    TenderBid[]
+  project   Project                @relation(fields: [projectId], references: [id])
+  package   Package?               @relation(fields: [packageId], references: [id])
+  bids      TenderBid[]
   // Additive relations for questions, responses, and invites
   questions TenderQuestion[]
   responses TenderResponse[]
@@ -1405,13 +1431,13 @@ model Tender {
 
 // Additive: questions for tender scoring
 model TenderQuestion {
-  id        Int      @id @default(autoincrement())
-  tenantId  String   @default("demo")
-  tenderId  Int
-  text      String
-  type      String   // 'text' | 'number' | 'single' | 'multi' | 'file'
-  weight    Float
-  options   Json?
+  id       Int    @id @default(autoincrement())
+  tenantId String @default("demo")
+  tenderId Int
+  text     String
+  type     String // 'text' | 'number' | 'single' | 'multi' | 'file'
+  weight   Float
+  options  Json?
 
   tender Tender @relation(fields: [tenderId], references: [id])
 
@@ -1449,7 +1475,7 @@ model TenderResponse {
   notes        String?
 
   // Additive fields for buyer-entered responses and file attachments
-  source      String   @default("supplier") // 'supplier' | 'buyer'
+  source      String @default("supplier") // 'supplier' | 'buyer'
   attachments Json?
 
   tender   Tender   @relation(fields: [tenderId], references: [id])
@@ -1543,14 +1569,14 @@ model CostValueReconciliation {
   id             Int      @id @default(autoincrement())
   tenantId       String
   projectId      Int
-  period         String   // YYYY-MM
-  budget         Decimal  @db.Decimal(18, 2) @default(0)
-  committed      Decimal  @db.Decimal(18, 2) @default(0)
-  actual         Decimal  @db.Decimal(18, 2) @default(0)
-  earnedValue    Decimal  @db.Decimal(18, 2) @default(0)
-  costVariance   Decimal  @db.Decimal(18, 2) @default(0)
-  costToComplete Decimal  @db.Decimal(18, 2) @default(0)
-  marginPct      Decimal  @db.Decimal(9, 4)  @default(0)
+  period         String // YYYY-MM
+  budget         Decimal  @default(0) @db.Decimal(18, 2)
+  committed      Decimal  @default(0) @db.Decimal(18, 2)
+  actual         Decimal  @default(0) @db.Decimal(18, 2)
+  earnedValue    Decimal  @default(0) @db.Decimal(18, 2)
+  costVariance   Decimal  @default(0) @db.Decimal(18, 2)
+  costToComplete Decimal  @default(0) @db.Decimal(18, 2)
+  marginPct      Decimal  @default(0) @db.Decimal(9, 4)
   notes          String?
   justification  String?
   createdAt      DateTime @default(now())
@@ -1568,13 +1594,13 @@ model CVRLine {
   cvrId       Int
   packageId   Int?
   costCode    String?
-  budget      Decimal  @db.Decimal(18, 2) @default(0)
-  committed   Decimal  @db.Decimal(18, 2) @default(0)
-  actual      Decimal  @db.Decimal(18, 2) @default(0)
-  earnedValue Decimal  @db.Decimal(18, 2) @default(0)
-  variance    Decimal  @db.Decimal(18, 2) @default(0)
-  adjustment  Decimal  @db.Decimal(18, 2) @default(0)
-  adjusted    Decimal  @db.Decimal(18, 2) @default(0)
+  budget      Decimal  @default(0) @db.Decimal(18, 2)
+  committed   Decimal  @default(0) @db.Decimal(18, 2)
+  actual      Decimal  @default(0) @db.Decimal(18, 2)
+  earnedValue Decimal  @default(0) @db.Decimal(18, 2)
+  variance    Decimal  @default(0) @db.Decimal(18, 2)
+  adjustment  Decimal  @default(0) @db.Decimal(18, 2)
+  adjusted    Decimal  @default(0) @db.Decimal(18, 2)
   variationId Int?
   note        String?
   createdAt   DateTime @default(now())
@@ -1588,15 +1614,15 @@ model CVRLine {
 
 // --- Project Diary (additive) ---
 model DiaryEntry {
-  id         Int      @id @default(autoincrement())
-  tenantId   String
-  projectId  Int
-  date       DateTime
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  date        DateTime
   description String
-  issues     String?
-  createdBy  Int
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  issues      String?
+  createdBy   Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([tenantId, projectId, date])
 }
@@ -1615,45 +1641,44 @@ model AuditLog {
   @@index([entity, entityId])
 }
 
-
 model CVRSnapshot {
-  id         Int      @id @default(autoincrement())
-  tenantId   String
-  projectId  Int
-  period     String   // "YYYY-MM"
-  status     String?  // "draft" | "submitted" | "approved" (string, not enum)
-  note       String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  projectId Int
+  period    String // "YYYY-MM"
+  status    String? // "draft" | "submitted" | "approved" (string, not enum)
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  lines      CVRSnapshotLine[]
+  lines CVRSnapshotLine[]
 
   @@index([tenantId, projectId, period])
   @@index([tenantId, status])
 }
 
 model CVRSnapshotLine {
-  id            Int      @id @default(autoincrement())
-  tenantId      String
-  snapshotId    Int
-  projectId     Int
-  budgetLineId  Int?
-  packageId     Int?
-  contractId    BigInt?
-  code          String?
-  name          String?
+  id           Int     @id @default(autoincrement())
+  tenantId     String
+  snapshotId   Int
+  projectId    Int
+  budgetLineId Int?
+  packageId    Int?
+  contractId   BigInt?
+  code         String?
+  name         String?
 
-  planned       Decimal  @db.Decimal(18,2) @default(0) // from BudgetLine.planned at seed
-  estimate      Decimal  @db.Decimal(18,2) @default(0) // from Contract value (sum per package)
-  actualToDate  Decimal  @db.Decimal(18,2) @default(0) // sum of invoices up to period end
+  planned      Decimal @default(0) @db.Decimal(18, 2) // from BudgetLine.planned at seed
+  estimate     Decimal @default(0) @db.Decimal(18, 2) // from Contract value (sum per package)
+  actualToDate Decimal @default(0) @db.Decimal(18, 2) // sum of invoices up to period end
 
-  progressPct   Decimal  @db.Decimal(5,2)  @default(0) // editable % complete this period (0-100)
-  notes         String?
+  progressPct Decimal @default(0) @db.Decimal(5, 2) // editable % complete this period (0-100)
+  notes       String?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  snapshot      CVRSnapshot @relation(fields: [snapshotId], references: [id])
+  snapshot CVRSnapshot @relation(fields: [snapshotId], references: [id])
 
   @@index([tenantId, snapshotId])
   @@index([tenantId, projectId])

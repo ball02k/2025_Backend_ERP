@@ -70,13 +70,10 @@ router.post('/cost-codes', async (req, res, next) => {
         resolvedParentId = parent.id;
       }
     }
-    const row = await prisma.costCode.create({
-      data: {
-        tenantId,
-        code: code.trim(),
-        description: description?.trim() || null,
-        parentId: resolvedParentId,
-      },
+    const row = await prisma.costCode.upsert({
+      where: { tenantId_code: { tenantId, code: code.trim() } },
+      update: { description: description?.trim() || undefined, parentId: resolvedParentId ?? undefined },
+      create: { tenantId, code: code.trim(), description: description?.trim() || null, parentId: resolvedParentId },
       select: costCodeSelect,
     });
     res.json(row);

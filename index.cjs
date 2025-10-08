@@ -184,6 +184,8 @@ app.use('/api/projects', requireAuth, require('./routes/project_alerts.cjs')(pri
 // app.use('/api/projects', projectsOverviewRouter);
 app.use('/api/projects', requireAuth, projectsOverviewRouter);
 app.use('/api', requireAuth, projectBudgetRouter);
+// Grouped budgets + budget group management
+app.use('/api/projects', require('./routes/projects.budgets.cjs'));
 app.use('/api', requireAuth, projectPackagesRouter);
 app.use('/api', requireAuth, projectContractsRouter);
 app.use('/api', requireAuth, projectOverviewRouter2);

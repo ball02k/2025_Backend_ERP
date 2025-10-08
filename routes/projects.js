@@ -162,7 +162,7 @@ module.exports = (prisma) => {
   });
 
   // --- MVP additive: Packages & Tenders (lightweight) ---
-  // POST /api/projects/:projectId/packages → Create package (extended)
+  // POST /api/projects/:projectId/packages → Create package (extended with budgetIds)
   router.post('/:projectId/packages', requireProjectMember, async (req, res) => {
     try {
       const projectId = Number(req.params.projectId);
@@ -207,17 +207,66 @@ module.exports = (prisma) => {
     res.status(201).json(tender);
   });
 
-  // GET /api/projects/:projectId/tenders → List tenders
+  // GET /api/projects/:projectId/tenders → List tenders (with filters + paging)
   router.get('/:projectId/tenders', requireProjectMember, async (req, res) => {
-    const tenantId = req.user && req.user.tenantId;
-    const projectId = Number(req.params.projectId);
-    // Filter via the project relation's tenant to avoid missing rows when Tender.tenantId is inconsistent
-    const tenders = await prisma.tender.findMany({
-      where: { projectId, project: { tenantId } },
-      include: { bids: true, package: true },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-    });
-    res.json(tenders);
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const projectId = Number(req.params.projectId);
+      const { search = '', status, packageId, before, after, page = 1, pageSize = 25 } = req.query;
+      const where = {
+        projectId,
+        project: { tenantId },
+        ...(status ? { status: { in: String(status).split(',') } } : {}),
+        ...(packageId ? { packageId: Number(packageId) } : {}),
+        ...(after || before
+          ? { deadlineAt: { ...(after ? { gte: new Date(String(after)) } : {}), ...(before ? { lte: new Date(String(before)) } : {}) } }
+          : {}),
+        ...(search ? { title: { contains: String(search), mode: 'insensitive' } } : {}),
+      };
+      const take = Number(pageSize);
+      const skip = (Number(page) - 1) * take;
+      const [rows, total] = await Promise.all([
+        prisma.tender.findMany({
+          where,
+          orderBy: [{ deadlineAt: 'asc' }, { id: 'desc' }],
+          skip,
+          take,
+          include: {
+            package: { select: { id: true, name: true } },
+            _count: { select: { invites: true, responses: true } },
+          },
+        }),
+        prisma.tender.count({ where }),
+      ]);
+      // Optionally enrich with contract + awarded supplier by looking up contracts per package
+      const pkgIds = Array.from(new Set(rows.map(r => r.packageId).filter(Boolean)));
+      let contractsByPkg = new Map();
+      if (pkgIds.length) {
+        const cons = await prisma.contract.findMany({
+          where: { projectId, packageId: { in: pkgIds } },
+          include: { supplier: { select: { id: true, name: true } } },
+          orderBy: [{ createdAt: 'desc' }],
+        });
+        for (const c of cons) {
+          if (!contractsByPkg.has(c.packageId)) contractsByPkg.set(c.packageId, c);
+        }
+      }
+      // Map counts and contract info onto fields expected by FE without persisting
+      const items = rows.map((t) => {
+        const enriched = { ...t };
+        enriched.invitedCount = t._count?.invites ?? t.invitedCount ?? 0;
+        enriched.submissionCount = t._count?.responses ?? t.submissionCount ?? 0;
+        const con = t.packageId ? contractsByPkg.get(t.packageId) : null;
+        if (con) {
+          enriched.contractId = con.id;
+          enriched.awardedTo = con.supplier?.name || null;
+        }
+        return enriched;
+      });
+      res.json({ items, page: Number(page), total });
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to list tenders' });
+    }
   });
 
   // GET /api/projects/tenders/:tenderId → tender with bids
@@ -250,6 +299,47 @@ module.exports = (prisma) => {
       res.json(updated);
     } catch (e) {
       res.status(400).json({ error: e?.message || 'Failed to update tender' });
+    }
+  });
+
+  // GET /api/projects/:projectId/variations → list variations (optionally only for live contracts)
+  router.get('/:projectId/variations', requireProjectMember, async (req, res) => {
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const projectId = Number(req.params.projectId);
+      const onlyLive = String(req.query.live || req.query.onlyLive || '').toLowerCase() === '1';
+
+      // If filtering by live contracts, gather contract ids first
+      let contractFilter = undefined;
+      if (onlyLive) {
+        const liveContracts = await prisma.contract.findMany({
+          where: { projectId, status: { in: ['Live', 'Signed'] } },
+          select: { id: true },
+        });
+        const ids = liveContracts.map((c) => c.id);
+        contractFilter = ids.length ? { contractId: { in: ids } } : { contractId: -1 }; // empty
+      }
+
+      const rows = await prisma.variation.findMany({
+        where: {
+          tenantId,
+          projectId,
+          ...(contractFilter || {}),
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        include: {
+          contract: {
+            select: {
+              id: true,
+              title: true,
+              supplier: { select: { id: true, name: true } },
+            },
+          },
+        },
+      });
+      res.json(rows);
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to list variations' });
     }
   });
 
