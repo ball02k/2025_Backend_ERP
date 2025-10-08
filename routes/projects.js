@@ -224,6 +224,30 @@ module.exports = (prisma) => {
     res.json(tender);
   });
 
+  // PATCH /api/projects/tenders/:tenderId → update tender fields (title, description, status, dates)
+  router.patch('/tenders/:tenderId', requireProjectMember, async (req, res) => {
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const tenderId = Number(req.params.tenderId);
+      const existing = await prisma.tender.findFirst({ where: { id: tenderId, tenantId } });
+      if (!existing) return res.status(404).json({ error: 'Tender not found' });
+      const { title, description, status, openDate, closeDate } = req.body || {};
+      const updated = await prisma.tender.update({
+        where: { id: tenderId },
+        data: {
+          ...(title != null ? { title: String(title) } : {}),
+          ...(description != null ? { description: String(description) } : {}),
+          ...(status != null ? { status: String(status) } : {}),
+          ...(openDate ? { openDate: new Date(openDate) } : {}),
+          ...(closeDate ? { closeDate: new Date(closeDate) } : {}),
+        },
+      });
+      res.json(updated);
+    } catch (e) {
+      res.status(400).json({ error: e?.message || 'Failed to update tender' });
+    }
+  });
+
   // POST /api/projects/:projectId/tenders/:tenderId/bids → add bid
   router.post('/:projectId/tenders/:tenderId/bids', requireProjectMember, async (req, res) => {
     const tenantId = req.user && req.user.tenantId;
