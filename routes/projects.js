@@ -211,7 +211,12 @@ module.exports = (prisma) => {
   router.get('/:projectId/tenders', requireProjectMember, async (req, res) => {
     const tenantId = req.user && req.user.tenantId;
     const projectId = Number(req.params.projectId);
-    const tenders = await prisma.tender.findMany({ where: { tenantId, projectId }, include: { bids: true, package: true } });
+    // Filter via the project relation's tenant to avoid missing rows when Tender.tenantId is inconsistent
+    const tenders = await prisma.tender.findMany({
+      where: { projectId, project: { tenantId } },
+      include: { bids: true, package: true },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+    });
     res.json(tenders);
   });
 
