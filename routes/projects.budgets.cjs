@@ -3,64 +3,100 @@ const router = express.Router({ mergeParams: true });
 const { prisma } = require('../utils/prisma.cjs');
 const { requireProjectMember } = require('../middleware/membership.cjs');
 
-// GET /api/projects/:projectId/budgets?grouping=costCode|user
-// GET grouped budgets (subtotals correct)
+// --- helpers: coerce Prisma Decimal/strings to numbers, and shape outbound lines ---
+function num(v) {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function shapeLine(b) {
+  return {
+    id: b.id,
+    description: b.description ?? "",
+    quantity: num(b.quantity),   // may be null if not set
+    unit: b.unit ?? "ea",
+    rate: num(b.rate),
+    amount: num(b.amount),
+    sortOrder: num(b.sortOrder) ?? 0,
+    groupId: b.groupId ? Number(b.groupId) : null,
+    costCode: b.costCode ? { id: b.costCode.id, code: b.costCode.code, description: b.costCode.description ?? "" } : null,
+    // Map through join table; include status if present
+    packages: Array.isArray(b.packageItems)
+      ? b.packageItems
+          .map(pi => (pi.package ? { id: pi.package.id, name: pi.package.name, status: pi.package.status, code: pi.package.costCode?.code } : null))
+          .filter(Boolean)
+      : [],
+  };
+}
+
+// GET grouped budgets — unified data for both views; includes empty groups for "user"
 router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
   try {
     const { projectId } = req.params;
-    const grouping = String(req.query.grouping || 'costCode').toLowerCase();
+    const groupingRaw = String(req.query.grouping || 'user');
+    const grouping = groupingRaw.split(':')[0]; // sanitize unexpected values like 'user:1'
     const tenantId = req.user.tenantId;
 
-    const lines = await prisma.budgetLine.findMany({
+    // 1) Load all lines (we'll coerce with shapeLine)
+    const linesRaw = await prisma.budgetLine.findMany({
       where: { tenantId, projectId: Number(projectId) },
-      include: { costCode: true },
+      select: {
+        id: true,
+        description: true,
+        amount: true,
+        sortOrder: true,
+        groupId: true,
+        costCode: { select: { id: true, code: true, description: true } },
+        packageItems: { select: { package: { select: { id: true, name: true, status: true, costCode: { select: { code: true } } } } } },
+      },
       orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
     });
 
+    const lines = linesRaw.map(shapeLine);
+
+    // 2) Load all groups (so empty groups appear)
+    const allGroups = await prisma.budgetGroup.findMany({
+      where: { tenantId, projectId: Number(projectId) },
+      select: { id: true, name: true, sortOrder: true },
+    });
+    const gmap = new Map(allGroups.map(g => [g.id, g]));
+
     const groups = new Map();
 
-    for (const b of lines) {
-      const codePrefix = (b.costCode?.code || '').split('-')[0] || 'UNGROUPED';
-      const key = (grouping === 'user' && b.groupId) ? `user:${b.groupId}` : `code:${codePrefix}`;
-
-      if (!groups.has(key)) {
-        const gid = key.startsWith('user:') ? Number(String(key).split(':')[1]) : null;
-        const meta = gid ? await prisma.budgetGroup.findFirst({ where: { tenantId, projectId: Number(projectId), id: gid }, select: { name: true, sortOrder: true } }).catch(()=>null) : null;
-        const name = key.startsWith('user:') ? (meta?.name || `Group ${gid}`) : codePrefix;
-        const sortOrder = key.startsWith('user:') ? (meta?.sortOrder ?? 0) : 999999;
-        groups.set(key, { key, groupId: gid, name, sortOrder, subtotal: 0, items: [] });
+    if (String(grouping) === 'user') {
+      // Seed UNGROUPED bucket first
+      groups.set('user:0', { key: 'user:0', name: 'Ungrouped', sortOrder: 0, subtotal: 0, items: [] });
+      // Seed ALL user groups (even if empty)
+      for (const g of allGroups) {
+        groups.set(`user:${g.id}`, { key: `user:${g.id}`, name: g.name || `Group ${g.id}`, sortOrder: g.sortOrder ?? 10000, subtotal: 0, items: [] });
       }
-      const g = groups.get(key);
-      g.items.push(b);
-
-      const lineAmount = (b.amount != null ? Number(b.amount) : (Number(b.quantity||0) * Number(b.rate||0)));
-      g.subtotal += Number(lineAmount || 0);
+      // Place each line into its group (or ungrouped)
+      for (const l of lines) {
+        const key = l.groupId ? `user:${l.groupId}` : 'user:0';
+        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
+        if (!groups.has(key)) groups.set(key, { key, name: l.groupId ? (gmap.get(l.groupId)?.name || `Group ${l.groupId}`) : 'Ungrouped', sortOrder: l.groupId ? (gmap.get(l.groupId)?.sortOrder ?? 10000) : 0, subtotal: 0, items: [] });
+        const g = groups.get(key);
+        g.items.push(l);
+        g.subtotal += amt;
+      }
+    } else {
+      // Group by cost code prefix; UNGROUPED first
+      groups.set('code:UNGROUPED', { key: 'code:UNGROUPED', name: 'Ungrouped', sortOrder: 0, subtotal: 0, items: [] });
+      for (const l of lines) {
+        const code = l.costCode?.code || '';
+        const prefix = code.split('-')[0] || 'UNGROUPED';
+        const key = `code:${prefix}`;
+        if (!groups.has(key)) groups.set(key, { key, name: prefix === 'UNGROUPED' ? 'Ungrouped' : prefix, sortOrder: prefix === 'UNGROUPED' ? 0 : 10000, subtotal: 0, items: [] });
+        const g = groups.get(key);
+        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
+        g.items.push(l);
+        g.subtotal += amt;
+      }
     }
 
-    // If user grouping: order groups by BudgetGroup.sortOrder (if available)
-    let out = Array.from(groups.values());
-    if (grouping === 'user') {
-      // Ensure empty groups also appear, and sort by group.sortOrder
-      const allGroups = await prisma.budgetGroup.findMany({
-        where: { tenantId, projectId: Number(projectId) },
-        select: { id: true, name: true, sortOrder: true },
-        orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-      });
-      for (const mg of allGroups) {
-        const key = `user:${mg.id}`;
-        if (!groups.has(key)) {
-          groups.set(key, { key, groupId: mg.id, name: mg.name || `Group ${mg.id}`, sortOrder: mg.sortOrder ?? 0, subtotal: 0, items: [] });
-        } else {
-          const g = groups.get(key);
-          g.name = mg.name || g.name;
-          g.sortOrder = mg.sortOrder ?? g.sortOrder ?? 0;
-          g.groupId = mg.id;
-        }
-      }
-      out = allGroups.map(mg => groups.get(`user:${mg.id}`)).filter(Boolean);
-    }
-
-    res.json({ groups: out });
+    const out = Array.from(groups.values()).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    const total = out.reduce((s, g) => s + (Number(g.subtotal) || 0), 0);
+    res.json({ groups: out, total });
   } catch (e) {
     console.error('[budgets/groups]', e);
     res.status(500).json({ error: 'Failed to load budget groups' });
@@ -191,7 +227,13 @@ router.patch('/:projectId/budgets/:id', requireProjectMember, async (req, res) =
       }
     }).catch(() => {});
 
-    res.json(updated);
+    // Coerce any Decimal/string numerics to plain numbers to keep client inputs stable
+    res.json({
+      ...updated,
+      quantity: Number(updated.quantity ?? 0),
+      rate: Number(updated.rate ?? 0),
+      amount: Number(updated.amount ?? 0),
+    });
   } catch (e) {
     console.error('[budgets/update]', e);
     res.status(500).json({ error: 'Failed to update budget line' });
@@ -203,6 +245,34 @@ router.delete('/:projectId/budgets/:id', requireProjectMember, async (req, res) 
   try {
     const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
+
+    // Check linked packages and variations
+    const [packages, varCount] = await Promise.all([
+      prisma.package.findMany({
+        where: { budgetItems: { some: { budgetLineId: id } } },
+        select: { id: true, name: true, status: true },
+      }),
+      prisma.variation.count({ where: { budgetLineId: id } }).catch(()=>0),
+    ]);
+
+    const blocking = packages.filter(p => ['awarded','contracted'].includes(String(p.status||'').toLowerCase()));
+    if (blocking.length) {
+      return res.status(409).json({
+        error: 'LINKED_TO_AWARDED',
+        message: 'Line is linked to awarded/contracted package(s). Remove it there first.',
+        packages: blocking.map(p => ({ id: p.id, name: p.name, status: p.status })),
+      });
+    }
+
+    // If other references exist (e.g., non-awarded packages or variations), still block to avoid FK errors
+    if (packages.length > 0 || varCount > 0) {
+      return res.status(409).json({
+        error: 'BUDGET_LINE_IN_USE',
+        message: 'This budget line is linked to other records. Remove it from packages/variations first, then delete.',
+        refs: { packages: packages.length, variations: varCount },
+      });
+    }
+
     await prisma.budgetLine.delete({ where: { id } });
     await prisma.auditLog?.create?.({
       data: { tenantId, userId: req.user.id, entity: 'BudgetLine', entityId: String(id), action: 'DELETE', changes: {} }
@@ -211,6 +281,36 @@ router.delete('/:projectId/budgets/:id', requireProjectMember, async (req, res) 
   } catch (e) {
     console.error('[budgets/delete]', e);
     res.status(500).json({ error: 'Failed to delete budget line' });
+  }
+});
+
+// TEMP: One-off backfill for legacy lines where amount is null
+// Remove after running once per project/tenant
+router.post('/:projectId/budgets/backfill-amounts', requireProjectMember, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+
+    const rows = await prisma.budgetLine.findMany({
+      where: { tenantId, projectId },
+      select: { id: true, amount: true },
+      orderBy: { id: 'asc' },
+    });
+
+    // In this schema quantity/rate are not persisted; this backfill simply ensures amount is numeric
+    const tx = [];
+    for (const r of rows) {
+      const amt = num(r.amount) ?? 0;
+      // Only update when stored value is null/NaN
+      if (amt !== num(r.amount)) {
+        tx.push(prisma.budgetLine.update({ where: { id: r.id }, data: { amount: amt } }));
+      }
+    }
+    if (tx.length) await prisma.$transaction(tx);
+    res.json({ ok: true, updated: tx.length });
+  } catch (e) {
+    console.error('[budgets/backfill-amounts]', e);
+    res.status(500).json({ error: 'Failed to backfill amounts' });
   }
 });
 
