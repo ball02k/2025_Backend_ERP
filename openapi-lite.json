@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "cd55bbd"
+    "version": "2071582"
   },
   "paths": {
     "*": {
@@ -1659,6 +1659,34 @@
               "application/json": {
                 "example": {
                   "ok": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/budgets/backfill-amounts": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/budgets/backfill-amounts",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
                 }
               }
             }
