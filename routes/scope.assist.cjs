@@ -23,6 +23,10 @@ function tokenise(value) {
   return normalised.split(' ').filter(Boolean);
 }
 
+function tokenize(value) {
+  return tokenise(value);
+}
+
 function overlapScore(tokensA, tokensB) {
   if (!tokensA.length || !tokensB.length) return 0;
   const setA = new Set(tokensA);
@@ -35,69 +39,59 @@ function overlapScore(tokensA, tokensB) {
   return coverage;
 }
 
-function sharedPrefixLength(codeA, codeB) {
-  if (!codeA || !codeB) return 0;
-  const aParts = String(codeA).split(/[-\s/.]/).filter(Boolean);
-  const bParts = String(codeB).split(/[-\s/.]/).filter(Boolean);
-  const max = Math.min(aParts.length, bParts.length);
-  let shared = 0;
-  for (let i = 0; i < max; i++) {
-    if (aParts[i] !== bParts[i]) break;
-    shared++;
-  }
-  return shared;
-}
-
-function scoreLine(line, tax) {
+function scoreLine(line, taxon) {
   let score = 0;
-  const explain = [];
-  const lineTokens = tokenise(`${line.code || ''} ${line.category || ''} ${line.description || ''}`);
-  const taxTokens = tokenise(`${tax.code || ''} ${tax.description || ''}`);
+  const hits = [];
 
-  const prefix = sharedPrefixLength(line.code, tax.code);
-  if (prefix > 0) {
-    const boost = prefix * 18;
-    score += boost;
-    explain.push(`Shared code prefix x${prefix} (+${boost.toFixed(1)})`);
+  const text = `${line.description || ''} ${line.notes || ''}`.toLowerCase();
+  const toks = tokenize(text);
+  const stems = toks.map(t => t.replace(/(ing|ed|es|s)$/,''));
+  const keywords = Array.isArray(taxon.keywords) ? taxon.keywords : [];
+  const prefixes = Array.isArray(taxon.costCodePrefixes) ? taxon.costCodePrefixes : [];
+
+  // 2.1 keyword / stem / substring
+  for (const kw of keywords) {
+    const k = String(kw).toLowerCase();
+    const ks = k.replace(/(ing|ed|es|s)$/,'');
+    const hit = toks.includes(k) || stems.includes(ks) || toks.some(t => t.startsWith(ks));
+    if (hit) { score += 1; hits.push({ type: 'keyword', token: kw }); }
   }
 
-  const categoryTokens = tokenise(line.category || '');
-  if (categoryTokens.length) {
-    const overlap = overlapScore(categoryTokens, taxTokens);
-    if (overlap > 0) {
-      const boost = overlap * 20;
-      score += boost;
-      explain.push(`Category overlap ${(overlap * 100).toFixed(0)}% (+${boost.toFixed(1)})`);
+  // 2.2 cost-code hierarchy (e.g., '08-' strong, '08' weak)
+  const code = (line.costCode?.code || line.costCode || '').toString();
+  for (const p of prefixes) {
+    const pref = String(p);
+    if (code.startsWith(pref)) { score += 2; hits.push({ type:'costCode', prefix: pref }); }
+    else if (pref.endsWith('-') && code.startsWith(pref.slice(0,-1))) {
+      score += 1; hits.push({ type:'costCodeGroup', prefix: pref.slice(0,-1) });
     }
   }
 
-  const descriptionOverlap = overlapScore(lineTokens, taxTokens);
-  if (descriptionOverlap > 0) {
-    const boost = descriptionOverlap * 30;
-    score += boost;
-    explain.push(`Description overlap ${(descriptionOverlap * 100).toFixed(0)}% (+${boost.toFixed(1)})`);
+  // 2.3 unit/context nudges
+  const unit = String(line.unit||'').toLowerCase();
+  if ((unit==='t' || unit==='m3') && /rebar|concrete|slab/.test(text) && (taxon.code==='RC')) {
+    score += 0.5; hits.push({ type:'unit', value:unit });
+  }
+  if (unit==='hr' && /test|commission/.test(text) && (taxon.code==='MEP' || taxon.code==='FITOUT')) {
+    score += 0.25; hits.push({ type:'unit', value:unit });
   }
 
-  if (tax.parent?.code && sharedPrefixLength(line.code, tax.parent.code) > 0) {
-    score += 8;
-    explain.push('Parent code prefix match (+8.0)');
+  return { score, hits };
+}
+
+function formatHit(hit) {
+  switch (hit.type) {
+    case 'keyword':
+      return `Matched keyword "${hit.token}"`;
+    case 'costCode':
+      return `Cost code starts with ${hit.prefix}`;
+    case 'costCodeGroup':
+      return `Cost code group ${hit.prefix}`;
+    case 'unit':
+      return `Unit hint (${hit.value})`;
+    default:
+      return 'Heuristic match';
   }
-
-  const aiSource = line.aiSource || line.source || (line.description && /\bpdf heading\b/i.test(line.description) ? 'pdf-heading' : null);
-  if (aiSource === 'pdf-heading' && descriptionOverlap > 0.25) {
-    score += 10;
-    explain.push('PDF heading boost (+10.0)');
-  }
-
-  const capped = Math.min(score, 100);
-  const confidence = capped / 100;
-
-  return {
-    score: capped,
-    confidence,
-    explain,
-    altCode: tax.parent?.code || null,
-  };
 }
 
 async function rerankIfEnabled(line, ranked) {
@@ -163,7 +157,12 @@ router.post('/scope/assist/projects/:projectId/suggest', async (req, res, next) 
 
     for (const line of lines) {
       const rankedBase = tax
-        .map((t) => ({ t, ...scoreLine(line, t) }))
+        .map((t) => {
+          const { score, hits } = scoreLine(line, t);
+          const explain = hits.map(formatHit);
+          const confidence = Math.min(1, score / 5);
+          return { t, score, hits, explain, confidence, altCode: null };
+        })
         .filter((r) => r.score > 0)
         .sort((a, b) => b.score - a.score);
 
@@ -184,7 +183,7 @@ router.post('/scope/assist/projects/:projectId/suggest', async (req, res, next) 
 
       const top = ranked[0];
       const alt = ranked[1] || null;
-      const confidence = Math.min(1, Math.max(top.confidence ?? 0, top.score / 100));
+      const confidence = Math.min(1, Math.max(top.confidence ?? 0, top.score / 5));
       suggestions.push({
         tenantId,
         scopeRunId: run.id,
