@@ -4,6 +4,9 @@ const prisma = new PrismaClient();
 const { buildLinks } = require('../lib/buildLinks.cjs');
 const { safeJson } = require('../lib/serialize.cjs');
 const { recomputeProjectFinancials } = require('./hooks.recompute.cjs');
+// Reuse import handlers to avoid mount/proxy issues
+let importHandlers;
+try { importHandlers = require('./budgets.import.cjs'); } catch (_) { importHandlers = null; }
 
 const budgetLineSelect = {
   id: true,
@@ -103,3 +106,8 @@ router.patch('/projects/:projectId/budget/:id', async (req, res, next) => {
 });
 
 module.exports = router;
+// Attach import endpoints here too to guarantee availability under this router
+if (importHandlers && importHandlers.previewHandler && importHandlers.commitHandler) {
+  router.post('/projects/:projectId/budgets/import', importHandlers.previewHandler);
+  router.post('/projects/:projectId/budgets/commit', importHandlers.commitHandler);
+}

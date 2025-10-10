@@ -79,6 +79,44 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
         g.items.push(l);
         g.subtotal += amt;
       }
+    } else if (String(grouping) === 'package') {
+      // Group by linked package; include an 'Unassigned' bucket for lines with no packages
+      groups.set('pkg:0', { key: 'pkg:0', name: 'Unassigned', sortOrder: 0, subtotal: 0, items: [] });
+
+      for (const l of lines) {
+        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
+        const pkgs = Array.isArray(l.packages) ? l.packages : [];
+        if (!pkgs.length) {
+          const g = groups.get('pkg:0');
+          g.items.push(l);
+          g.subtotal += amt;
+        } else {
+          for (const p of pkgs) {
+            const key = `pkg:${p.id}`;
+            if (!groups.has(key)) groups.set(key, { key, name: p.name || `Package ${p.id}`, sortOrder: 10000, subtotal: 0, items: [] });
+            const g = groups.get(key);
+            g.items.push(l);
+            g.subtotal += amt;
+          }
+        }
+      }
+
+      // Sort: Unassigned first, then by package name asc
+      const out = Array.from(groups.values()).sort((a, b) => {
+        if (a.key === 'pkg:0') return -1;
+        if (b.key === 'pkg:0') return 1;
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
+      // Compute total as sum of unique line amounts to avoid double counting lines linked to multiple packages
+      const seen = new Set();
+      const total = lines.reduce((s, l) => {
+        if (seen.has(l.id)) return s;
+        seen.add(l.id);
+        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
+        return s + (Number(amt) || 0);
+      }, 0);
+      res.json({ groups: out, total });
+      return;
     } else {
       // Group by cost code prefix; UNGROUPED first
       groups.set('code:UNGROUPED', { key: 'code:UNGROUPED', name: 'Ungrouped', sortOrder: 0, subtotal: 0, items: [] });
@@ -92,6 +130,11 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
         g.items.push(l);
         g.subtotal += amt;
       }
+
+      const out = Array.from(groups.values()).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+      const total = out.reduce((s, g) => s + (Number(g.subtotal) || 0), 0);
+      res.json({ groups: out, total });
+      return;
     }
 
     const out = Array.from(groups.values()).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));

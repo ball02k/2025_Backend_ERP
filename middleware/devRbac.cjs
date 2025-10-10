@@ -65,13 +65,29 @@ module.exports = async function devRbac(req, _res, next) {
       const tenantId = tenantIdSafe;
       const userId = Number(userIdSafe || req.user.id);
       if (Number.isFinite(projectId) && Number.isFinite(userId)) {
-        await prisma.projectMembership.upsert({
-          where: {
-            tenantId_projectId_userId: { tenantId, projectId, userId },
-          },
-          update: { role: 'PM' },
-          create: { tenantId, projectId, userId, role: 'PM' },
-        });
+        try {
+          // Only create membership if the project actually exists for this tenant
+          const proj = await prisma.project.findFirst({ where: { id: projectId, tenantId }, select: { id: true } });
+          if (!proj) {
+            console.warn('[devRbac] Skip membership: project not found', { tenantId, projectId });
+          } else {
+            await prisma.projectMembership.upsert({
+              where: {
+                tenantId_projectId_userId: { tenantId, projectId, userId },
+              },
+              update: { role: 'PM' },
+              create: { tenantId, projectId, userId, role: 'PM' },
+            });
+          }
+        } catch (e) {
+          if (e?.code === 'P2021') {
+            console.warn('[devRbac] Skipping membership upsert: table not present yet.');
+          } else if (e?.code === 'P2003') {
+            console.warn('[devRbac] Foreign key constraint on project membership; skipping.', { tenantId, projectId, userId });
+          } else {
+            throw e;
+          }
+        }
       }
     }
   } catch (e) {

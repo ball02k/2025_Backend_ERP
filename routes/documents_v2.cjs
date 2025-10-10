@@ -152,7 +152,7 @@ router.post('/complete', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const { q, projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId, entityType, entityId, limit = 50, offset = 0 } = req.query;
+    const { q, projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId, entityType, entityId, limit = 50, offset = 0, includeImports } = req.query;
 
     const where = { tenantId };
 
@@ -177,6 +177,16 @@ router.get('/', async (req, res) => {
           ...(entityId != null ? { entityId: Number(entityId) } : {}),
         },
       };
+    }
+
+    // By default hide import-temporary files (category starting with 'import:') unless includeImports=true|1
+    const incImports = String(includeImports || '').toLowerCase();
+    const showImports = incImports === 'true' || incImports === '1';
+    if (!showImports) {
+      where.AND = [
+        ...(where.AND || []),
+        { links: { none: { tenantId, category: { startsWith: 'import:' } } } },
+      ];
     }
 
     let data = [], total = 0;

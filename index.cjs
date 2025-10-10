@@ -66,6 +66,10 @@ const afpRouter = require('./routes/afp.cjs');
 const afpOpenRouter = require('./routes/afp.open.cjs');
 const cvrRouter = require('./routes/financials.cvr.cjs');
 const diaryRouter = require('./routes/diary.cjs');
+const budgetsImportRouter = require('./routes/budgets.import.cjs');
+const packagesSeedRouter = require('./routes/packages.seed.cjs');
+// Also import handlers directly for top-level mounting
+const { previewHandler: budgetsPreview, commitHandler: budgetsCommit } = require('./routes/budgets.import.cjs');
 const { ensureFeature } = require('./middleware/featureGuard.js');
 const documentLinksRouter = require('./routes/document.links.cjs');
 const { attachUser } = require('./middleware/auth.cjs');
@@ -198,6 +202,14 @@ app.use('/api/tenders', tendersRouter(prisma, { requireAuth }));
 app.use('/', tendersRouter(prisma, { requireAuth }));
 app.use('/api/projects', requireAuth, cvrRouter(prisma));
 app.use('/api/projects', requireAuth, diaryRouter(prisma));
+// Budgets CSV import preview/commit
+app.use('/api', requireAuth, budgetsImportRouter);
+app.use('/api/projects', requireAuth, budgetsImportRouter);
+// Seed packages from budgets
+app.use('/api', requireAuth, packagesSeedRouter);
+// Top-level explicit mounts to avoid any router path ambiguity
+app.post('/api/projects/:projectId/budgets/import', requireAuth, budgetsPreview);
+app.post('/api/projects/:projectId/budgets/commit', requireAuth, budgetsCommit);
 app.use('/api/projects', requireAuth, projectInvoicesRouter(prisma));
 app.use('/api/projects', requireAuth, projectDocumentsRouter);
 app.use('/api/health', requireAuth, healthRouter);
