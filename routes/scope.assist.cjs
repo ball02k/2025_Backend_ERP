@@ -163,7 +163,6 @@ router.post('/scope/assist/projects/:projectId/suggest', async (req, res, next) 
           const confidence = Math.min(1, score / 5);
           return { t, score, hits, explain, confidence, altCode: null };
         })
-        .filter((r) => r.score > 0)
         .sort((a, b) => b.score - a.score);
 
       const ranked = await rerankIfEnabled(line, rankedBase);
@@ -181,17 +180,19 @@ router.post('/scope/assist/projects/:projectId/suggest', async (req, res, next) 
         continue;
       }
 
-      const top = ranked[0];
+      const best = ranked[0];
       const alt = ranked[1] || null;
-      const confidence = Math.min(1, Math.max(top.confidence ?? 0, top.score / 5));
+      const total = Math.max(1, best.score + (alt?.score || 0));
+      const fallbackConfidence = best.confidence ?? Math.min(1, best.score / 5);
+      const confidence = Math.min(fallbackConfidence, Math.min(1, best.score / total));
       suggestions.push({
         tenantId,
         scopeRunId: run.id,
         budgetId: line.id,
-        suggestedCode: top.t.code,
-        altCode: alt ? alt.t.code : top.altCode ?? null,
+        suggestedCode: best.t.code,
+        altCode: alt ? alt.t.code : best.altCode ?? null,
         confidence: confidence.toFixed(4),
-        explain: top.explain,
+        explain: best.explain,
       });
     }
 
