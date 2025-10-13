@@ -68,6 +68,8 @@ const cvrRouter = require('./routes/financials.cvr.cjs');
 const diaryRouter = require('./routes/diary.cjs');
 const budgetsImportRouter = require('./routes/budgets.import.cjs');
 const packagesSeedRouter = require('./routes/packages.seed.cjs');
+const scopeAssistRouter = require('./routes/scope.assist.cjs');
+const taxonomyRouter = require('./routes/taxonomy.cjs');
 // Also import handlers directly for top-level mounting
 const { previewHandler: budgetsPreview, commitHandler: budgetsCommit } = require('./routes/budgets.import.cjs');
 const { ensureFeature } = require('./middleware/featureGuard.js');
@@ -207,6 +209,10 @@ app.use('/api', requireAuth, budgetsImportRouter);
 app.use('/api/projects', requireAuth, budgetsImportRouter);
 // Seed packages from budgets
 app.use('/api', requireAuth, packagesSeedRouter);
+// Scope assist (feature-gated routes); route-level auth inside
+app.use('/api', scopeAssistRouter);
+// Taxonomy admin routes
+app.use('/api', taxonomyRouter);
 // Top-level explicit mounts to avoid any router path ambiguity
 app.post('/api/projects/:projectId/budgets/import', requireAuth, budgetsPreview);
 app.post('/api/projects/:projectId/budgets/commit', requireAuth, budgetsCommit);
