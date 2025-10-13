@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: 2025_Backend_ERP
+    env: node
+    buildCommand: npm install
+    startCommand: node index.cjs
+    autoDeploy: true
