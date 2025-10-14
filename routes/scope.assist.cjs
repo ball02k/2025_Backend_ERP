@@ -1,299 +1,466 @@
 const express = require('express');
-const router = express.Router();
-const { prisma } = require('../utils/prisma.cjs');
-const requireAuth = require('../middleware/requireAuth.cjs');
+const router = express.Router({ mergeParams: true });
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 
-// In-memory fallbacks when Prisma models aren't generated/migrated yet
-const mem = {
-  runs: new Map(),          // key: runId -> { id, tenantId, projectId, status, createdById }
-  suggestions: new Map(),   // key: runId -> [{ tenantId, scopeRunId, budgetId, suggestedCode, altCode, confidence, explain }]
+let customExtractPdfHeadings = null;
+try {
+  // Optional hook: consumers can provide richer PDF heading extraction without
+  // breaking the default lightweight implementation below.
+  // eslint-disable-next-line import/no-unresolved, global-require
+  const maybe = require('../services/scope/pdfHeadings.cjs');
+  if (maybe && typeof maybe.extractPdfHeadings === 'function') {
+    customExtractPdfHeadings = maybe.extractPdfHeadings;
+  }
+} catch (_) {
+  customExtractPdfHeadings = null;
+}
+
+const PDF_HEADING_RULES = {
+  mechanical: {
+    label: 'Mechanical',
+    base: 1,
+    lineBonus: 0.5,
+    taxonKeywords: [
+      'mechanical',
+      'mep',
+      'hvac',
+      'ventilation',
+      'ductwork',
+      'pipework',
+      'plumbing',
+      'plant room',
+      'sprinkler',
+      'chiller',
+    ],
+    codePrefixes: ['M', 'ME', 'MP', '21', '22', '23'],
+    lineKeywords: [
+      'mechanical',
+      'hvac',
+      'ventilation',
+      'duct',
+      'pipe',
+      'pump',
+      'valve',
+      'boiler',
+      'chiller',
+      'sprinkler',
+    ],
+  },
+  electrical: {
+    label: 'Electrical',
+    base: 1,
+    lineBonus: 0.5,
+    taxonKeywords: [
+      'electrical',
+      'power',
+      'lighting',
+      'containment',
+      'cabling',
+      'switchboard',
+      'distribution',
+      'panelboard',
+      'earthing',
+    ],
+    codePrefixes: ['E', 'EL', 'P', '26', '27', '41'],
+    lineKeywords: [
+      'electrical',
+      'lighting',
+      'cable',
+      'containment',
+      'tray',
+      'conduit',
+      'switch',
+      'socket',
+      'panel',
+      'distribution',
+    ],
+  },
+  roofing: {
+    label: 'Roofing',
+    base: 1,
+    lineBonus: 0.5,
+    taxonKeywords: [
+      'roof',
+      'roofing',
+      'rooflight',
+      'membrane',
+      'cladding',
+      'fascia',
+      'soffit',
+      'gutter',
+      'flashing',
+    ],
+    codePrefixes: ['R', 'RF', '71', '72', '73'],
+    lineKeywords: [
+      'roof',
+      'roofing',
+      'membrane',
+      'tile',
+      'slate',
+      'gutter',
+      'fascia',
+      'soffit',
+      'flashing',
+      'rooflight',
+    ],
+  },
 };
 
-function hasModel(name) {
-  try { return !!(prisma && prisma[name] && typeof prisma[name].findFirst === 'function'); }
-  catch { return false; }
+function getTenantId(req) {
+  return req.user?.tenantId || req.tenantId;
 }
 
-const DEFAULT_TAXONOMY = [
-  { code: 'PRELIM', name: 'Preliminaries', keywords: ['welfare','hoarding','scaffold'], costCodePrefixes: ['01-'] },
-  { code: 'GROUND', name: 'Groundworks', keywords: ['excavate','trench','pile','blinding'], costCodePrefixes: ['02-'] },
-  { code: 'RC', name: 'Reinforced Concrete', keywords: ['rebar','formwork','shutter','slab'], costCodePrefixes: ['04-','02-015'] },
-  { code: 'STEEL', name: 'Structural Steel', keywords: ['steelwork','beams','columns','connections'], costCodePrefixes: ['03-'] },
-  { code: 'ROOF', name: 'Roofing', keywords: ['roof','membrane','gutter','soffit'], costCodePrefixes: ['06-'] },
-  { code: 'ENVELOPE', name: 'Envelope', keywords: ['cladding','curtain','glazing','facade'], costCodePrefixes: ['05-','07-'] },
-  { code: 'MEP', name: 'M&E', keywords: ['ductwork','ahu','chiller','boiler','containment','cable','switchgear','sprinkler'], costCodePrefixes: ['08-'] },
-  { code: 'FITOUT', name: 'Fit-Out', keywords: ['partition','plasterboard','joinery','doorset','carpet','vinyl','paint'], costCodePrefixes: ['09-','11-','12-'] },
-];
-
-// Feature flag gate (minimal)
-async function ensureFeature(req, res, next) {
-  try {
-    const ff = (req.user?.features || req.user?.tenantFeatures || []);
-    if (ff && Array.isArray(ff) && (ff.includes('tendering') || ff.includes('ai_scope'))) return next();
-    if (String(req.user?.tenantId || '').toLowerCase() === 'demo') return next();
-    return res.status(403).json({ error: 'FEATURE_DISABLED' });
-  } catch (e) { return res.status(403).json({ error: 'FEATURE_DISABLED' }); }
-}
-
-// Naive PDF heading extractor using existing stored text or filenames
-async function extractPdfHeadings(prisma, tenantId, projectId) {
-  try {
-    // Prefer project-linked documents via DocumentLink -> Document join
-    const links = await prisma.documentLink.findMany({
-      where: { tenantId, projectId },
-      select: { document: { select: { id: true, filename: true, mimeType: true /*, textExtract: true (if present) */ } } },
-    }).catch(() => []);
-    const pdfs = (links || [])
-      .map(l => l.document)
-      .filter(d => d && String(d.mimeType || '').includes('pdf'));
-
-    const headings = new Set();
-    const tryAdd = (s) => s && String(s).toUpperCase()
-      .split(/[^A-Z]/).filter(Boolean).forEach((t) => headings.add(t));
-
-    for (const d of pdfs) {
-      // If a textExtract or OCR text is ever added, parse first ~400 lines here
-      // For now, rely on filename tokens as a weak signal
-      tryAdd(d.filename);
-    }
-    return Array.from(headings);
-  } catch (_) {
-    return [];
-  }
-}
-
-// Optional re-ranker toggle (simple bag-of-words cosine sim)
-const useRerank = String(process.env.AI_SCOPE_RERANK || 'off').toLowerCase() === 'on';
-function simpleEmbedding(text) {
-  const m = new Map();
-  tokenize(String(text || '')).slice(0, 128).forEach((t) => m.set(t, (m.get(t) || 0) + 1));
-  return m;
-}
-function cosineSim(a, b) {
-  let dot = 0, a2 = 0, b2 = 0;
-  for (const [k, v] of a) { a2 += v * v; if (b.has(k)) dot += v * b.get(k); }
-  for (const v of b.values()) b2 += v * v;
-  const den = Math.sqrt(a2 || 1) * Math.sqrt(b2 || 1);
-  return den ? (dot / den) : 0;
-}
-function rerank(line, ranked) {
-  if (!useRerank || !Array.isArray(ranked) || ranked.length < 2) return ranked;
-  const lv = simpleEmbedding(`${line.description || ''} ${(line.notes || '')}`);
-  const top = ranked.slice(0, 3).map((r) => {
-    const blob = `${r.t.name || ''} ${(r.t.keywords || []).join(' ')} ${(r.t.costCodePrefixes || []).join(' ')}`;
-    const sim = cosineSim(lv, simpleEmbedding(blob));
-    return { ...r, score: r.score + sim * 2, _sim: sim, hits: (r.hits || []) };
-  }).sort((a, b) => b.score - a.score);
-  return top.concat(ranked.slice(3));
-}
-
-router.post('/projects/:projectId/scope-runs', requireAuth, ensureFeature, async (req, res) => {
-  const tenantId = String(req.user.tenantId);
-  const projectId = Number(req.params.projectId);
-  if (hasModel('scopeRun')) {
-    const run = await prisma.scopeRun.create({
-      data: { tenantId, projectId, status: 'draft', createdById: req.user.id || null }
-    });
-    await prisma.auditLog?.create?.({ data: { tenantId, userId: req.user.id, entity: 'ScopeRun', entityId: String(run.id), action: 'CREATE', changes: { status: 'draft' }}}).catch(()=>{});
-    return res.json(run);
-  }
-  // Fallback: ephemeral run
-  const id = Date.now();
-  const run = { id, tenantId, projectId, status: 'draft', createdById: req.user.id || null };
-  mem.runs.set(id, run);
-  return res.json(run);
-});
-
-// Simple tokenizer & scorer (no new deps)
-function tokenize(str) {
-  return String(str || '')
+function normaliseText(value) {
+  if (!value) return '';
+  return String(value)
     .toLowerCase()
-    .replace(/[^a-z0-9\-\s]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
+    .normalize('NFKD')
+    .replace(/[^a-z0-9\s\/.-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function scoreLine(line, taxon) {
+function tokenise(value) {
+  const normalised = normaliseText(value);
+  if (!normalised) return [];
+  return normalised.split(' ').filter(Boolean);
+}
+
+function tokenize(value) {
+  return tokenise(value);
+}
+
+function detectHeadingCategories(rawHeading) {
+  if (!rawHeading) return [];
+  const value = String(rawHeading).toUpperCase();
+  const categories = new Set();
+  if (/\bM&E\b/.test(value)) {
+    categories.add('mechanical');
+    categories.add('electrical');
+  }
+  if (/(MECH|HVAC|PLUMBING|SPRINKLER)/.test(value)) categories.add('mechanical');
+  if (/(ELEC|LV\b|HV\b|POWER|LIGHTING)/.test(value)) categories.add('electrical');
+  if (/ROOF/.test(value)) categories.add('roofing');
+  return Array.from(categories);
+}
+
+function parseHeadingEntry(lineIdRaw, entry) {
+  const numericId = Number(lineIdRaw);
+  if (!Number.isFinite(numericId)) return null;
+  if (entry == null) return null;
+  if (typeof entry === 'string') {
+    const trimmed = entry.trim();
+    if (!trimmed) return null;
+    return { id: numericId, raw: trimmed, categories: detectHeadingCategories(trimmed) };
+  }
+  if (typeof entry === 'object') {
+    const raw = [entry.heading, entry.raw, entry.title, entry.name, entry.label, entry.category, entry.value]
+      .map((v) => (v == null ? '' : String(v).trim()))
+      .find((v) => v);
+    if (!raw) return null;
+    const catSource = entry.category || entry.group || entry.type || raw;
+    const categories = detectHeadingCategories(catSource);
+    const lineId = Number(entry.budgetId ?? entry.lineId ?? entry.id ?? numericId);
+    if (!Number.isFinite(lineId)) return null;
+    return { id: lineId, raw, categories };
+  }
+  return null;
+}
+
+function normaliseHeadingResult(result) {
+  const map = new Map();
+  if (!result) return map;
+  if (result instanceof Map) {
+    for (const [lineId, entry] of result.entries()) {
+      const parsed = parseHeadingEntry(lineId, entry);
+      if (parsed) map.set(parsed.id, { raw: parsed.raw, categories: parsed.categories });
+    }
+    return map;
+  }
+  if (Array.isArray(result)) {
+    for (const entry of result) {
+      if (!entry) continue;
+      const parsed = parseHeadingEntry(entry.lineId ?? entry.budgetId ?? entry.id, entry);
+      if (parsed) map.set(parsed.id, { raw: parsed.raw, categories: parsed.categories });
+    }
+    return map;
+  }
+  if (typeof result === 'object') {
+    for (const [lineId, entry] of Object.entries(result)) {
+      const parsed = parseHeadingEntry(lineId, entry);
+      if (parsed) map.set(parsed.id, { raw: parsed.raw, categories: parsed.categories });
+    }
+    return map;
+  }
+  return map;
+}
+
+function defaultExtractPdfHeadings(lines) {
+  const map = new Map();
+  for (const line of lines) {
+    if (!line || line.id == null) continue;
+    const heading = line.category || line.groupName || line.section || line.pdfHeading;
+    if (!heading) continue;
+    const raw = String(heading).trim();
+    if (!raw) continue;
+    const categories = detectHeadingCategories(raw);
+    if (!categories.length) continue;
+    map.set(line.id, { raw, categories });
+  }
+  return map;
+}
+
+async function extractPdfHeadings(lines, context) {
+  if (typeof customExtractPdfHeadings === 'function') {
+    try {
+      const result = await customExtractPdfHeadings(lines, context);
+      const normalised = normaliseHeadingResult(result);
+      if (normalised.size) return normalised;
+    } catch (error) {
+      console.warn('scope.assist pdf heading hook failed', error?.message || error);
+    }
+  }
+  return defaultExtractPdfHeadings(lines);
+}
+
+function computeHeadingRuleBoost(rule, heading, line, taxon, tokens) {
+  if (!rule) return null;
+  const taxonText = normaliseText(`${taxon.code || ''} ${taxon.description || ''}`);
+  const matchesTaxonKeyword = rule.taxonKeywords.some((kw) => taxonText.includes(kw));
+  const code = String(taxon.code || '').toUpperCase();
+  const matchesCode = rule.codePrefixes.some((pref) => code.startsWith(pref));
+  if (!matchesTaxonKeyword && !matchesCode) return null;
+  const matchesLineKeyword = tokens.some((token) => rule.lineKeywords.some((kw) => token.includes(kw)));
+  const bonus = rule.base + (matchesLineKeyword ? rule.lineBonus : 0);
+  if (!bonus) return null;
+  const detail = [];
+  if (matchesCode) detail.push('code match');
+  if (matchesTaxonKeyword && !matchesCode) detail.push('taxon keyword');
+  if (matchesLineKeyword) detail.push('line keyword');
+  return { heading, bonus, detail: detail.join(' + '), label: rule.label };
+}
+
+function pdfHeadingBoosts(headingInfo, line, taxon, tokens) {
+  if (!headingInfo || !Array.isArray(headingInfo.categories)) return [];
+  const boosts = [];
+  for (const category of headingInfo.categories) {
+    const rule = PDF_HEADING_RULES[category];
+    if (!rule) continue;
+    const boost = computeHeadingRuleBoost(rule, headingInfo.raw, line, taxon, tokens);
+    if (boost) {
+      boosts.push({
+        type: category,
+        heading: headingInfo.raw,
+        bonus: boost.bonus,
+        detail: boost.detail,
+        label: boost.label,
+      });
+    }
+  }
+  return boosts;
+}
+
+function overlapScore(tokensA, tokensB) {
+  if (!tokensA.length || !tokensB.length) return 0;
+  const setA = new Set(tokensA);
+  const setB = new Set(tokensB);
+  let matches = 0;
+  for (const token of setA) {
+    if (setB.has(token)) matches++;
+  }
+  const coverage = matches / Math.min(setA.size, setB.size);
+  return coverage;
+}
+
+function scoreLine(line, taxon, opts = {}) {
   let score = 0;
-  const toks = tokenize(line.description);
+  const hits = [];
+
+  const text = `${line.description || ''} ${line.notes || ''}`.toLowerCase();
+  const toks = tokenize(text);
+  const stems = toks.map(t => t.replace(/(ing|ed|es|s)$/,''));
   const keywords = Array.isArray(taxon.keywords) ? taxon.keywords : [];
   const prefixes = Array.isArray(taxon.costCodePrefixes) ? taxon.costCodePrefixes : [];
 
-  // keyword hits
-  const hits = [];
+  // 2.1 keyword / stem / substring
   for (const kw of keywords) {
     const k = String(kw).toLowerCase();
-    if (toks.includes(k)) { score += 1; hits.push({ type: 'keyword', token: kw }); }
+    const ks = k.replace(/(ing|ed|es|s)$/,'');
+    const hit = toks.includes(k) || stems.includes(ks) || toks.some(t => t.startsWith(ks));
+    if (hit) { score += 1; hits.push({ type: 'keyword', token: kw }); }
   }
-  // cost code boosts
+
+  // 2.2 cost-code hierarchy (e.g., '08-' strong, '08' weak)
   const code = (line.costCode?.code || line.costCode || '').toString();
   for (const p of prefixes) {
-    if (code.startsWith(p)) { score += 2; hits.push({ type: 'costCode', prefix: p }); }
-  }
-  // PDF heading boosts (if any)
-  if (Array.isArray(line.__pdfHeadings)) {
-    for (const h of line.__pdfHeadings) {
-      const H = String(h).toUpperCase();
-      if ((H.includes('MECHANICAL') || H.includes('ELECTRICAL')) && taxon.code === 'MEP') { score += 1; hits.push({ type: 'heading', value: h }); }
-      if (H.includes('ROOF') && (taxon.code === 'ROOF' || String(taxon.name || '').toUpperCase().includes('ROOF'))) { score += 1; hits.push({ type: 'heading', value: h }); }
-      if (H.includes('STRUCTURAL') && (taxon.code === 'STEEL' || taxon.code === 'RC')) { score += 1; hits.push({ type: 'heading', value: h }); }
-      if (H.includes('CIVILS') && taxon.code === 'GROUND') { score += 1; hits.push({ type: 'heading', value: h }); }
+    const pref = String(p);
+    if (code.startsWith(pref)) { score += 2; hits.push({ type:'costCode', prefix: pref }); }
+    else if (pref.endsWith('-') && code.startsWith(pref.slice(0,-1))) {
+      score += 1; hits.push({ type:'costCodeGroup', prefix: pref.slice(0,-1) });
     }
   }
+
+  // 2.3 unit/context nudges
+  const unit = String(line.unit||'').toLowerCase();
+  if ((unit==='t' || unit==='m3') && /rebar|concrete|slab/.test(text) && (taxon.code==='RC')) {
+    score += 0.5; hits.push({ type:'unit', value:unit });
+  }
+  if (unit==='hr' && /test|commission/.test(text) && (taxon.code==='MEP' || taxon.code==='FITOUT')) {
+    score += 0.25; hits.push({ type:'unit', value:unit });
+  }
+
+  if (opts.headingInfo) {
+    const boosts = pdfHeadingBoosts(opts.headingInfo, line, taxon, toks);
+    for (const boost of boosts) {
+      score += boost.bonus;
+      hits.push({
+        type: 'pdfHeading',
+        heading: boost.heading,
+        category: boost.type,
+        bonus: boost.bonus,
+        detail: boost.detail,
+        label: boost.label,
+      });
+    }
+  }
+
   return { score, hits };
 }
 
-router.post('/projects/:projectId/scope-runs/:runId/suggest', requireAuth, ensureFeature, async (req, res) => {
-  const tenantId = String(req.user.tenantId);
-  const projectId = Number(req.params.projectId);
-  const runId = Number(req.params.runId);
-
-  let run;
-  if (hasModel('scopeRun')) run = await prisma.scopeRun.findFirst({ where: { id: runId, tenantId, projectId } });
-  else run = mem.runs.get(runId);
-  if (!run) return res.status(404).json({ error: 'RUN_NOT_FOUND' });
-
-  let tax = [];
-  if (hasModel('packageTaxonomy')) {
-    tax = await prisma.packageTaxonomy.findMany({ where: { tenantId, isActive: true } });
-  }
-  if (!tax.length) tax = DEFAULT_TAXONOMY;
-
-  const lines = await prisma.budgetLine.findMany({
-    where: { tenantId, projectId },
-    include: { costCode: { select: { code: true } } }
-  });
-
-  // Extract PDF headings once and attach as a light hint
-  const pdfHeadings = await extractPdfHeadings(prisma, tenantId, projectId);
-  for (const ln of lines) ln.__pdfHeadings = pdfHeadings;
-
-  const suggestions = [];
-  for (const line of lines) {
-    let ranked = tax.map(t => ({ t, ...scoreLine(line, t) }))
-                    .filter(r => r.score > 0)
-                    .sort((a,b)=> b.score - a.score);
-    ranked = rerank(line, ranked);
-    if (!ranked.length) continue; // skip lines with no signal
-    const best = ranked[0];
-    const alt = ranked[1];
-    const total = Math.max(1, best.score + (alt?.score || 0));
-    const conf = Math.min(1, best.score / total); // crude normalization
-
-    const hitList = Array.isArray(best.hits) ? best.hits.slice() : [];
-    if (best._sim) hitList.push({ type: 'rerank', value: Number(best._sim.toFixed(2)) });
-    suggestions.push({
-      tenantId,
-      scopeRunId: run.id,
-      budgetId: line.id,
-      suggestedCode: best.t.code,
-      altCode: alt?.t?.code || null,
-      confidence: Number(conf.toFixed(4)),
-      explain: hitList
-    });
-  }
-
-  if (suggestions.length) {
-    if (hasModel('scopeSuggestion')) {
-      await prisma.scopeSuggestion.createMany({ data: suggestions });
-    } else {
-      mem.suggestions.set(run.id, suggestions);
+function formatHit(hit) {
+  switch (hit.type) {
+    case 'keyword':
+      return `Matched keyword "${hit.token}"`;
+    case 'costCode':
+      return `Cost code starts with ${hit.prefix}`;
+    case 'costCodeGroup':
+      return `Cost code group ${hit.prefix}`;
+    case 'unit':
+      return `Unit hint (${hit.value})`;
+    case 'pdfHeading': {
+      const parts = [];
+      if (hit.label) parts.push(`${hit.label} heading`);
+      else parts.push('PDF heading');
+      if (hit.heading) parts.push(`"${hit.heading}"`);
+      if (hit.detail) parts.push(`(${hit.detail})`);
+      if (typeof hit.bonus === 'number') parts.push(`+${hit.bonus.toFixed(2)}`);
+      return parts.filter(Boolean).join(' ');
     }
+    default:
+      return 'Heuristic match';
   }
+}
 
-  await prisma.auditLog?.create?.({ data: { tenantId, userId: req.user.id, entity: 'ScopeRun', entityId: String(run.id), action: 'SUGGEST', changes: { count: suggestions.length }}}).catch(()=>{});
-  res.json({ runId: run.id, count: suggestions.length });
-});
+async function rerankIfEnabled(line, ranked) {
+  if (process.env.AI_SCOPE_RERANK === 'on' && Array.isArray(ranked) && ranked.length > 1) {
+    return ranked
+      .map((entry) => {
+        const tokens = tokenise(`${line.description || ''}`);
+        const taxTokens = tokenise(`${entry.t.code || ''} ${entry.t.description || ''}`);
+        const density = overlapScore(tokens, taxTokens);
+        const adjusted = entry.score + density * 5;
+        const explain = density > 0.25
+          ? [...entry.explain, `AI rerank density ${(density * 100).toFixed(0)}% (+${(density * 5).toFixed(1)})`]
+          : entry.explain;
+        return { ...entry, score: adjusted, explain };
+      })
+      .sort((a, b) => b.score - a.score);
+  }
+  return ranked;
+}
 
-router.get('/projects/:projectId/scope-runs/:runId', requireAuth, ensureFeature, async (req, res) => {
-  const tenantId = String(req.user.tenantId);
-  const projectId = Number(req.params.projectId);
-  const runId = Number(req.params.runId);
+router.post('/scope/assist/projects/:projectId/suggest', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    if (!tenantId) return res.status(400).json({ error: 'tenantId required' });
+    const projectId = Number(req.params.projectId);
+    if (Number.isNaN(projectId)) return res.status(400).json({ error: 'invalid projectId' });
 
-  let run;
-  if (hasModel('scopeRun')) run = await prisma.scopeRun.findFirst({ where: { id: runId, tenantId, projectId } });
-  else run = mem.runs.get(runId);
-  if (!run) return res.status(404).json({ error: 'RUN_NOT_FOUND' });
+    const [lines, tax] = await Promise.all([
+      prisma.budgetLine.findMany({
+        where: { tenantId, projectId },
+        orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          tenantId: true,
+          projectId: true,
+          code: true,
+          category: true,
+          description: true,
+          amount: true,
+        },
+      }),
+      prisma.costCode.findMany({
+        where: { tenantId },
+        select: {
+          id: true,
+          tenantId: true,
+          code: true,
+          description: true,
+          parent: { select: { code: true, description: true } },
+        },
+      }),
+    ]);
 
-  let items = [];
-  if (hasModel('scopeSuggestion')) items = await prisma.scopeSuggestion.findMany({ where: { tenantId, scopeRunId: run.id } });
-  else items = mem.suggestions.get(run.id) || [];
-  res.json({ run, items });
-});
+    const run = {
+      id: Date.now(),
+      projectId,
+      tenantId,
+      generatedAt: new Date().toISOString(),
+      lineCount: lines.length,
+    };
 
-router.patch('/projects/:projectId/scope-runs/:runId/accept', requireAuth, ensureFeature, async (req, res) => {
-  const tenantId = String(req.user.tenantId);
-  const projectId = Number(req.params.projectId);
-  const runId = Number(req.params.runId);
-  const { mappings = [], createPackages = [] } = req.body || {};
+    const suggestions = [];
 
-  let run;
-  if (hasModel('scopeRun')) run = await prisma.scopeRun.findFirst({ where: { id: runId, tenantId, projectId } });
-  else run = mem.runs.get(runId);
-  if (!run) return res.status(404).json({ error: 'RUN_NOT_FOUND' });
+    const pdfHeadings = await extractPdfHeadings(lines, { tenantId, projectId, prisma });
 
-  // Persist final choices to ScopeSuggestion or in-memory
-  if (hasModel('scopeSuggestion')) {
-    for (const m of mappings) {
-      await prisma.scopeSuggestion.updateMany({
-        where: { tenantId, scopeRunId: run.id, budgetId: Number(m.budgetId) },
-        data: { acceptedCode: String(m.packageCode) }
+    for (const line of lines) {
+      const headingInfo = pdfHeadings.get(line.id);
+      const rankedBase = tax
+        .map((t) => {
+          const { score, hits } = scoreLine(line, t, { headingInfo });
+          const explain = hits.map(formatHit);
+          const confidence = Math.min(1, score / 5);
+          return { t, score, hits, explain, confidence, altCode: null };
+        })
+        .sort((a, b) => b.score - a.score);
+
+      const ranked = await rerankIfEnabled(line, rankedBase);
+
+      if (!ranked.length) {
+        suggestions.push({
+          tenantId,
+          scopeRunId: run.id,
+          budgetId: line.id,
+          suggestedCode: 'UNASSIGNED',
+          altCode: null,
+          confidence: '0.0000',
+          explain: [],
+        });
+        continue;
+      }
+
+      const best = ranked[0];
+      const alt = ranked[1] || null;
+      const total = Math.max(1, best.score + (alt?.score || 0));
+      const fallbackConfidence = best.confidence ?? Math.min(1, best.score / 5);
+      const confidence = Math.min(fallbackConfidence, Math.min(1, best.score / total));
+      suggestions.push({
+        tenantId,
+        scopeRunId: run.id,
+        budgetId: line.id,
+        suggestedCode: best.t.code,
+        altCode: alt ? alt.t.code : best.altCode ?? null,
+        confidence: confidence.toFixed(4),
+        explain: best.explain,
       });
     }
-  } else {
-    const cur = mem.suggestions.get(run.id) || [];
-    for (const m of mappings) {
-      const idx = cur.findIndex(x => Number(x.budgetId) === Number(m.budgetId));
-      if (idx >= 0) cur[idx] = { ...cur[idx], acceptedCode: String(m.packageCode) };
-    }
-    mem.suggestions.set(run.id, cur);
+
+    res.json({ run, suggestions });
+  } catch (error) {
+    next(error);
   }
-
-  // Ensure Packages exist for all accepted codes
-  let accepted = [];
-  if (hasModel('scopeSuggestion')) {
-    accepted = await prisma.scopeSuggestion.findMany({ where: { tenantId, scopeRunId: run.id, NOT: { acceptedCode: null } } });
-  } else {
-    const cur = mem.suggestions.get(run.id) || [];
-    accepted = cur.filter(x => x.acceptedCode);
-  }
-  const codes = [...new Set(accepted.map(a => a.acceptedCode))];
-
-  const codeToPackageId = new Map();
-  for (const c of codes) {
-    // Find by taxonomy code stored in tradeCategory
-    let pkg = await prisma.package.findFirst({ where: { projectId, tradeCategory: c } }).catch(()=>null);
-    if (!pkg) {
-      const wanted = createPackages.find(p => p.code === c) || {};
-      pkg = await prisma.package.create({ data: { projectId, name: wanted.name || c, tradeCategory: c, budgetEstimate: 0 } });
-    }
-    codeToPackageId.set(c, pkg.id);
-  }
-
-  // Link budget lines via PackageItem
-  const toLink = [];
-  for (const a of accepted) {
-    const packageId = codeToPackageId.get(a.acceptedCode);
-    if (!packageId) continue;
-    toLink.push({ packageId, budgetLineId: a.budgetId });
-  }
-  if (toLink.length) await prisma.packageItem.createMany({ data: toLink, skipDuplicates: true }).catch(async()=>{
-    // fallback to individual inserts for older Prisma/DBs
-    for (const it of toLink) { try { await prisma.packageItem.create({ data: it }); } catch {} }
-  });
-
-  // Roll up budget totals per package (update budgetEstimate)
-  for (const [code, packageId] of codeToPackageId.entries()) {
-    const items = await prisma.packageItem.findMany({ where: { packageId }, include: { budgetLine: { select: { amount: true } } } });
-    const total = items.reduce((s, li) => s + Number(li?.budgetLine?.amount || 0), 0);
-    await prisma.package.update({ where: { id: packageId }, data: { budgetEstimate: total } });
-  }
-
-  if (hasModel('scopeRun')) await prisma.scopeRun.update({ where: { id: run.id }, data: { status: 'approved' } });
-  else mem.runs.set(run.id, { ...run, status: 'approved' });
-  await prisma.auditLog?.create?.({ data: { tenantId, userId: req.user.id, entity: 'ScopeRun', entityId: String(run.id), action: 'APPROVE', changes: { packages: codes.length }}}).catch(()=>{});
-
-  res.json({ ok: true, packages: codes.length, linked: toLink.length });
 });
 
 module.exports = router;

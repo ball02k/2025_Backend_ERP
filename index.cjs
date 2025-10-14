@@ -66,6 +66,7 @@ const afpRouter = require('./routes/afp.cjs');
 const afpOpenRouter = require('./routes/afp.open.cjs');
 const cvrRouter = require('./routes/financials.cvr.cjs');
 const diaryRouter = require('./routes/diary.cjs');
+const scopeAssistRouter = require('./routes/scope.assist.cjs');
 const budgetsImportRouter = require('./routes/budgets.import.cjs');
 const packagesSeedRouter = require('./routes/packages.seed.cjs');
 const scopeAssistRouter = require('./routes/scope.assist.cjs');
@@ -207,6 +208,7 @@ app.use('/api/projects', requireAuth, diaryRouter(prisma));
 // Budgets CSV import preview/commit
 app.use('/api', requireAuth, budgetsImportRouter);
 app.use('/api/projects', requireAuth, budgetsImportRouter);
+app.use('/api', requireAuth, scopeAssistRouter);
 // Seed packages from budgets
 app.use('/api', requireAuth, packagesSeedRouter);
 // Scope assist (feature-gated routes); route-level auth inside
