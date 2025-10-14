@@ -69,7 +69,6 @@ const diaryRouter = require('./routes/diary.cjs');
 const scopeAssistRouter = require('./routes/scope.assist.cjs');
 const budgetsImportRouter = require('./routes/budgets.import.cjs');
 const packagesSeedRouter = require('./routes/packages.seed.cjs');
-const scopeAssistRouter = require('./routes/scope.assist.cjs');
 const taxonomyRouter = require('./routes/taxonomy.cjs');
 // Also import handlers directly for top-level mounting
 const { previewHandler: budgetsPreview, commitHandler: budgetsCommit } = require('./routes/budgets.import.cjs');
