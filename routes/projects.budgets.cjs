@@ -194,7 +194,7 @@ router.patch('/:projectId/budgets/:budgetLineId/group', requireProjectMember, as
   }
 });
 
-// CREATE budget line via budgets namespace (maps qty/rate -> amount)
+// CREATE budget line via budgets namespace (persist qty/rate/unit when provided)
 router.post('/:projectId/budgets', requireProjectMember, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
@@ -209,6 +209,9 @@ router.post('/:projectId/budgets', requireProjectMember, async (req, res) => {
         tenantId,
         projectId,
         description: b.description ?? null,
+        quantity: b.quantity != null ? Number(b.quantity) : (b.qty != null ? Number(b.qty) : null),
+        unit: b.unit ?? null,
+        rate: b.rate != null ? Number(b.rate) : (b.unitCost != null ? Number(b.unitCost) : null),
         amount: Number.isFinite(amount) ? amount : 0,
         planned: null,
         estimated: null,
@@ -247,6 +250,9 @@ router.patch('/:projectId/budgets/:id', requireProjectMember, async (req, res) =
 
     const data = {};
     if (b.description !== undefined) data.description = b.description ?? null;
+    if (b.quantity !== undefined) data.quantity = b.quantity != null ? Number(b.quantity) : null;
+    if (b.unit !== undefined) data.unit = b.unit ?? null;
+    if (b.rate !== undefined) data.rate = b.rate != null ? Number(b.rate) : null;
     if (b.groupId !== undefined) data.groupId = b.groupId ? Number(b.groupId) : null;
     if (b.sortOrder !== undefined) data.sortOrder = Number(b.sortOrder);
     if (b.costCodeId !== undefined) data.costCodeId = b.costCodeId ? Number(b.costCodeId) : null;

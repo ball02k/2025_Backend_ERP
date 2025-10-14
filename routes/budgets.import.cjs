@@ -357,7 +357,11 @@ async function commitHandler(req, res) {
           projectId,
           costCodeId: costCodeId,
           description,
-          amount: amount != null ? amount : 0,
+          // Persist granular fields when present
+          quantity: quantity != null ? Number(quantity) : null,
+          unit: unit || null,
+          rate: rate != null ? Number(rate) : null,
+          amount: amount != null ? amount : ((quantity != null && rate != null) ? Number(quantity) * Number(rate) : 0),
           groupId,
         },
       });

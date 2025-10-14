@@ -183,8 +183,10 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
             select: {
               id: true,
               description: true,
+              quantity: true,
+              unit: true,
+              rate: true,
               amount: true,
-              // quantity/rate/unit may not exist in schema; omit for safety
               costCode: { select: { id: true, code: true, description: true } },
             },
           },
@@ -196,9 +198,9 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
           id: it.budgetLine.id,
           description: it.budgetLine.description,
           amount: Number(it.budgetLine.amount || 0),
-          quantity: null,
-          unit: 'ea',
-          rate: null,
+          quantity: it.budgetLine.quantity != null ? Number(it.budgetLine.quantity) : null,
+          unit: it.budgetLine.unit || 'ea',
+          rate: it.budgetLine.rate != null ? Number(it.budgetLine.rate) : null,
           costCode: it.budgetLine.costCode ? { id: it.budgetLine.costCode.id, code: it.budgetLine.costCode.code, description: it.budgetLine.costCode.description || '' } : null,
         } : null))
         .filter(Boolean);
