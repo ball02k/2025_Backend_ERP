@@ -68,6 +68,12 @@ router.patch('/projects/:projectId/info', async (req, res, next) => {
     if ('siteLat' in body) data.siteLat = body.siteLat;
     if ('siteLng' in body) data.siteLng = body.siteLng;
     if ('country' in body) data.country = body.country;
+    if ('procurementMode' in body) {
+      const allowed = new Set(['internal','external','hybrid']);
+      const v = String(body.procurementMode || '').toLowerCase();
+      if (!allowed.has(v)) return res.status(400).json({ error: 'Invalid procurementMode' });
+      data.procurementMode = v;
+    }
 
     const upd = await prisma.project.update({ where: { id: projectId }, data });
     res.json(safeJson(upd));

@@ -3,6 +3,55 @@ const router = express.Router();
 
 // Expect: attachUser + requireAuth already applied in index.cjs or here if needed
 module.exports = (prisma, { requireAuth }) => {
+  // Lightweight dashboard summary for live cards (CVR, RFIs, tenders, invoices)
+  router.get('/dashboard/summary', requireAuth, async (req, res) => {
+    try {
+      const tenantId = req.user?.tenantId || 'demo';
+
+      // Finance snapshot (value/committed/actual)
+      const [cvrAgg, rfiOpen, tendersOpen, invOverdue, invOpen] = await Promise.all([
+        (async () => {
+          try {
+            const r = await prisma.$queryRaw`SELECT
+              COALESCE(SUM(v.value),0) as value,
+              COALESCE(SUM(vr.approvedValue),0) as variations,
+              COALESCE(SUM(c.actualCost),0) as actualCost,
+              COALESCE(SUM(c.committedCost),0) as committedCost
+            FROM (SELECT 0) x
+            LEFT JOIN (
+              SELECT projectId, SUM(amount) as value FROM "Valuation" WHERE "tenantId" = ${tenantId} GROUP BY projectId
+            ) v ON 1=1
+            LEFT JOIN (
+              SELECT projectId, SUM(approvedValue) as approvedValue FROM "Variation" WHERE "tenantId" = ${tenantId} AND status IN ('approved','accepted') GROUP BY projectId
+            ) vr ON 1=1
+            LEFT JOIN (
+              SELECT projectId, SUM(actualCost) as actualCost, SUM(committedCost) as committedCost FROM "CostPeriod" WHERE "tenantId" = ${tenantId} GROUP BY projectId
+            ) c ON 1=1`;
+            const agg = Array.isArray(r) ? (r[0] || {}) : {};
+            const value = Number(agg.value || 0) + Number(agg.variations || 0);
+            const cost = Number(agg.actualCost || 0) + Number(agg.committedCost || 0);
+            const margin = value - cost;
+            const marginPct = value > 0 ? (margin / value) * 100 : 0;
+            return { value, cost, margin, marginPct };
+          } catch { return { value: 0, cost: 0, margin: 0, marginPct: 0 }; }
+        })(),
+        prisma.rfi?.count?.({ where: { tenantId, status: { equals: 'open', mode: 'insensitive' } } }).catch(() => 0),
+        prisma.tender?.count?.({ where: { tenantId, status: { in: ['draft','open'] } } }).catch(() => 0),
+        prisma.invoice?.count?.({ where: { tenantId, dueDate: { lt: new Date() }, status: { in: ['Open','Pending','open','pending'] } } }).catch(() => 0),
+        prisma.invoice?.count?.({ where: { tenantId, status: { in: ['Open','Pending','open','pending'] } } }).catch(() => 0),
+      ]);
+
+      return res.json({
+        cvr: cvrAgg,
+        rfis: { open: Number(rfiOpen || 0) },
+        tenders: { open: Number(tendersOpen || 0) },
+        invoices: { open: Number(invOpen || 0), overdue: Number(invOverdue || 0) },
+        asOf: new Date().toISOString(),
+      });
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to load dashboard summary' });
+    }
+  });
   router.get('/home/overview', requireAuth, async (req, res) => {
     try {
       const tenantId = req.user?.tenantId || 'demo';
@@ -190,12 +239,31 @@ module.exports = (prisma, { requireAuth }) => {
         select: { id: true, title: true, dueDate: true, projectId: true }
       });
 
+      // Live finance metrics (simple aggregate): Budget, Committed, Actual
+      const [budgetAgg, committedAgg, actualAgg, openRfis, tendersOpen, overdueInv] = await Promise.all([
+        prisma.budgetLine?.aggregate ? prisma.budgetLine.aggregate({ _sum: { amount: true }, where: { tenantId } }) : Promise.resolve({ _sum: { amount: 0 } }),
+        prisma.contract?.aggregate ? prisma.contract.aggregate({ _sum: { value: true }, where: { project: { tenantId } } }) : Promise.resolve({ _sum: { value: 0 } }),
+        prisma.invoice?.aggregate ? prisma.invoice.aggregate({ _sum: { gross: true }, where: { tenantId } }) : Promise.resolve({ _sum: { gross: 0 } }),
+        prisma.rfi?.count ? prisma.rfi.count({ where: { tenantId, status: { equals: 'open', mode: 'insensitive' } } }) : Promise.resolve(0),
+        prisma.tender?.count ? prisma.tender.count({ where: { tenantId, status: { notIn: ['awarded','closed','cancelled','archived'] } } }) : Promise.resolve(0),
+        prisma.invoice?.count ? prisma.invoice.count({ where: { tenantId, dueDate: { lt: new Date() }, status: { in: ['Open','Pending','open','pending'] } } }) : Promise.resolve(0),
+      ]);
+      const live = {
+        budget: Number(budgetAgg?._sum?.amount || 0),
+        committed: Number(committedAgg?._sum?.value || 0),
+        actual: Number(actualAgg?._sum?.gross || 0),
+        openRfis: Number(openRfis || 0),
+        tendersOpen: Number(tendersOpen || 0),
+        overdueInvoices: Number(overdueInv || 0),
+      };
+
       return res.json({
         asOf: today,
         kpis: {
           activeProjects: projects.length,
           budgetVsSpend,
           margin: { value, cost, margin, marginPct },
+          live,
           pending: { variations: pendingVariations, purchaseOrders: pendingPOs },
           cashflow,
           carbon: carbonSummary

@@ -69,7 +69,6 @@ const diaryRouter = require('./routes/diary.cjs');
 const scopeAssistRouter = require('./routes/scope.assist.cjs');
 const budgetsImportRouter = require('./routes/budgets.import.cjs');
 const packagesSeedRouter = require('./routes/packages.seed.cjs');
-const scopeAssistRouter = require('./routes/scope.assist.cjs');
 const taxonomyRouter = require('./routes/taxonomy.cjs');
 // Also import handlers directly for top-level mounting
 const { previewHandler: budgetsPreview, commitHandler: budgetsCommit } = require('./routes/budgets.import.cjs');
@@ -82,6 +81,8 @@ const devAuth = require('./middleware/devAuth.cjs');
 const devRbac = require('./middleware/devRbac.cjs');
 const authDev = require('./routes/auth.dev.cjs');
 const { isDevAuthEnabled, isDevEnv } = require('./utils/devFlags.cjs');
+const settingsTaxonomiesRouter = require('./routes/settings.taxonomies.cjs');
+const tradesRouter = require('./routes/trades.cjs');
 
 // CORS: allow dev servers and handle preflight
 // Allow override via CORS_ORIGINS env (comma-separated)
@@ -177,6 +178,8 @@ app.get('/openapi-lite.json', (req, res) => {
 
 
 app.use(devDeltaRoutes);
+// Settings v1 (admin-only endpoints inside)
+app.use(settingsTaxonomiesRouter);
 
 app.use('/auth', authRouter);
 app.use('/me', meRouter);
@@ -208,7 +211,6 @@ app.use('/api/projects', requireAuth, diaryRouter(prisma));
 // Budgets CSV import preview/commit
 app.use('/api', requireAuth, budgetsImportRouter);
 app.use('/api/projects', requireAuth, budgetsImportRouter);
-app.use('/api', requireAuth, scopeAssistRouter);
 // Seed packages from budgets
 app.use('/api', requireAuth, packagesSeedRouter);
 // Scope assist (feature-gated routes); route-level auth inside
@@ -239,6 +241,7 @@ app.use('/api/spm', requireAuth, spmRouter);
 app.use('/api/search', requireAuth, searchRouter);
 app.use('/api', requireAuth, lookupsRouter);
 app.use('/api', requireAuth, documentLinksRouter);
+app.use('/api/trades', requireAuth, tradesRouter);
 app.use('/api/integrations', requireAuth, integrationsRouter());
 // Meta, Geo, and Project Info (additive)
 app.use('/api', requireAuth, require('./routes/meta.cjs'));

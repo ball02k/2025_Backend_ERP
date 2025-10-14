@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router({ mergeParams: true });
 const { prisma } = require('../utils/prisma.cjs');
 const { requireProjectMember } = require('../middleware/membership.cjs');
+const { makeStorageKey } = require('../utils/storage.cjs');
 
 // --- helpers: coerce Prisma Decimal/strings to numbers, and shape outbound lines ---
 function num(v) {
@@ -234,6 +235,36 @@ router.post('/:projectId/budgets', requireProjectMember, async (req, res) => {
   } catch (e) {
     console.error('[budgets/create]', e);
     res.status(500).json({ error: 'Failed to create budget line' });
+  }
+});
+
+// POST /api/projects/:projectId/budget-ocr
+// Accepts either { documentId } or { filename, mimeType, size, storageKey } to create a Document then an OCRImportJob
+router.post('/:projectId/budget-ocr', requireProjectMember, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+    const body = req.body || {};
+    let documentId = body.documentId ? Number(body.documentId) : null;
+
+    if (!documentId) {
+      const filename = String(body.filename || 'budget.csv');
+      const mimeType = String(body.mimeType || 'text/csv');
+      const size = Number(body.size || 0);
+      const storageKey = String(body.storageKey || makeStorageKey(filename));
+      const doc = await prisma.document.create({ data: { tenantId, filename, mimeType, size, storageKey } });
+      await prisma.documentLink.create({ data: { tenantId, documentId: doc.id, projectId, linkType: 'project', category: 'import:budget' } }).catch(()=>{});
+      documentId = Number(doc.id);
+    }
+
+    const job = await prisma.ocrImportJob.create({ data: { tenantId, projectId, documentId: BigInt(documentId), kind: 'budget', status: 'queued' } });
+
+    // Audit (best-effort)
+    await prisma.auditLog?.create?.({ data: { tenantId, userId: req.user.id, entity: 'OcrImportJob', entityId: String(job.id), action: 'CREATE', changes: { kind: 'budget' } } }).catch(()=>{});
+
+    res.status(201).json({ id: job.id, status: job.status });
+  } catch (e) {
+    res.status(400).json({ error: e?.message || 'Failed to init budget OCR job' });
   }
 });
 

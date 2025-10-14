@@ -227,7 +227,71 @@ async function ensureSuppliers() {
     }
     out.push(s);
   }
+  // Ensure internal supplier exists for tenant
+  try {
+    let self = await prisma.supplier.findFirst({ where: { tenantId: TENANT, isInternal: true } });
+    if (!self) {
+      self = await prisma.supplier.create({ data: { tenantId: TENANT, name: 'Internal Delivery (Your Company)', isInternal: true, status: 'active' } });
+    }
+    // Store selfSupplierId in TenantSetting (KV storage)
+    try {
+      const key = 'selfSupplierId';
+      const existing = await prisma.tenantSetting.findFirst({ where: { tenantId: TENANT, k: key } });
+      if (!existing) await prisma.tenantSetting.create({ data: { tenantId: TENANT, k: key, v: self.id } });
+      else if (!existing.v) await prisma.tenantSetting.update({ where: { tenantId_k: { tenantId: TENANT, k: key } }, data: { v: self.id } });
+    } catch (_) { /* tolerate missing KV model */ }
+  } catch (_) {}
   return out;
+}
+
+async function ensureTrades() {
+  const groups = {
+    'Groundworks & Civils': [
+      'Demolition','Enabling Works','Earthworks','Piling','Drainage','Utilities Diversions','Roads/Highways','Kerbs & Paving'
+    ],
+    'Structure': [
+      'Concrete (in-situ)','Precast','Reinforcement','Structural Steelwork','Metal Decking','Timber Frame'
+    ],
+    'Envelope': [
+      'Brick/Blockwork','Cladding','Rainscreen','Curtain Walling','Roofing (Flat/Pitched)','Waterproofing','Windows & External Doors'
+    ],
+    'MEP (Building Services)': [
+      'Mechanical','Electrical','Public Health (Plumbing/Drainage)','Sprinklers','Fire Alarm','BMS','HV/LV','UPS/Generators','Data/Comms','Security/CCTV/Access'
+    ],
+    'Interiors & Finishes': [
+      'Partitions','Drylining','Ceilings','Screed','Flooring','Joinery','Decorations','Tiling','Washrooms/Sanitaryware'
+    ],
+    'Vertical Transport & Specialist': [
+      'Lifts','Escalators','Facades Access/ BMU','Scaffolding/Temporary Works'
+    ],
+    'External Works & Landscaping': [
+      'Hard Landscaping','Soft Landscaping','Fencing/Gates','Street Furniture'
+    ],
+    'Compliance & Fire': [
+      'Fire Stopping/Compartmentation','Fire Doors'
+    ],
+    'Other': [
+      'Temporary Electrics/Mechanical','Hoists','Modular/Off-site'
+    ],
+  };
+  let order = 1;
+  for (const [group, names] of Object.entries(groups)) {
+    for (const name of names) {
+      const code = `${group.split(' ')[0].toUpperCase()}-${String(order).padStart(3,'0')}`;
+      try {
+        await prisma.trade.upsert({
+          where: { tenantId_code: { tenantId: TENANT, code } },
+          update: { name, group },
+          create: { tenantId: TENANT, code, name, group },
+        });
+      } catch (_) {
+        // Fallback when compound unique not available; try match by name
+        const existing = await prisma.trade.findFirst({ where: { tenantId: TENANT, name } }).catch(()=>null);
+        if (!existing) await prisma.trade.create({ data: { tenantId: TENANT, code, name, group } }).catch(()=>{});
+      }
+      order++;
+    }
+  }
 }
 
 async function seedPackages(projectId, suppliers) {
@@ -433,6 +497,22 @@ async function seedRequestsRFQ(suppliers) {
   }
 }
 
+// Seed basic PackageTaxonomy rows to support scope suggestions
+async function seedPackageTaxonomy() {
+  const items = [
+    { code: 'STEEL', name: 'Structural Steel', keywords: ['steel','frame','beams','columns'], costCodePrefixes: ['SUPER'] },
+    { code: 'MEP', name: 'MEP', keywords: ['mechanical','electrical','plumbing','services'], costCodePrefixes: ['M&E'] },
+    { code: 'CONC', name: 'Concrete', keywords: ['concrete','rebar','formwork'], costCodePrefixes: ['SUB'] },
+    { code: 'FACADE', name: 'Facade', keywords: ['cladding','curtain wall','façade','glazing'], costCodePrefixes: ['SUPER'] },
+  ];
+  for (const it of items) {
+    const exists = await prisma.packageTaxonomy.findFirst({ where: { tenantId: TENANT, code: it.code } }).catch(()=>null);
+    if (!exists) {
+      await prisma.packageTaxonomy.create({ data: { tenantId: TENANT, code: it.code, name: it.name, keywords: it.keywords, costCodePrefixes: it.costCodePrefixes, isActive: true } }).catch(()=>{});
+    }
+  }
+}
+
 async function main() {
   console.log('Seeding for tenant:', TENANT);
   // Clean ONLY demo tenant artifacts in these modules to avoid duplication
@@ -457,6 +537,7 @@ async function main() {
   const p3 = await ensureProject('PRJ-003', 'Demo Project Gamma', client.id, { status: 'Closed', type: 'Civils', startDate: addDays(new Date(), -180), endDate: addDays(new Date(), -10) });
 
   const suppliers = await ensureSuppliers();
+  await ensureTrades().catch(()=>{});
 
   for (const p of [p1, p2, p3]) {
     await seedTasks(p.id);
@@ -470,6 +551,84 @@ async function main() {
 
   // Seed a Request/RFQ flow (not project-bound)
   await seedRequestsRFQ(suppliers);
+  // Seed basic package taxonomy for scope suggestions
+  await seedPackageTaxonomy().catch(()=>{});
+
+  // Settings/Taxonomies (additive; tolerant if tables absent)
+  try {
+    // Helper to upsert taxonomy and terms
+    async function ensureTaxonomy(key, name, isHierarchical, terms) {
+      const tx = await prisma.taxonomy.upsert({
+        where: { tenantId_key: { tenantId: TENANT, key } },
+        update: { name, isHierarchical, isLocked: false },
+        create: { tenantId: TENANT, key, name, isHierarchical, isLocked: false },
+      });
+      if (Array.isArray(terms) && terms.length) {
+        // Upsert terms by code or label
+        const existing = await prisma.taxonomyTerm.findMany({ where: { tenantId: TENANT, taxonomyId: tx.id } });
+        const byCode = new Map(); const byLabel = new Map();
+        existing.forEach((t) => { if (t.code) byCode.set(t.code, t); byLabel.set(t.label.toLowerCase(), t); });
+        const parentIdByCode = new Map();
+        for (let i = 0; i < terms.length; i++) {
+          const t = terms[i];
+          const code = t.code || null;
+          const label = t.label;
+          const parentCode = t.parentCode || null;
+          let parentId = null;
+          if (parentCode) {
+            parentId = parentIdByCode.get(parentCode) || byCode.get(parentCode)?.id || null;
+          }
+          const found = code ? byCode.get(code) : byLabel.get(label.toLowerCase());
+          if (found) {
+            await prisma.taxonomyTerm.update({ where: { id: found.id }, data: { label, sort: t.sort || 0, parentId } });
+          } else {
+            const created = await prisma.taxonomyTerm.create({ data: { tenantId: TENANT, taxonomyId: tx.id, code, label, sort: t.sort || 0, parentId } });
+            if (code) parentIdByCode.set(code, created.id);
+          }
+        }
+      }
+    }
+
+    // cost_codes (NRM scaffold levels)
+    await ensureTaxonomy('cost_codes', 'Cost Codes', true, [
+      { code: 'PRELIM', label: 'Preliminaries', sort: 10 },
+      { code: 'SUB', label: 'Substructure', sort: 20 },
+      { code: 'SUPER', label: 'Superstructure', sort: 30 },
+      { code: 'FIN', label: 'Finishes', sort: 40 },
+      { code: 'FIT', label: 'Fittings & furnishings', sort: 50 },
+      { code: 'M&E', label: 'Building services', sort: 60 },
+      { code: 'EXT', label: 'External works', sort: 70 },
+      { code: 'RISK', label: 'Risks/Provisional sums', sort: 80 },
+    ]);
+
+    // contract_families
+    await ensureTaxonomy('contract_families', 'Contract Families', false, [
+      { code: 'NEC3', label: 'NEC3 (ECC, PSC, TSC Options A–F)' },
+      { code: 'NEC4', label: 'NEC4 (ECC, PSC, TSC Options A–F)' },
+      { code: 'JCT', label: 'JCT (SBC, DB, IC, MW, etc.)' },
+    ]);
+
+    // rfx_scoring_sets
+    await ensureTaxonomy('rfx_scoring_sets', 'RFx Scoring Sets', false, [
+      { code: 'STD', label: 'Price 40, Programme 20, Technical 20, H&S 10, ESG 10' },
+    ]);
+
+    // Supplier accreditations list
+    const accs = ['Constructionline', 'CHAS'];
+    for (const name of accs) {
+      await prisma.supplierAccreditation.upsert({
+        where: { tenantId_name: { tenantId: TENANT, name } },
+        update: {},
+        create: { tenantId: TENANT, name },
+      }).catch(()=>{});
+    }
+  } catch (e) {
+    if (e?.code === 'P2021') {
+      console.warn('[seed] Settings/Taxonomies tables not present; skipping.');
+    } else {
+      console.warn('[seed] Taxonomies seed warning:', e.message || e);
+    }
+  }
 
   console.log('Done. Project ids:', p1.id, p2.id, p3.id);
 }

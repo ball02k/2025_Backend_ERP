@@ -23,6 +23,12 @@ function makeStore() {
     requestResponse: [],
     awardDecision: [],
     purchaseOrder: [],
+    taxonomy: [],
+    taxonomyTerm: [],
+    tenantSetting: [],
+    auditLog: [],
+    supplierAccreditation: [],
+    supplierAccreditationLink: [],
   };
 }
 
@@ -38,9 +44,17 @@ let nextIds = {
   requestResponse: 1,
   awardDecision: 1,
   purchaseOrder: 1,
+  taxonomy: 1,
+  taxonomyTerm: 1,
+  tenantSetting: 1,
+  auditLog: 1,
+  supplierAccreditation: 1,
+  supplierAccreditationLink: 1,
 };
 
 const db = makeStore();
+// Expose for white-box assertions in tests
+if (typeof global !== 'undefined') { global.__PRISMA_MOCK_DB__ = db; }
 
 function matchWhere(row, where = {}) {
   // very small where matcher for simple equality/contains/in/NOT/OR
@@ -182,9 +196,15 @@ class Model {
   }
 
   upsert({ where, create }) {
-    // Simplistic: try to find by keys in where; if not found, throw to allow route catch-path
+    // Support composite unique where like { tenantId_key: { tenantId, key } }
     const keys = Object.keys(where || {});
-    const row = db[this.name].find((r) => keys.every((k) => r[k] === where[k]));
+    let row;
+    if (keys.length === 1 && where[keys[0]] && typeof where[keys[0]] === 'object') {
+      const nested = where[keys[0]];
+      row = db[this.name].find((r) => Object.keys(nested).every((k) => r[k] === nested[k]));
+    } else {
+      row = db[this.name].find((r) => keys.every((k) => r[k] === where[k]));
+    }
     if (row) return Promise.resolve({ ...row });
     // mimic Prisma throwing when upsert cannot match by unique where
     return Promise.reject(Object.assign(new Error('Upsert needs unique where'), { code: 'P2002' }));
@@ -204,6 +224,12 @@ class PrismaClient {
     this.requestResponse = new Model('requestResponse');
     this.awardDecision = new Model('awardDecision');
     this.purchaseOrder = new Model('purchaseOrder');
+    this.taxonomy = new Model('taxonomy');
+    this.taxonomyTerm = new Model('taxonomyTerm');
+    this.tenantSetting = new Model('tenantSetting');
+    this.auditLog = new Model('auditLog');
+    this.supplierAccreditation = new Model('supplierAccreditation');
+    this.supplierAccreditationLink = new Model('supplierAccreditationLink');
   }
 
   $transaction(fn) {
@@ -215,4 +241,3 @@ class PrismaClient {
 }
 
 module.exports = { PrismaClient, Prisma };
-

@@ -149,8 +149,23 @@ module.exports = (prisma) => {
         }),
       ]);
       const { buildLinks } = require('../lib/buildLinks.cjs');
+      // Attach live budget sum per project (quick aggregate)
+      const ids = rows.map(r => r.id);
+      let sums = [];
+      try {
+        sums = await prisma.budgetLine.groupBy({ by: ['projectId'], where: { projectId: { in: ids } }, _sum: { amount: true } });
+      } catch (_) {}
+      const sumByProject = new Map(sums.map(s => [s.projectId, Number(s._sum?.amount || 0)]));
+
+      const reqCols = String(req.query.columns || '').split(',').map(s => s.trim()).filter(Boolean);
+      const wantBudgetTotal = reqCols.includes('budgetTotal');
+      const wantSector = reqCols.includes('sector');
       const projects = rows.map((p) => {
         const row = { ...p, clientName: p.client ? p.client.name : null };
+        const sum = sumByProject.get(p.id) ?? p.budget ?? 0;
+        row.budget = sum;
+        if (wantBudgetTotal) row.budgetTotal = sum;
+        if (wantSector) row.sector = p.type || p.typeRel?.label || null;
         row.links = buildLinks('project', { ...row, client: p.client });
         return row;
       });
@@ -181,9 +196,15 @@ module.exports = (prisma) => {
         },
         select: { id: true, projectId: true, name: true, scope: true, trade: true, status: true, budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true, createdAt: true, updatedAt: true, costCodeId: true },
       });
-      // Link budget lines if table exists
+      // Link budget lines if table exists (enforce one-package-per-line)
       if (Array.isArray(budgetIds) && budgetIds.length) {
-        try { await prisma.packageItem.createMany({ data: budgetIds.map((id) => ({ packageId: pkg.id, budgetLineId: Number(id) })) }); } catch (_) {}
+        try {
+          await prisma.packageItem.createMany({ data: budgetIds.map((id) => ({ packageId: pkg.id, budgetLineId: Number(id) })) });
+        } catch (e) {
+          if (e?.code === 'P2002') {
+            return res.status(409).json({ error: 'LINES_ALREADY_COMMITTED', message: 'One or more budget lines are already linked to another package.' });
+          }
+        }
       }
       res.status(201).json(pkg);
     } catch (err) {
@@ -233,7 +254,7 @@ module.exports = (prisma) => {
           take,
           include: {
             package: { select: { id: true, name: true } },
-            _count: { select: { invites: true, responses: true } },
+            _count: { select: { invites: true, responses: true, bids: true } },
           },
         }),
         prisma.tender.count({ where }),
@@ -256,6 +277,7 @@ module.exports = (prisma) => {
         const enriched = { ...t };
         enriched.invitedCount = t._count?.invites ?? t.invitedCount ?? 0;
         enriched.submissionCount = t._count?.responses ?? t.submissionCount ?? 0;
+        enriched.bidsCount = t._count?.bids ?? 0;
         const con = t.packageId ? contractsByPkg.get(t.packageId) : null;
         if (con) {
           enriched.contractId = con.id;

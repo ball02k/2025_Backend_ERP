@@ -4,6 +4,18 @@ const { prisma } = require('../utils/prisma.cjs');
 const jwt = require('jsonwebtoken');
 const { requireAuth } = require('../middleware/auth.cjs') || { requireAuth: (_req,_res,next)=>next() };
 
+function ensureAdmin(req) {
+  const role = String(req.user?.role || '').toLowerCase();
+  if (role !== 'admin') {
+    const err = new Error('Forbidden');
+    err.status = 403; throw err;
+  }
+}
+
+async function audit(req, entity, entityId, action, changes) {
+  try { await prisma.auditLog.create({ data: { entity, entityId: String(entityId), action, userId: req.user?.id ?? null, changes: changes || {} } }); } catch(_) {}
+}
+
 // Read-only Suppliers API (tenant-scoped)
 
 // GET /api/suppliers?q=&status=&limit=&offset=
@@ -122,6 +134,65 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+// Supplier accreditations (list)
+router.get('/:id/accreditations', async (req, res, next) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const supplierId = Number(req.params.id);
+    if (!Number.isFinite(supplierId)) return res.status(400).json({ error: 'Invalid supplier id' });
+    const rows = await prisma.supplierAccreditationLink.findMany({
+      where: { tenantId, supplierId },
+      orderBy: { createdAt: 'desc' },
+      include: { accreditation: true },
+    });
+    const items = rows.map((r) => ({ id: r.id, status: r.status, expiry: r.expiry, accreditationId: r.accreditationId, name: r.accreditation?.name || '', authority: r.accreditation?.authority || null, url: r.accreditation?.url || null }));
+    res.json(items);
+  } catch (err) { next(err); }
+});
+
+// Supplier accreditations (create/link)
+router.post('/:id/accreditations', async (req, res, next) => {
+  try {
+    ensureAdmin(req);
+    const tenantId = req.user.tenantId;
+    const supplierId = Number(req.params.id);
+    if (!Number.isFinite(supplierId)) return res.status(400).json({ error: 'Invalid supplier id' });
+    const { accreditationId, name, status = 'valid', expiry } = req.body || {};
+    let accId = Number(accreditationId);
+    if (!Number.isFinite(accId)) {
+      const nm = String(name || '').trim();
+      if (!nm) return res.status(400).json({ error: 'accreditationId or name required' });
+      let acc = await prisma.supplierAccreditation.findFirst({ where: { tenantId, name: nm } });
+      if (!acc) {
+        acc = await prisma.supplierAccreditation.create({ data: { tenantId, name: nm } });
+      }
+      accId = acc.id;
+    }
+    // prevent dup
+    const existing = await prisma.supplierAccreditationLink.findFirst({ where: { tenantId, supplierId, accreditationId: accId } });
+    if (existing) return res.json(existing);
+    const created = await prisma.supplierAccreditationLink.create({ data: { tenantId, supplierId, accreditationId: accId, status: String(status || 'valid'), expiry: expiry ? new Date(expiry) : null } });
+    await audit(req, 'SupplierAccreditationLink', created.id, 'create', { supplierId, accreditationId: accId });
+    res.status(201).json(created);
+  } catch (err) { next(err); }
+});
+
+// Supplier accreditations (delete/unlink)
+router.delete('/:id/accreditations/:linkId', async (req, res, next) => {
+  try {
+    ensureAdmin(req);
+    const tenantId = req.user.tenantId;
+    const supplierId = Number(req.params.id);
+    const linkId = Number(req.params.linkId);
+    if (!Number.isFinite(supplierId) || !Number.isFinite(linkId)) return res.status(400).json({ error: 'Invalid id' });
+    const row = await prisma.supplierAccreditationLink.findFirst({ where: { id: linkId, tenantId, supplierId } });
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    await prisma.supplierAccreditationLink.delete({ where: { id: row.id } });
+    await audit(req, 'SupplierAccreditationLink', row.id, 'delete', {});
+    res.status(204).end();
+  } catch (err) { next(err); }
 });
 
 // POST /api/suppliers

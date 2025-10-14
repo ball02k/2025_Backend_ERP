@@ -9,7 +9,7 @@ router.post('/projects/:projectId/packages:seed', requireAuth, async (req, res) 
   try {
     const tenantId = req.user?.tenantId || req.tenantId || 'demo';
     const projectId = Number(req.params.projectId);
-    const { mode = 'group', prefixes = {} } = req.body || {};
+    const { mode = 'group', prefixes = {}, only = [], groupId, costCodePrefix } = req.body || {};
 
     const project = await prisma.project.findFirst({ where: { id: projectId, tenantId }, select: { id: true } });
     if (!project) return res.status(404).json({ error: 'PROJECT_NOT_FOUND' });
@@ -27,7 +27,32 @@ router.post('/projects/:projectId/packages:seed', requireAuth, async (req, res) 
       orderBy: [{ id: 'asc' }],
     });
 
-    // Group lines
+    // Optional filtered modes: single groupId or single costCodePrefix
+    if (groupId != null) {
+      const gid = Number(groupId);
+      const lines = budgets.filter(b => (b.group?.name ? true : (gid === 0 ? true : false)) || b.group?.id === gid);
+      const name = gid === 0 ? 'Ungrouped' : (await prisma.budgetGroup.findFirst({ where: { tenantId, id: gid }, select: { name: true } }))?.name || `Group ${gid}`;
+      if (!lines.length) return res.json({ createdCount: 0, packages: [] });
+      const budgetAmount = lines.reduce((a, l) => a + Number(l.amount || 0), 0);
+      const pkg = await prisma.package.create({ data: { projectId, name, budgetEstimate: Number(budgetAmount) || 0 } });
+      // Enforce one-package-per-line at DB via unique constraint; catch duplicates
+      try { await prisma.packageItem.createMany({ data: lines.map(l => ({ tenantId, packageId: pkg.id, budgetLineId: Number(l.id) })) }); }
+      catch (e) { if (e?.code === 'P2002') return res.status(409).json({ error: 'LINES_ALREADY_COMMITTED' }); }
+      return res.json({ createdCount: 1, packages: [{ id: pkg.id, name: pkg.name, count: lines.length, budgetAmount }] });
+    }
+
+    if (costCodePrefix != null) {
+      const pref = String(costCodePrefix);
+      const lines = budgets.filter(b => (b.costCode?.code || '').startsWith(pref));
+      if (!lines.length) return res.json({ createdCount: 0, packages: [] });
+      const budgetAmount = lines.reduce((a, l) => a + Number(l.amount || 0), 0);
+      const pkg = await prisma.package.create({ data: { projectId, name: pref, budgetEstimate: Number(budgetAmount) || 0 } });
+      try { await prisma.packageItem.createMany({ data: lines.map(l => ({ tenantId, packageId: pkg.id, budgetLineId: Number(l.id) })) }); }
+      catch (e) { if (e?.code === 'P2002') return res.status(409).json({ error: 'LINES_ALREADY_COMMITTED' }); }
+      return res.json({ createdCount: 1, packages: [{ id: pkg.id, name: pkg.name, count: lines.length, budgetAmount }] });
+    }
+
+    // Group lines (bulk modes)
     const groups = new Map(); // name -> array of lines
     for (const b of budgets) {
       let key;
@@ -44,7 +69,9 @@ router.post('/projects/:projectId/packages:seed', requireAuth, async (req, res) 
 
     // Create packages + join items
     const created = [];
+    const onlyNames = Array.isArray(only) ? only.map(String) : null;
     for (const [name, lines] of groups.entries()) {
+      if (onlyNames && onlyNames.length && !onlyNames.includes(String(name))) continue;
       if (!lines.length) continue;
       const budgetAmount = lines.reduce((a, l) => a + Number(l.amount || 0), 0);
 
@@ -80,4 +107,3 @@ router.post('/projects/:projectId/packages:seed', requireAuth, async (req, res) 
 });
 
 module.exports = router;
-

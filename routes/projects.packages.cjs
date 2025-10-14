@@ -27,30 +27,108 @@ const packageSelect = {
   costCodeId: true,
   ownerUserId: true,
   buyerUserId: true,
+  procurementType: true,
+  selfDeliveringTeamId: true,
 };
 
 // GET /api/projects/:projectId/packages — list packages with linked budget items
 router.get('/projects/:projectId/packages', async (req, res, next) => {
   try {
     const projectId = Number(req.params.projectId);
+    const tenantId = req.user?.tenantId || req.tenantId || 'demo';
     let rows = [];
     try {
       rows = await prisma.package.findMany({
-        where: { projectId },
+        where: { projectId, project: { tenantId } },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
-        select: packageSelect,
+        select: { ...packageSelect, type: true, tradeCode: true, tenders: { select: { id: true, status: true, title: true, _count: { select: { responses: true, bids: true } } }, orderBy: { createdAt: 'desc' } } },
       });
     } catch (e) {
       // Fallback minimal selection if schema migrations not applied yet
-      rows = await prisma.package.findMany({ where: { projectId }, orderBy: [{ name: 'asc' }, { id: 'asc' }], select: packageSelect });
+      rows = await prisma.package.findMany({ where: { projectId, project: { tenantId } }, orderBy: [{ name: 'asc' }, { id: 'asc' }], select: packageSelect });
     }
+    // Compute budget totals per package (sum BudgetLine.amount via PackageItem)
+    let sums = [];
+    try {
+      const ids = rows.map(r => r.id);
+      const items = await prisma.packageItem.findMany({ where: { packageId: { in: ids } }, select: { packageId: true, budgetLine: { select: { amount: true } } } });
+      const map = new Map();
+      for (const it of items) {
+        map.set(it.packageId, (map.get(it.packageId) || 0) + Number(it.budgetLine?.amount || 0));
+      }
+      sums = map;
+    } catch (_) {}
+
     const data = rows.map(r => {
       const row = safeJson(r);
-      row.budgetTotal = 0;
+      row.budgetTotal = (sums instanceof Map) ? (sums.get(r.id) || 0) : 0;
+      // Attach linked tender + bids count
+      const active = Array.isArray(row.tenders) ? row.tenders.filter(t => String(t.status||'').toLowerCase() !== 'cancelled') : [];
+      if (active.length) {
+        const t = active[0];
+        row.linkedTender = { id: t.id, title: t.title || `Tender #${t.id}`, status: t.status };
+        row.tenderId = t.id;
+        row.bidsCount = Number((t._count?.bids ?? t._count?.responses) || 0);
+      } else {
+        row.linkedTender = null;
+        row.tenderId = null;
+        row.bidsCount = 0;
+      }
+      // expose trade / tradeCode directly
+      row.trade = row.trade || null;
+      row.tradeCode = row.tradeCode || null;
       row.links = buildLinks('package', { ...row, projectId });
       return row;
     });
     res.json({ items: data, total: data.length });
+  } catch (e) { next(e); }
+});
+
+// POST /api/projects/:projectId/packages/:packageId/items:add-from-budgets
+// Body: { budgetIds: number[] }
+router.post('/projects/:projectId/packages/:packageId/items:add-from-budgets', async (req, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId || req.tenantId || 'demo';
+    const projectId = Number(req.params.projectId);
+    const packageId = Number(req.params.packageId);
+    const ids = Array.isArray(req.body?.budgetIds) ? req.body.budgetIds.map(Number).filter(Number.isFinite) : [];
+    if (!ids.length) return res.status(400).json({ error: 'budgetIds required' });
+    // Validate package belongs to project
+    const pkg = await prisma.package.findFirst({ where: { id: packageId, projectId, project: { tenantId } }, select: { id: true } });
+    if (!pkg) return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
+
+    // Check duplicates first to provide clear error
+    const existing = await prisma.packageItem.findMany({ where: { budgetLineId: { in: ids } }, select: { budgetLineId: true, packageId: true } });
+    if (existing.length) {
+      return res.status(409).json({ error: 'LINES_ALREADY_COMMITTED', lines: existing.map(e => e.budgetLineId) });
+    }
+
+    await prisma.packageItem.createMany({ data: ids.map((id) => ({ tenantId, packageId, budgetLineId: id })) });
+
+    // Audit
+    await prisma.auditLog?.create?.({ data: { tenantId, userId: req.user?.id ?? null, entity: 'Package', entityId: String(packageId), action: 'ATTACH_BUDGETS', changes: { budgetIds: ids } } }).catch(()=>{});
+    res.status(201).json({ added: ids.length });
+  } catch (e) { next(e); }
+});
+
+// DELETE /api/projects/:projectId/packages/:packageId with tender status guards
+router.delete('/projects/:projectId/packages/:packageId', async (req, res, next) => {
+  try {
+    const projectId = Number(req.params.projectId);
+    const packageId = Number(req.params.packageId);
+    const tenantId = req.user?.tenantId || req.tenantId || 'demo';
+    const pkg = await prisma.package.findFirst({ where: { id: packageId, projectId, project: { tenantId } }, select: { id: true } });
+    if (!pkg) return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
+
+    // Block if any active tenders exist in statuses [draft, open, awarded]
+    const blocking = await prisma.tender.count({ where: { packageId, status: { in: ['draft','open','awarded'] } } });
+    if (blocking > 0) return res.status(409).json({ error: 'PACKAGE_HAS_ACTIVE_TENDER' });
+
+    // Remove join rows then package
+    await prisma.packageItem.deleteMany({ where: { packageId } }).catch(()=>{});
+    await prisma.package.delete({ where: { id: packageId } });
+    await prisma.auditLog?.create?.({ data: { tenantId, userId: req.user?.id ?? null, entity: 'Package', entityId: String(packageId), action: 'DELETE' } }).catch(()=>{});
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -61,7 +139,7 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
     const tenantId = req.user?.tenantId || req.tenantId || 'demo';
     const { name, description, scope, tradeCategory, trade, costCodeId, attachments,
       targetAwardDate, requiredOnSite, leadTimeWeeks, contractForm, retentionPct, paymentTerms, currency,
-      ownerUserId, buyerUserId, draftEntityId } = req.body || {};
+      ownerUserId, buyerUserId, draftEntityId, procurementType, selfDeliveringTeamId } = req.body || {};
     // Accept both budgetIds and budgetLineIds for compatibility
     const budgetLineIds = Array.isArray(req.body?.budgetLineIds)
       ? req.body.budgetLineIds.map(Number).filter(Number.isFinite)
@@ -110,14 +188,45 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
         currency: currency == null ? null : String(currency),
         ownerUserId: ownerUserId == null || ownerUserId === '' ? null : Number(ownerUserId),
         buyerUserId: buyerUserId == null || buyerUserId === '' ? null : Number(buyerUserId),
+        procurementType: (procurementType === 'internal' ? 'internal' : 'external'),
+        selfDeliveringTeamId: selfDeliveringTeamId == null || selfDeliveringTeamId === '' ? null : Number(selfDeliveringTeamId),
       },
       select: packageSelect,
     });
+    // If internal procurement, auto-create a contract using tenant self-supplier
+    try {
+      if ((procurementType || '').toLowerCase() === 'internal') {
+        let selfId = null;
+        try {
+          const kv = await prisma.tenantSetting.findFirst({ where: { tenantId, k: 'selfSupplierId' } });
+          if (kv && kv.v != null) selfId = Number(kv.v);
+        } catch (_) {}
+        if (!selfId) {
+          const self = await prisma.supplier.findFirst({ where: { tenantId, isInternal: true } });
+          if (self) selfId = self.id;
+        }
+        if (selfId) {
+          let value = 0;
+          if (Array.isArray(budgetLineIds) && budgetLineIds.length) {
+            try {
+              const agg = await prisma.budgetLine.aggregate({ _sum: { amount: true }, where: { id: { in: budgetLineIds } } });
+              value = Number(agg?._sum?.amount || 0);
+            } catch (_) { value = 0; }
+          }
+          await prisma.contract.create({ data: { projectId, packageId: created.id, supplierId: selfId, title: `Internal Works – ${name}`, value, status: 'Approved', startDate: new Date() } });
+          try { await prisma.auditLog?.create?.({ data: { entity: 'Contract', entityId: String(created.id), action: 'CREATE', changes: { reason: 'Auto-created internal contract from package create' } } }); } catch (_) {}
+        }
+      }
+    } catch (_) {}
     // Try to attach budget lines if table exists (ignore on failure)
     if (Array.isArray(budgetLineIds) && budgetLineIds.length > 0) {
       try {
         await prisma.packageItem.createMany({ data: budgetLineIds.map((id) => ({ tenantId, packageId: created.id, budgetLineId: Number(id) })) });
-      } catch (_) {}
+      } catch (e) {
+        if (e?.code === 'P2002') {
+          return res.status(409).json({ error: 'LINES_ALREADY_COMMITTED', message: 'One or more budget lines are already linked to another package.' });
+        }
+      }
     }
     // If a draft document entityId was provided, relink draft document links to this package id
     try {
@@ -148,7 +257,7 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
     } catch (_) {}
     const row = safeJson(created); row.links = buildLinks('package', { ...row, projectId });
     // Respond with at least the id for minimal FE flows; keep full row for compatibility
-    res.json({ ...row, id: created.id });
+    res.status(201).json({ ...row, id: created.id });
   } catch (e) { next(e); }
 });
 
@@ -235,6 +344,8 @@ router.patch('/projects/:projectId/packages/:packageId', async (req, res, next) 
     if (body.contractForm !== undefined) data.contractForm = body.contractForm == null ? null : String(body.contractForm);
     if (body.paymentTerms !== undefined) data.paymentTerms = body.paymentTerms == null ? null : String(body.paymentTerms);
     if (body.currency !== undefined) data.currency = body.currency == null ? null : String(body.currency);
+    if (body.procurementType !== undefined) data.procurementType = (String(body.procurementType).toLowerCase() === 'internal') ? 'internal' : 'external';
+    if (body.selfDeliveringTeamId !== undefined) data.selfDeliveringTeamId = body.selfDeliveringTeamId == null || body.selfDeliveringTeamId === '' ? null : Number(body.selfDeliveringTeamId);
     if (body.ownerUserId !== undefined) data.ownerUserId = body.ownerUserId == null || body.ownerUserId === '' ? null : Number(body.ownerUserId);
     if (body.buyerUserId !== undefined) data.buyerUserId = body.buyerUserId == null || body.buyerUserId === '' ? null : Number(body.buyerUserId);
     // costCodeId passthrough when provided (optional)

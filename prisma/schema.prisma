@@ -167,6 +167,8 @@ model Project {
   startActual            DateTime?
   endActual              DateTime?
   labels                 Json?
+  // Procurement mode (internal/external/hybrid), string not enum
+  procurementMode        String   @default("hybrid")
 
   // Existing financial/schedule fields retained
   budget      Decimal?  @db.Decimal(18, 2)
@@ -196,6 +198,8 @@ model Project {
   scopeRuns      ScopeRun[]
   // Import jobs (CSV preview/commit tracking)
   importJobs     ImportJob[]
+  // OCR Import jobs (lightweight)
+  ocrImportJobs  OcrImportJob[]
 
   // Additive relations to new modules
   rfis                  Rfi[]
@@ -217,6 +221,7 @@ model Project {
   // Hot paths: client-filtered project lists and planned end sorting
   @@index([tenantId, clientId])
   @@index([tenantId, endPlanned])
+  @@index([tenantId, procurementMode])
   // Additive indexes for new info fields
   @@index([tenantId, clientContactId])
   @@index([tenantId, projectManagerUserId])
@@ -239,6 +244,18 @@ model CostCode {
 
   @@unique([tenantId, code])
   @@index([tenantId, parentId])
+}
+
+// Trade lookup (no enums)
+model Trade {
+  id       Int    @id @default(autoincrement())
+  tenantId String @default("demo")
+  code     String
+  name     String
+  group    String?
+
+  @@unique([tenantId, code])
+  @@index([tenantId, name])
 }
 
 model Task {
@@ -783,6 +800,8 @@ model Supplier {
   insuranceExpiry       DateTime?
   hsAccreditations      String?
   performanceScore      Decimal?
+  // Internal supplier flag (additive)
+  isInternal            Boolean  @default(false)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -797,6 +816,8 @@ model Supplier {
   invoices              Invoice[]
   onboardingTokens      SupplierOnboardingToken[]
   ApplicationForPayment ApplicationForPayment[]
+  // Accreditation links (additive)
+  accreditationLinks    SupplierAccreditationLink[]
 
   @@index([tenantId, name])
   @@index([tenantId, status])
@@ -1415,6 +1436,24 @@ model OcrJob {
 
 // Feature flags removed by Task-14 rollback: FeatureGrant model deleted
 
+// Lightweight OCR import jobs for structured doc types
+model OcrImportJob {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  projectId  Int
+  documentId BigInt
+  kind       String   @default("budget") // e.g., 'budget'
+  status     String   @default("queued")  // queued|processing|done|error
+  resultJson Json?
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId, status])
+}
+
 model Package {
   id              Int       @id @default(autoincrement())
   projectId       Int
@@ -1422,7 +1461,8 @@ model Package {
   name            String
   scope           String?
   trade           String?
-  status          String    @default("Draft")
+  // Status as free string (draft|open|awarded|closed)
+  status          String    @default("draft")
   budgetEstimate  Decimal?
   deadline        DateTime?
   // Additional scheduling + info fields
@@ -1443,6 +1483,13 @@ model Package {
   attachments     Json?
   // Optional: explicitly store a trade category label
   tradeCategory   String?
+  // Procurement (additive)
+  procurementType     String   @default("external")
+  // New: explicit package type (internal|external)
+  type                String   @default("external")
+  // New: Trade code reference (string, not enum)
+  tradeCode           String?
+  selfDeliveringTeamId Int?
   // Ownership (optional)
   ownerUserId     Int?
   buyerUserId     Int?
@@ -1461,6 +1508,7 @@ model Package {
   @@index([projectId])
   @@index([projectId, costCodeId])
   @@index([projectId, status])
+  @@index([projectId, procurementType])
 }
 
 // Join model linking packages to budget lines
@@ -1476,6 +1524,8 @@ model PackageItem {
 
   @@index([tenantId, packageId])
   @@index([tenantId, budgetLineId])
+  // Enforce one-package-per-budget-line per-tenant
+  @@unique([tenantId, budgetLineId])
 }
 
 // Additive lightweight tendering models (separate from existing Request/Submission)
@@ -1632,7 +1682,9 @@ model Contract {
   endDate               DateTime?
   managedByUserId       Int?
   pdfUrl                String?
+  // Commercial terms (moved here as source of truth)
   retentionPct          Float?
+  paymentTerms          String?
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
   ApplicationForPayment ApplicationForPayment[]
@@ -1762,6 +1814,85 @@ model CVRSnapshotLine {
   @@index([tenantId, packageId])
   @@index([tenantId, budgetLineId])
   @@index([tenantId, contractId])
+}
+
+// --- Settings & Taxonomies (additive) ---
+
+model Taxonomy {
+  id             Int      @id @default(autoincrement())
+  tenantId       String
+  key            String
+  name           String
+  description    String?
+  isHierarchical Boolean  @default(false)
+  isLocked       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  terms          TaxonomyTerm[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId, key])
+}
+
+model TaxonomyTerm {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  taxonomyId Int
+  code       String?
+  label      String
+  parentId   Int?
+  sort       Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  taxonomy   Taxonomy      @relation(fields: [taxonomyId], references: [id])
+  parent     TaxonomyTerm? @relation("TermToParent", fields: [parentId], references: [id])
+  children   TaxonomyTerm[] @relation("TermToParent")
+
+  @@index([tenantId, taxonomyId, parentId])
+  @@index([tenantId, taxonomyId, code])
+}
+
+model TenantSetting {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  k         String
+  v         Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, k])
+  @@index([tenantId, k])
+}
+
+model SupplierAccreditation {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  name      String
+  authority String?
+  url       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  links     SupplierAccreditationLink[]
+
+  @@unique([tenantId, name])
+}
+
+model SupplierAccreditationLink {
+  id              Int      @id @default(autoincrement())
+  tenantId        String
+  supplierId      Int
+  accreditationId Int
+  status          String
+  expiry          DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  accreditation   SupplierAccreditation @relation(fields: [accreditationId], references: [id])
+  supplier        Supplier              @relation(fields: [supplierId], references: [id])
+
+  @@index([tenantId, supplierId, accreditationId])
 }
 
 // --- Additive: Budget CSV import tracking (preview/commit) ---
