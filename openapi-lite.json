@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "8906765"
+    "version": "c9a553d"
   },
   "paths": {
     "*": {
@@ -1339,6 +1339,34 @@
         "parameters": [
           {
             "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/info": {
+      "get": {
+        "summary": "GET //api/projects/:projectId/info",
+        "parameters": [
+          {
+            "name": "projectId",
             "in": "path",
             "required": true,
             "schema": {
@@ -9916,9 +9944,9 @@
         }
       }
     },
-    "//api/projects/{projectId}/info": {
+    "//api/{projectId}/info": {
       "get": {
-        "summary": "GET //api/projects/:projectId/info",
+        "summary": "GET //api/:projectId/info",
         "parameters": [
           {
             "name": "projectId",
@@ -9937,32 +9965,6 @@
                 "example": {
                   "id": 1,
                   "_example": true
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "summary": "PATCH //api/projects/:projectId/info",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 1,
-                  "updated": true
                 }
               }
             }
