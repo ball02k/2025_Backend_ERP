@@ -4,6 +4,12 @@ const { prisma, toDecimal, Prisma } = require('../lib/prisma.js');
 const { writeAudit } = require('../lib/audit.cjs');
 const { requireProjectMember } = require('../middleware/membership.cjs');
 
+function toErr(e, fallback = 'INTERNAL') {
+  const code = e?.code || fallback;
+  const message = e?.meta?.cause || e?.message || 'Internal error';
+  return { error: { code, message } };
+}
+
 // --- helpers: coerce Prisma Decimal/strings to numbers, and shape outbound lines ---
 function num(v) {
   if (v === null || v === undefined) return null;
@@ -64,14 +70,20 @@ function lineAmountValue(line) {
 // GET grouped budgets — unified data for both views; includes empty groups for "user"
 router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
   try {
-    const { projectId } = req.params;
+    const projectId = Number(req.params.projectId);
+    if (!Number.isFinite(projectId)) {
+      return res
+        .status(400)
+        .json({ error: { code: 'BAD_REQUEST', message: 'Invalid projectId' } });
+    }
+
     const groupingRaw = String(req.query.grouping || 'user');
     const grouping = groupingRaw.split(':')[0]; // sanitize unexpected values like 'user:1'
     const tenantId = req.user.tenantId;
 
     // 1) Load all lines (we'll coerce with shapeLine)
     const linesRaw = await prisma.budgetLine.findMany({
-      where: { tenantId, projectId: Number(projectId) },
+      where: { tenantId, projectId },
       select: {
         id: true,
         description: true,
@@ -190,8 +202,8 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
     const total = out.reduce((s, g) => s + (Number(g.subtotal) || 0), 0);
     res.json({ groups: out, total });
   } catch (e) {
-    console.error('[budgets/groups]', e);
-    res.status(500).json({ error: 'Failed to load budget groups' });
+    console.error('[budgets/groups] ', e);
+    res.status(500).json(toErr(e));
   }
 });
 

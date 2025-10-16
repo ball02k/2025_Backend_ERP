@@ -190,6 +190,7 @@ app.use('/api/contacts', requireAuth, require('./routes/contacts')(prisma));
 app.use('/api/projects', requireAuth, require('./routes/projects')(prisma));
 app.use('/api/projects', requireAuth, require('./routes/project_members.cjs')(prisma));
 app.use('/api/projects', requireAuth, require('./routes/project_alerts.cjs')(prisma));
+app.use('/api/projects', require('./routes/projects.info.cjs'));
 // app.use('/api/projects', projectsOverviewRouter);
 app.use('/api/projects', requireAuth, projectsOverviewRouter);
 app.use('/api', requireAuth, projectBudgetRouter);
