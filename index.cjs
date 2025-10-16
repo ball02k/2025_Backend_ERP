@@ -22,6 +22,23 @@ const TENANT_DEFAULT = process.env.TENANT_DEFAULT || 'demo';
 console.log('[API Catalog] hash:', getCatalogHash());
 console.log(getDeltaPrompt());
 
+function getTenantId(req) {
+  return (
+    req.user?.tenantId ||
+    req.headers['x-tenant-id'] ||
+    req.headers['X-Tenant-Id'] ||
+    TENANT_DEFAULT
+  );
+}
+
+const SAMPLE_TRADES = [
+  { id: 'trade:gen', name: 'General Construction', group: 'Core Trades' },
+  { id: 'trade:elec', name: 'Electrical', group: 'Core Trades' },
+  { id: 'trade:mech', name: 'Mechanical', group: 'Core Trades' },
+  { id: 'trade:plumb', name: 'Plumbing', group: 'Specialist Trades' },
+  { id: 'trade:join', name: 'Joinery', group: 'Specialist Trades' },
+];
+
 
 const variationsRouter = require('./routes/variations.cjs');
 const documentsRouter = require('./routes/documents_v2.cjs');
@@ -54,6 +71,8 @@ const projectInvoicesRouter = require('./routes/project_invoices.cjs');
 const projectBudgetRouter = require('./routes/projects.budget.cjs');
 const projectPackagesRouter = require('./routes/projects.packages.cjs');
 const projectContractsRouter = require('./routes/projects.contracts.cjs');
+const contractsRouter = require('./routes/contracts.cjs');
+const packagesRouter = require('./routes/packages.cjs');
 const projectOverviewRouter2 = require('./routes/projects.overview.cjs');
 const costCodesRouter = require('./routes/costCodes.cjs');
 const financePoRouter = require('./routes/finance.pos.cjs');
@@ -67,6 +86,7 @@ const afpOpenRouter = require('./routes/afp.open.cjs');
 const cvrRouter = require('./routes/financials.cvr.cjs');
 const diaryRouter = require('./routes/diary.cjs');
 const scopeAssistRouter = require('./routes/scope.assist.cjs');
+const projectScopeRouter = require('./routes/projects.scope.cjs');
 const budgetsImportRouter = require('./routes/budgets.import.cjs');
 const packagesSeedRouter = require('./routes/packages.seed.cjs');
 const taxonomyRouter = require('./routes/taxonomy.cjs');
@@ -158,6 +178,37 @@ app.set('json replacer', (key, value) =>
   (typeof value === 'bigint' ? Number(value) : value)
 );
 
+app.get('/api/v1/tenants/modules', (req, res) => {
+  const tenantId = getTenantId(req);
+  res.json({
+    tenantId,
+    tendering: true,
+    rfx: true,
+    contracts: true,
+    budgets: true,
+    ai_scope: false,
+    scope_suggest: true,
+    submittals: false,
+    finance: true,
+  });
+});
+
+app.get('/api/trades', (req, res) => {
+  const query = String(req.query.query || req.query.q || '').toLowerCase();
+  const filtered = query
+    ? SAMPLE_TRADES.filter((trade) => trade.name.toLowerCase().includes(query))
+    : SAMPLE_TRADES;
+
+  const grouped = filtered.reduce((acc, trade) => {
+    const key = trade.group || 'Trades';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push({ id: trade.id, name: trade.name });
+    return acc;
+  }, {});
+
+  res.json({ groups: grouped });
+});
+
 // Prefer explicit PORT; in dev we'll fall back to the next free port if the default is taken
 const DEFAULT_PORT = 3001;
 const EXPLICIT_PORT = process.env.PORT ? Number(process.env.PORT) : undefined;
@@ -194,6 +245,8 @@ app.use('/api', requireAuth, projectBudgetRouter);
 app.use('/api/projects', require('./routes/projects.budgets.cjs'));
 app.use('/api', requireAuth, projectPackagesRouter);
 app.use('/api', requireAuth, projectContractsRouter);
+app.use('/api/contracts', requireAuth, contractsRouter);
+app.use('/api/packages', requireAuth, packagesRouter());
 app.use('/api', requireAuth, projectOverviewRouter2);
 app.use('/api', requireAuth, costCodesRouter);
   app.use('/api/projects', requireAuth, rfxRouter(prisma));
@@ -212,6 +265,7 @@ app.use('/api', requireAuth, scopeAssistRouter);
 app.use('/api', requireAuth, packagesSeedRouter);
 // Scope assist (feature-gated routes); route-level auth inside
 app.use('/api', scopeAssistRouter);
+app.use('/api/projects/:projectId/scope-runs', requireAuth, projectScopeRouter);
 // Taxonomy admin routes
 app.use('/api', taxonomyRouter);
 // Top-level explicit mounts to avoid any router path ambiguity

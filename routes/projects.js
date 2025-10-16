@@ -5,6 +5,25 @@ const { projectBodySchema } = require('../lib/validation');
 const PackageController = require('../controllers/packageController.js');
 module.exports = (prisma) => {
   const router = express.Router();
+
+  function isScopeSummaryMissing(err) {
+    const msg = String(err?.message || '').toLowerCase();
+    if (!msg.includes('scopesummary')) return false;
+    return msg.includes('does not exist') || msg.includes('unknown column') || msg.includes('unknown field');
+  }
+
+  function normalizeScope(row) {
+    if (!row || typeof row !== 'object') return row;
+    if (!Object.prototype.hasOwnProperty.call(row, 'scopeSummary')) {
+      if (Object.prototype.hasOwnProperty.call(row, 'scope')) {
+        row.scopeSummary = row.scope;
+        delete row.scope;
+      } else {
+        row.scopeSummary = null;
+      }
+    }
+    return row;
+  }
   function toCsvRow(values) {
     return values
       .map((v) => {
@@ -166,21 +185,66 @@ module.exports = (prisma) => {
   router.post('/:projectId/packages', requireProjectMember, async (req, res) => {
     try {
       const projectId = Number(req.params.projectId);
-      const { name, description, scope, trade, tradeCategory, budget, attachments, costCodeId, budgetIds } = req.body || {};
+      const {
+        name,
+        description,
+        scope,
+        scopeSummary,
+        trade,
+        tradeCategory,
+        budget,
+        attachments,
+        costCodeId,
+        budgetIds,
+      } = req.body || {};
       if (!name) return res.status(400).json({ error: 'Name is required' });
-      const pkg = await prisma.package.create({
-        data: {
-          projectId,
-          name,
-          // map description to scope (legacy)
-          scope: (scope ?? description) || null,
-          trade: (trade || tradeCategory) ?? null,
-          status: 'Draft',
-          budgetEstimate: budget ?? null,
-          costCodeId: costCodeId ?? null,
-        },
-        select: { id: true, projectId: true, name: true, scope: true, trade: true, status: true, budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true, createdAt: true, updatedAt: true, costCodeId: true },
-      });
+      let pkg;
+      try {
+        pkg = await prisma.package.create({
+          data: {
+            projectId,
+            name,
+            scopeSummary: (scopeSummary ?? scope ?? description) || null,
+            trade: (trade || tradeCategory) ?? null,
+            status: 'Draft',
+            budgetEstimate: budget ?? null,
+            costCodeId: costCodeId ?? null,
+          },
+          select: {
+            id: true,
+            projectId: true,
+            name: true,
+            scopeSummary: true,
+            trade: true,
+            status: true,
+            budgetEstimate: true,
+            deadline: true,
+            awardValue: true,
+            awardSupplierId: true,
+            createdAt: true,
+            updatedAt: true,
+            costCodeId: true,
+          },
+        });
+      } catch (err) {
+        if (isScopeSummaryMissing(err)) {
+          const data = {
+            projectId,
+            name,
+            scope: (scopeSummary ?? scope ?? description) || null,
+            trade: (trade || tradeCategory) ?? null,
+            status: 'Draft',
+            budgetEstimate: budget ?? null,
+            costCodeId: costCodeId ?? null,
+          };
+          pkg = await prisma.package.create({
+            data,
+          });
+        } else {
+          throw err;
+        }
+      }
+      pkg = normalizeScope(pkg);
       // Link budget lines if table exists
       if (Array.isArray(budgetIds) && budgetIds.length) {
         try { await prisma.packageItem.createMany({ data: budgetIds.map((id) => ({ packageId: pkg.id, budgetLineId: Number(id) })) }); } catch (_) {}
@@ -194,7 +258,41 @@ module.exports = (prisma) => {
   // GET /api/projects/:projectId/packages → List packages (incl. budget items & tenders)
   router.get('/:projectId/packages', requireProjectMember, async (req, res) => {
     const projectId = Number(req.params.projectId);
-    const packages = await prisma.package.findMany({ where: { projectId }, orderBy: [{ name: 'asc' }, { id: 'asc' }], select: { id: true, projectId: true, name: true, scope: true, trade: true, status: true, budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true, createdAt: true, updatedAt: true, costCodeId: true, tenders: true } });
+    let packages;
+    try {
+      packages = await prisma.package.findMany({
+        where: { projectId },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          projectId: true,
+          name: true,
+          scopeSummary: true,
+          trade: true,
+          status: true,
+          budgetEstimate: true,
+          deadline: true,
+          awardValue: true,
+          awardSupplierId: true,
+          createdAt: true,
+          updatedAt: true,
+          costCodeId: true,
+          tenders: true,
+        },
+      });
+    } catch (err) {
+      if (isScopeSummaryMissing(err)) {
+        const rest = await prisma.package.findMany({
+          where: { projectId },
+          orderBy: [{ name: 'asc' }, { id: 'asc' }],
+          include: { tenders: true },
+        });
+        packages = rest.map((row) => normalizeScope(row));
+      } else {
+        throw err;
+      }
+    }
+    packages = packages.map((row) => normalizeScope(row));
     res.json(packages);
   });
 
