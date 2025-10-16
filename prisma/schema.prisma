@@ -1053,9 +1053,9 @@ model BudgetLine {
   category    String?
   periodMonth String?
   description String?
-  qty         Decimal  @default(0) @db.Decimal(18, 3)
+  qty         Decimal  @default(0) @db.Decimal(18, 2)
   unit        String?
-  rate        Decimal  @default(0) @db.Decimal(18, 2)
+  rate        Decimal  @default(0) @db.Decimal(18, 4)
   total       Decimal  @default(0) @db.Decimal(18, 2)
   amount      Decimal  @default(0)
   planned     Decimal? @db.Decimal(18, 2)
@@ -1566,7 +1566,7 @@ model Submission {
 
 model Contract {
   id                   Int       @id @default(autoincrement())
-  tenantId             String    @default("demo")
+  tenantId             String?   @db.VarChar(64) @map("tenantId")
   projectId            Int
   project              Project   @relation(fields: [projectId], references: [id])
   packageId            Int?
