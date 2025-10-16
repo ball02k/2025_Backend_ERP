@@ -173,19 +173,33 @@ module.exports = (prisma) => {
           projectId,
           name,
           // map description to scope (legacy)
-          scope: (scope ?? description) || null,
+          scopeSummary: (scope ?? description) || null,
           trade: (trade || tradeCategory) ?? null,
           status: 'Draft',
           budgetEstimate: budget ?? null,
           costCodeId: costCodeId ?? null,
         },
-        select: { id: true, projectId: true, name: true, scope: true, trade: true, status: true, budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true, createdAt: true, updatedAt: true, costCodeId: true },
+        select: {
+          id: true,
+          projectId: true,
+          name: true,
+          scopeSummary: true,
+          trade: true,
+          status: true,
+          budgetEstimate: true,
+          deadline: true,
+          awardValue: true,
+          awardSupplierId: true,
+          createdAt: true,
+          updatedAt: true,
+          costCodeId: true,
+        },
       });
       // Link budget lines if table exists
       if (Array.isArray(budgetIds) && budgetIds.length) {
         try { await prisma.packageItem.createMany({ data: budgetIds.map((id) => ({ packageId: pkg.id, budgetLineId: Number(id) })) }); } catch (_) {}
       }
-      res.status(201).json(pkg);
+      res.status(201).json({ ...pkg, scope: pkg.scopeSummary ?? null });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
@@ -193,9 +207,38 @@ module.exports = (prisma) => {
 
   // GET /api/projects/:projectId/packages → List packages (incl. budget items & tenders)
   router.get('/:projectId/packages', requireProjectMember, async (req, res) => {
-    const projectId = Number(req.params.projectId);
-    const packages = await prisma.package.findMany({ where: { projectId }, orderBy: [{ name: 'asc' }, { id: 'asc' }], select: { id: true, projectId: true, name: true, scope: true, trade: true, status: true, budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true, createdAt: true, updatedAt: true, costCodeId: true, tenders: true } });
-    res.json(packages);
+    try {
+      const projectId = Number(req.params.projectId);
+      if (!Number.isFinite(projectId)) {
+        return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Invalid projectId' } });
+      }
+
+      const packages = await prisma.package.findMany({
+        where: { projectId },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        // IMPORTANT: Do NOT list scalar fields here; schema drifts will crash.
+        // Only include relations that EXIST in your current Prisma schema.
+        include: {
+          project: true,
+          awardSupplier: true,
+          ownerUser: true,
+          buyerUser: true,
+          submissions: true,
+          invites: true,
+          contracts: true,
+          requests: true,
+          costCode: true,
+          budgetItems: true,
+          tenders: true,
+          _count: true,
+        },
+      });
+
+      return res.json({ data: packages });
+    } catch (err) {
+      console.error('GET /projects/:projectId/packages failed:', err);
+      return res.status(500).json({ error: { code: 'INTERNAL', message: 'Failed to fetch packages' } });
+    }
   });
 
   // POST /api/projects/:projectId/tenders → Create tender
