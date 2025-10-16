@@ -3,6 +3,32 @@ const router = express.Router({ mergeParams: true });
 const { prisma } = require('../utils/prisma.cjs');
 const { requireProjectMember } = require('../middleware/membership.cjs');
 
+// POST /api/projects/:projectId/budgets/suggest-packages
+// Placeholder implementation to keep the UI workflow unblocked.
+router.post('/:projectId/budgets/suggest-packages', requireProjectMember, async (req, res) => {
+  try {
+    const projectId = Number(req.params.projectId);
+    if (!Number.isFinite(projectId)) {
+      return res.status(400).json({ error: 'Invalid project id' });
+    }
+
+    const tenantId = req.user?.tenantId || req.tenantId || 'demo';
+
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, tenantId },
+      select: { id: true },
+    });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    return res.json({ suggestions: [] });
+  } catch (err) {
+    console.error('[budgets/suggest-packages]', err);
+    return res.status(500).json({ error: err?.message || 'Server error' });
+  }
+});
+
 // --- helpers: coerce Prisma Decimal/strings to numbers, and shape outbound lines ---
 function num(v) {
   if (v === null || v === undefined) return null;

@@ -210,7 +210,7 @@ async function ensurePackages(projectId, budgetLines) {
     if (!row) {
       row = await http('POST', `/api/projects/${projectId}/packages`, {
         name: pkg.name,
-        scope: pkg.scope,
+        scopeSummary: pkg.scope,
         trade: pkg.trade,
         budgetEstimate: pkg.budgetEstimate,
         deadline,

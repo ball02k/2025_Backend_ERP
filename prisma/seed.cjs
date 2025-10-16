@@ -240,7 +240,7 @@ async function seedPackages(projectId, suppliers) {
       data: {
         projectId,
         name: def.name,
-        scope: `${def.trade} scope for level A & B`,
+        scopeSummary: `${def.trade} scope for level A & B`,
         trade: def.trade,
         status: def.status,
         budgetEstimate: 100000,

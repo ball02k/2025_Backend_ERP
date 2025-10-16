@@ -1280,7 +1280,7 @@ model ApplicationForPayment {
   tenantId        String
   projectId       Int
   supplierId      Int?
-  contractId      BigInt?
+  contractId      Int?
   applicationNo   String // e.g. "AFP-2025-00012", unique per tenant
   applicationDate DateTime // date submitted
   periodStart     DateTime
@@ -1318,7 +1318,7 @@ model ApplicationForPayment {
 
   project       Project         @relation(fields: [projectId], references: [id])
   supplier      Supplier?       @relation(fields: [supplierId], references: [id])
-  contract      Contract?       @relation(fields: [contractId], references: [id])
+  contract      Contract?       @relation("ContractApplications", fields: [contractId], references: [id])
   AfpAttachment AfpAttachment[]
 
   @@unique([tenantId, applicationNo])
@@ -1364,9 +1364,10 @@ model Package {
   projectId       Int
   project         Project   @relation(fields: [projectId], references: [id])
   name            String
-  scope           String?
+  scopeSummary    String?   @map("scope") // maps to DB column "scope"
   trade           String?
   status          String    @default("Draft")
+  route           String?   @default("tender")
   budgetEstimate  Decimal?
   deadline        DateTime?
   // Additional scheduling + info fields
@@ -1395,7 +1396,7 @@ model Package {
 
   submissions Submission[]   @relation("PackageSubmissions")
   invites     TenderInvite[] @relation("PackageInvites")
-  contract    Contract?      @relation("PackageContract")
+  contracts   Contract[]     @relation("PackageContracts")
   requests    Request[]
   tenders     Tender[]
   costCode    CostCode?      @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
@@ -1559,29 +1560,30 @@ model Submission {
 }
 
 model Contract {
-  id                    BigInt                  @id @default(autoincrement())
-  projectId             Int
-  project               Project                 @relation(fields: [projectId], references: [id])
-  packageId             Int?                    @unique
-  package               Package?                @relation(name: "PackageContract", fields: [packageId], references: [id])
-  supplierId            Int
-  supplier              Supplier                @relation("SupplierContracts", fields: [supplierId], references: [id])
-  title                 String
-  contractNumber        String?
-  value                 Decimal
-  originalValue         Decimal?                @db.Decimal(18, 2)
-  status                String                  @default("Pending")
-  signedAt              DateTime?
-  startDate             DateTime?
-  endDate               DateTime?
-  managedByUserId       Int?
-  pdfUrl                String?
-  retentionPct          Float?
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
-  ApplicationForPayment ApplicationForPayment[]
+  id              Int       @id @default(autoincrement())
+  tenantId        String
+  projectId       Int
+  packageId       Int
+  supplierId      Int
+  title           String
+  status          String    @default("Draft")
+  awardValue      Decimal   @db.Decimal(18, 2)
+  currency        String    @default("GBP")
+  contractType    String?
+  startDate       DateTime?
+  endDate         DateTime?
+  createdAt       DateTime  @default(now())
+  createdByUserId Int?
+  updatedAt       DateTime  @updatedAt
 
+  project      Project                 @relation(fields: [projectId], references: [id])
+  package      Package                 @relation("PackageContracts", fields: [packageId], references: [id])
+  supplier     Supplier                @relation("SupplierContracts", fields: [supplierId], references: [id])
+  applications ApplicationForPayment[] @relation("ContractApplications")
+
+  @@index([tenantId])
   @@index([projectId])
+  @@index([packageId])
   @@index([supplierId])
 }
 
@@ -1651,6 +1653,7 @@ model DiaryEntry {
 model AuditLog {
   id        Int      @id @default(autoincrement())
   timestamp DateTime @default(now())
+  tenantId  String?
   userId    Int?
   user      User?    @relation(fields: [userId], references: [id])
   entity    String

@@ -24,12 +24,12 @@ exports.listPackages = async (req, res) => {
 exports.createPackage = async (req, res) => {
   try {
     const projectId = Number(req.params.projectId);
-    const { name, scope, trade, budgetEstimate, deadline } = req.body;
+    const { name, scope, scopeSummary, trade, budgetEstimate, deadline } = req.body;
     const newPackage = await prisma.package.create({
       data: {
         projectId,
         name,
-        scope,
+        scopeSummary: (scopeSummary ?? scope) || null,
         trade,
         budgetEstimate,
         deadline: deadline ? new Date(deadline) : null
