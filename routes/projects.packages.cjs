@@ -8,7 +8,7 @@ const packageSelect = {
   id: true,
   projectId: true,
   name: true,
-  scope: true,
+  scopeSummary: true,
   trade: true,
   status: true,
   budgetEstimate: true,
@@ -46,6 +46,8 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
     }
     const data = rows.map(r => {
       const row = safeJson(r);
+      row.scopeSummary = row.scopeSummary ?? row.scope ?? null;
+      row.scope = row.scope ?? row.scopeSummary ?? null;
       row.budgetTotal = 0;
       row.links = buildLinks('package', { ...row, projectId });
       return row;
@@ -97,7 +99,7 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
         projectId,
         name,
         // Map description to scope for compatibility
-        scope: (scope ?? description) || null,
+        scopeSummary: (scope ?? description) || null,
         trade: (trade || tradeCategory) ?? null,
         costCodeId: costCodeId ?? null,
         // Extra fields (optional)
@@ -146,7 +148,10 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
         },
       }).catch(() => {});
     } catch (_) {}
-    const row = safeJson(created); row.links = buildLinks('package', { ...row, projectId });
+    const row = safeJson(created);
+    row.scopeSummary = row.scopeSummary ?? row.scope ?? null;
+    row.scope = row.scope ?? row.scopeSummary ?? null;
+    row.links = buildLinks('package', { ...row, projectId });
     // Respond with at least the id for minimal FE flows; keep full row for compatibility
     res.json({ ...row, id: created.id });
   } catch (e) { next(e); }
@@ -165,7 +170,7 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
       pkg = await prisma.package.findFirst({
         where: { id: packageId, projectId },
         select: {
-          id: true, projectId: true, name: true, scope: true, trade: true, status: true,
+          id: true, projectId: true, name: true, scopeSummary: true, trade: true, status: true,
           budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true,
           createdAt: true, updatedAt: true, costCodeId: true,
           tenders: { select: { id: true, status: true, title: true } }
@@ -174,6 +179,8 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
     }
     if (!pkg) return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
     const row = safeJson(pkg);
+    row.scopeSummary = row.scopeSummary ?? row.scope ?? null;
+    row.scope = row.scope ?? row.scopeSummary ?? null;
     // Attach budget lines via join table (robust to schema variants)
     try {
       const items = await prisma.packageItem.findMany({
@@ -220,7 +227,7 @@ router.patch('/projects/:projectId/packages/:packageId', async (req, res, next) 
     const data = {};
     if (body.name !== undefined) data.name = String(body.name).trim();
     // Map description -> scope for compatibility
-    if (body.description !== undefined) data.scope = body.description == null ? null : String(body.description);
+    if (body.description !== undefined) data.scopeSummary = body.description == null ? null : String(body.description);
     if (body.trade !== undefined) data.trade = body.trade == null ? null : String(body.trade);
     if (body.tradeCategory !== undefined) data.tradeCategory = body.tradeCategory == null ? null : String(body.tradeCategory);
     // Dates
@@ -260,7 +267,10 @@ router.patch('/projects/:projectId/packages/:packageId', async (req, res, next) 
       }).catch(()=>{});
     } catch (_) {}
 
-    const row = safeJson(updated); row.links = buildLinks('package', { ...row, projectId });
+    const row = safeJson(updated);
+    row.scopeSummary = row.scopeSummary ?? row.scope ?? null;
+    row.scope = row.scope ?? row.scopeSummary ?? null;
+    row.links = buildLinks('package', { ...row, projectId });
     res.json(row);
   } catch (e) { next(e); }
 });
@@ -333,10 +343,13 @@ router.get('/packages/:packageId', async (req, res, next) => {
     if (!Number.isFinite(packageId)) return res.status(400).json({ error: 'Invalid packageId' });
     const pkg = await prisma.package.findFirst({
       where: { id: packageId, project: { tenantId } },
-      select: { id: true, projectId: true, name: true, scope: true, trade: true, status: true, budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true, createdAt: true, updatedAt: true, costCodeId: true },
+      select: { id: true, projectId: true, name: true, scopeSummary: true, trade: true, status: true, budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true, createdAt: true, updatedAt: true, costCodeId: true },
     });
     if (!pkg) return res.status(404).json({ error: 'Not found' });
-    const row = safeJson(pkg); row.links = buildLinks('package', row);
+    const row = safeJson(pkg);
+    row.scopeSummary = row.scopeSummary ?? row.scope ?? null;
+    row.scope = row.scope ?? row.scopeSummary ?? null;
+    row.links = buildLinks('package', row);
     res.json(row);
   } catch (e) { next(e); }
 });

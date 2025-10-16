@@ -13,7 +13,7 @@ async function main() {
   // 3. Budget line
   await prisma.budgetLine.upsert({ where: { tenantId_projectId_code: { tenantId, projectId: project.id, code: 'BL-001' } }, update: {}, create: { tenantId, projectId: project.id, code: 'BL-001', description: 'Main works', planned: 100000, amount: 100000, costCodeId: cc.id } }).catch(()=>{});
   // 4. Package
-  const pkg = await prisma.package.create({ data: { projectId: project.id, name: 'Main Works', scope: 'Seeded by script', status: 'Draft' } });
+  const pkg = await prisma.package.create({ data: { projectId: project.id, name: 'Main Works', scopeSummary: 'Seeded by script', status: 'Draft' } });
   // 5. Tender
   const tender = await prisma.tender.create({ data: { tenantId, projectId: project.id, packageId: pkg.id, title: 'Main Works Tender', status: 'open' } });
   // 6. Supplier
