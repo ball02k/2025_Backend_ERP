@@ -1053,6 +1053,10 @@ model BudgetLine {
   category    String?
   periodMonth String?
   description String?
+  qty         Decimal  @default(0) @db.Decimal(18, 3)
+  unit        String?
+  rate        Decimal  @default(0) @db.Decimal(18, 2)
+  total       Decimal  @default(0) @db.Decimal(18, 2)
   amount      Decimal  @default(0)
   planned     Decimal? @db.Decimal(18, 2)
   estimated   Decimal? @db.Decimal(18, 2)
@@ -1063,6 +1067,7 @@ model BudgetLine {
   // Grouping (additive)
   groupId     Int?
   sortOrder   Int?     @default(0)
+  position    Int      @default(0)
 
   project      Project       @relation(fields: [projectId], references: [id])
   costCode     CostCode?     @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
@@ -1083,6 +1088,7 @@ model BudgetGroup {
   projectId Int
   name      String
   sortOrder Int      @default(0)
+  position  Int      @default(0)
   isSystem  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1191,7 +1197,7 @@ model Invoice {
   source        String?
   // Additive links to tie into budget/contract rollups
   packageId     Int?
-  contractId    BigInt?
+  contractId    Int?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -1280,7 +1286,7 @@ model ApplicationForPayment {
   tenantId        String
   projectId       Int
   supplierId      Int?
-  contractId      BigInt?
+  contractId      Int?
   applicationNo   String // e.g. "AFP-2025-00012", unique per tenant
   applicationDate DateTime // date submitted
   periodStart     DateTime
@@ -1364,7 +1370,7 @@ model Package {
   projectId       Int
   project         Project   @relation(fields: [projectId], references: [id])
   name            String
-  scope           String?
+  scopeSummary    String?   @map("scope")
   trade           String?
   status          String    @default("Draft")
   budgetEstimate  Decimal?
@@ -1395,7 +1401,7 @@ model Package {
 
   submissions Submission[]   @relation("PackageSubmissions")
   invites     TenderInvite[] @relation("PackageInvites")
-  contract    Contract?      @relation("PackageContract")
+  contracts   Contract[]     @relation("PackageContracts")
   requests    Request[]
   tenders     Tender[]
   costCode    CostCode?      @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
@@ -1559,30 +1565,30 @@ model Submission {
 }
 
 model Contract {
-  id                    BigInt                  @id @default(autoincrement())
-  projectId             Int
-  project               Project                 @relation(fields: [projectId], references: [id])
-  packageId             Int?                    @unique
-  package               Package?                @relation(name: "PackageContract", fields: [packageId], references: [id])
-  supplierId            Int
-  supplier              Supplier                @relation("SupplierContracts", fields: [supplierId], references: [id])
-  title                 String
-  contractNumber        String?
-  value                 Decimal
-  originalValue         Decimal?                @db.Decimal(18, 2)
-  status                String                  @default("Pending")
-  signedAt              DateTime?
-  startDate             DateTime?
-  endDate               DateTime?
-  managedByUserId       Int?
-  pdfUrl                String?
-  retentionPct          Float?
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
+  id                   Int       @id @default(autoincrement())
+  tenantId             String    @default("demo")
+  projectId            Int
+  project              Project   @relation(fields: [projectId], references: [id])
+  packageId            Int?
+  package              Package?  @relation("PackageContracts", fields: [packageId], references: [id])
+  supplierId           Int
+  supplier             Supplier  @relation("SupplierContracts", fields: [supplierId], references: [id])
+  title                String
+  status               String    @default("Draft")
+  awardValue           Decimal   @db.Decimal(18, 2)
+  currency             String    @default("GBP")
+  contractType         String?
+  startDate            DateTime?
+  endDate              DateTime?
+  createdAt            DateTime  @default(now())
+  createdByUserId      Int?
+  updatedAt            DateTime  @updatedAt
   ApplicationForPayment ApplicationForPayment[]
 
-  @@index([projectId])
-  @@index([supplierId])
+  @@index([tenantId])
+  @@index([tenantId, projectId])
+  @@index([tenantId, packageId])
+  @@index([tenantId, supplierId])
 }
 
 // --- Cost Value Reconciliation (additive) ---
@@ -1685,7 +1691,7 @@ model CVRSnapshotLine {
   projectId    Int
   budgetLineId Int?
   packageId    Int?
-  contractId   BigInt?
+  contractId   Int?
   code         String?
   name         String?
 

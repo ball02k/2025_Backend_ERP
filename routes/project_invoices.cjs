@@ -244,7 +244,7 @@ module.exports = (prisma) => {
           status: b.status ? String(b.status) : 'Open',
           source: b.source ? String(b.source) : null,
           packageId: b.packageId != null ? Number(b.packageId) : null,
-          contractId: b.contractId != null ? BigInt(b.contractId) : null,
+          contractId: b.contractId != null ? Number(b.contractId) : null,
         },
         select: {
           id: true,

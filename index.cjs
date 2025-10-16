@@ -54,6 +54,9 @@ const projectInvoicesRouter = require('./routes/project_invoices.cjs');
 const projectBudgetRouter = require('./routes/projects.budget.cjs');
 const projectPackagesRouter = require('./routes/projects.packages.cjs');
 const projectContractsRouter = require('./routes/projects.contracts.cjs');
+const packagesRouter = require('./routes/packages.cjs');
+const contractsRouter = require('./routes/contracts.cjs');
+const projectsScopeRouter = require('./routes/projects.scope.cjs');
 const projectOverviewRouter2 = require('./routes/projects.overview.cjs');
 const costCodesRouter = require('./routes/costCodes.cjs');
 const financePoRouter = require('./routes/finance.pos.cjs');
@@ -194,6 +197,9 @@ app.use('/api', requireAuth, projectBudgetRouter);
 app.use('/api/projects', require('./routes/projects.budgets.cjs'));
 app.use('/api', requireAuth, projectPackagesRouter);
 app.use('/api', requireAuth, projectContractsRouter);
+app.use('/api', requireAuth, packagesRouter);
+app.use('/api', requireAuth, contractsRouter);
+app.use('/api', requireAuth, projectsScopeRouter);
 app.use('/api', requireAuth, projectOverviewRouter2);
 app.use('/api', requireAuth, costCodesRouter);
   app.use('/api/projects', requireAuth, rfxRouter(prisma));
@@ -271,6 +277,27 @@ app.use('/api', requireAuth, financeMatchRouter);
 app.use('/api', requireAuth, financeOcrRouter);
 app.use('/api', requireAuth, financeReceiptsRouter);
 app.use('/api', financeInboundRouter);
+
+app.get('/api/v1/tenants/modules', requireAuth, (req, res) => {
+  const tenantId = req.user?.tenantId || TENANT_DEFAULT;
+  res.json({ tenantId, modules: ['scope_suggest'] });
+});
+
+app.get('/api/trades', requireAuth, async (req, res) => {
+  try {
+    const tenantId = req.user?.tenantId || TENANT_DEFAULT;
+    const rows = await prisma.package.findMany({
+      where: { project: { tenantId }, trade: { not: null } },
+      distinct: ['trade'],
+      select: { trade: true },
+      orderBy: { trade: 'asc' },
+    });
+    res.json({ items: rows.map((r) => r.trade).filter(Boolean) });
+  } catch (err) {
+    console.warn('[trades] failed to fetch', err);
+    res.status(500).json({ error: 'Failed to load trades', items: [] });
+  }
+});
 // Public, no auth routes (e.g., supplier onboarding)
 app.use('/public', publicRoutes);
 

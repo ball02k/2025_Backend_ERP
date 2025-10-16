@@ -1,11 +1,13 @@
 const express = require('express');
 const router = express.Router({ mergeParams: true });
-const { prisma } = require('../utils/prisma.cjs');
+const { prisma, toDecimal, Prisma } = require('../lib/prisma.js');
+const { writeAudit } = require('../lib/audit.cjs');
 const { requireProjectMember } = require('../middleware/membership.cjs');
 
 // --- helpers: coerce Prisma Decimal/strings to numbers, and shape outbound lines ---
 function num(v) {
   if (v === null || v === undefined) return null;
+  if (v instanceof Prisma.Decimal) return Number(v);
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -13,20 +15,44 @@ function shapeLine(b) {
   return {
     id: b.id,
     description: b.description ?? "",
-    quantity: num(b.quantity),   // may be null if not set
+    quantity: num(b.qty),   // may be null if not set
+    qty: num(b.qty),
     unit: b.unit ?? "ea",
     rate: num(b.rate),
-    amount: num(b.amount),
+    total: num(b.total ?? b.amount),
+    amount: num(b.total ?? b.amount),
     sortOrder: num(b.sortOrder) ?? 0,
+    position: num(b.position) ?? 0,
     groupId: b.groupId ? Number(b.groupId) : null,
     costCode: b.costCode ? { id: b.costCode.id, code: b.costCode.code, description: b.costCode.description ?? "" } : null,
     // Map through join table; include status if present
     packages: Array.isArray(b.packageItems)
       ? b.packageItems
-          .map(pi => (pi.package ? { id: pi.package.id, name: pi.package.name, status: pi.package.status, code: pi.package.costCode?.code } : null))
+          .map(pi => (pi.package ? {
+            id: pi.package.id,
+            name: pi.package.name,
+            status: pi.package.status,
+            scopeSummary: pi.package.scopeSummary,
+            scope: pi.package.scopeSummary,
+            code: pi.package.costCode?.code,
+          } : null))
           .filter(Boolean)
       : [],
   };
+}
+
+function lineAmountValue(line) {
+  if (line.total != null) {
+    const t = num(line.total);
+    if (t != null) return t;
+  }
+  if (line.amount != null) {
+    const a = num(line.amount);
+    if (a != null) return a;
+  }
+  const qty = num(line.quantity) || 0;
+  const rate = num(line.rate) || 0;
+  return qty * rate;
 }
 
 // GET grouped budgets — unified data for both views; includes empty groups for "user"
@@ -43,11 +69,28 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
       select: {
         id: true,
         description: true,
+        qty: true,
+        unit: true,
+        rate: true,
+        total: true,
         amount: true,
         sortOrder: true,
+        position: true,
         groupId: true,
         costCode: { select: { id: true, code: true, description: true } },
-        packageItems: { select: { package: { select: { id: true, name: true, status: true, costCode: { select: { code: true } } } } } },
+        packageItems: {
+          select: {
+            package: {
+              select: {
+                id: true,
+                name: true,
+                status: true,
+                scopeSummary: true,
+                costCode: { select: { code: true } },
+              },
+            },
+          },
+        },
       },
       orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
     });
@@ -73,7 +116,7 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
       // Place each line into its group (or ungrouped)
       for (const l of lines) {
         const key = l.groupId ? `user:${l.groupId}` : 'user:0';
-        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
+        const amt = lineAmountValue(l);
         if (!groups.has(key)) groups.set(key, { key, name: l.groupId ? (gmap.get(l.groupId)?.name || `Group ${l.groupId}`) : 'Ungrouped', sortOrder: l.groupId ? (gmap.get(l.groupId)?.sortOrder ?? 10000) : 0, subtotal: 0, items: [] });
         const g = groups.get(key);
         g.items.push(l);
@@ -84,7 +127,7 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
       groups.set('pkg:0', { key: 'pkg:0', name: 'Unassigned', sortOrder: 0, subtotal: 0, items: [] });
 
       for (const l of lines) {
-        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
+        const amt = lineAmountValue(l);
         const pkgs = Array.isArray(l.packages) ? l.packages : [];
         if (!pkgs.length) {
           const g = groups.get('pkg:0');
@@ -112,7 +155,7 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
       const total = lines.reduce((s, l) => {
         if (seen.has(l.id)) return s;
         seen.add(l.id);
-        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
+        const amt = lineAmountValue(l);
         return s + (Number(amt) || 0);
       }, 0);
       res.json({ groups: out, total });
@@ -126,7 +169,7 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
         const key = `code:${prefix}`;
         if (!groups.has(key)) groups.set(key, { key, name: prefix === 'UNGROUPED' ? 'Ungrouped' : prefix, sortOrder: prefix === 'UNGROUPED' ? 0 : 10000, subtotal: 0, items: [] });
         const g = groups.get(key);
-        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
+        const amt = lineAmountValue(l);
         g.items.push(l);
         g.subtotal += amt;
       }
@@ -155,13 +198,15 @@ router.post('/:projectId/budget-groups', requireProjectMember, async (req, res) 
     if (!name) return res.status(400).json({ error: 'name is required' });
     const group = await prisma.budgetGroup.create({ data: { tenantId, projectId, name, isSystem: false } });
 
-    await prisma.auditLog?.create?.({
-      data: {
-        tenantId, userId: req.user.id,
-        entity: 'BudgetGroup', entityId: String(group.id),
-        action: 'CREATE', changes: { name }
-      }
-    }).catch(() => {});
+    await writeAudit({
+      prisma,
+      req,
+      userId: req.user?.id,
+      entity: 'BudgetGroup',
+      entityId: group.id,
+      action: 'CREATE',
+      changes: { name },
+    });
 
     res.status(201).json(group);
   } catch (e) {
@@ -179,13 +224,15 @@ router.patch('/:projectId/budgets/:budgetLineId/group', requireProjectMember, as
 
     const updated = await prisma.budgetLine.update({ where: { id: budgetLineId }, data: { groupId } });
 
-    await prisma.auditLog?.create?.({
-      data: {
-        tenantId, userId: req.user.id,
-        entity: 'BudgetLine', entityId: String(budgetLineId),
-        action: 'UPDATE', changes: { groupId }
-      }
-    }).catch(() => {});
+    await writeAudit({
+      prisma,
+      req,
+      userId: req.user?.id,
+      entity: 'BudgetLine',
+      entityId: budgetLineId,
+      action: 'UPDATE',
+      changes: { groupId },
+    });
 
     res.json(updated);
   } catch (e) {
@@ -200,34 +247,51 @@ router.post('/:projectId/budgets', requireProjectMember, async (req, res) => {
     const tenantId = req.user.tenantId;
     const projectId = Number(req.params.projectId);
     const b = req.body || {};
-    const qty = Number(b.quantity || b.qty || 0) || 0;
-    const rate = Number(b.rate || b.unitCost || 0) || 0;
-    const amount = b.amount != null ? Number(b.amount) : (qty * rate);
+    const qtyInput = b.quantity ?? b.qty ?? 0;
+    const rateInput = b.rate ?? b.unitCost ?? 0;
+    const totalInput = b.total ?? b.amount ?? (Number(qtyInput) || 0) * (Number(rateInput) || 0);
+
+    const qtyDec = toDecimal(qtyInput, { fallback: 0 });
+    const rateDec = toDecimal(rateInput, { fallback: 0 });
+    const totalDec = toDecimal(totalInput, { fallback: 0 });
 
     const created = await prisma.budgetLine.create({
       data: {
         tenantId,
         projectId,
         description: b.description ?? null,
-        amount: Number.isFinite(amount) ? amount : 0,
+        qty: qtyDec,
+        unit: b.unit ? String(b.unit) : 'ea',
+        rate: rateDec,
+        total: totalDec,
+        amount: totalDec,
         planned: null,
         estimated: null,
         actual: null,
+        position: b.position != null ? Number(b.position) : 0,
+        sortOrder: b.sortOrder != null ? Number(b.sortOrder) : 0,
         costCodeId: b.costCodeId != null ? Number(b.costCodeId) : null,
         groupId: b.groupId != null ? Number(b.groupId) : null,
       },
-      include: { costCode: true },
+      include: { costCode: true, packageItems: { select: { package: { select: { id: true, name: true, status: true, scopeSummary: true, costCode: { select: { code: true } } } } } } },
     });
 
-    await prisma.auditLog?.create?.({
-      data: {
-        tenantId, userId: req.user.id,
-        entity: 'BudgetLine', entityId: String(created.id),
-        action: 'CREATE', changes: { description: created.description, amount: created.amount }
-      }
-    }).catch(() => {});
+    await writeAudit({
+      prisma,
+      req,
+      userId: req.user?.id,
+      entity: 'BudgetLine',
+      entityId: created.id,
+      action: 'CREATE',
+      changes: {
+        description: created.description,
+        qty: Number(qtyDec),
+        rate: Number(rateDec),
+        total: Number(totalDec),
+      },
+    });
 
-    res.status(201).json(created);
+    res.status(201).json(shapeLine(created));
   } catch (e) {
     console.error('[budgets/create]', e);
     res.status(500).json({ error: 'Failed to create budget line' });
@@ -249,34 +313,66 @@ router.patch('/:projectId/budgets/:id', requireProjectMember, async (req, res) =
     if (b.description !== undefined) data.description = b.description ?? null;
     if (b.groupId !== undefined) data.groupId = b.groupId ? Number(b.groupId) : null;
     if (b.sortOrder !== undefined) data.sortOrder = Number(b.sortOrder);
+    if (b.position !== undefined) data.position = Number(b.position);
+    if (b.unit !== undefined) data.unit = b.unit ? String(b.unit) : 'ea';
     if (b.costCodeId !== undefined) data.costCodeId = b.costCodeId ? Number(b.costCodeId) : null;
 
-    // Robust recompute: if amount provided, take it; else recompute from qty*rate provided by client
-    if (b.amount !== undefined) {
-      data.amount = Number(b.amount) || 0;
-    } else if (b.quantity !== undefined || b.rate !== undefined) {
-      const q = b.quantity != null ? Number(b.quantity) : 0;
-      const r = b.rate != null ? Number(b.rate) : 0;
-      data.amount = (Number.isFinite(q) ? q : 0) * (Number.isFinite(r) ? r : 0);
+    if (b.quantity !== undefined || b.qty !== undefined) {
+      data.qty = toDecimal(b.quantity ?? b.qty ?? 0, { fallback: 0 });
+    }
+    if (b.rate !== undefined) {
+      data.rate = toDecimal(b.rate ?? 0, { fallback: 0 });
     }
 
-    const updated = await prisma.budgetLine.update({ where: { id }, data, include: { costCode: true } });
+    const needsTotal =
+      b.total !== undefined ||
+      b.amount !== undefined ||
+      data.qty !== undefined ||
+      data.rate !== undefined;
 
-    await prisma.auditLog?.create?.({
-      data: {
-        tenantId, userId: req.user.id,
-        entity: 'BudgetLine', entityId: String(id),
-        action: 'UPDATE', changes: data
-      }
-    }).catch(() => {});
+    if (needsTotal) {
+      const qtyDec = data.qty !== undefined ? data.qty : existing.qty ?? new Prisma.Decimal(0);
+      const rateDec = data.rate !== undefined ? data.rate : existing.rate ?? new Prisma.Decimal(0);
+      let totalDec;
+      if (b.total !== undefined) totalDec = toDecimal(b.total, { fallback: 0 });
+      else if (b.amount !== undefined) totalDec = toDecimal(b.amount, { fallback: 0 });
+      else totalDec = new Prisma.Decimal(qtyDec).mul(new Prisma.Decimal(rateDec));
+      data.total = totalDec;
+      data.amount = totalDec;
+    }
 
-    // Coerce any Decimal/string numerics to plain numbers to keep client inputs stable
-    res.json({
-      ...updated,
-      quantity: Number(updated.quantity ?? 0),
-      rate: Number(updated.rate ?? 0),
-      amount: Number(updated.amount ?? 0),
+    const updated = await prisma.budgetLine.update({
+      where: { id },
+      data,
+      include: {
+        costCode: true,
+        packageItems: {
+          select: {
+            package: {
+              select: {
+                id: true,
+                name: true,
+                status: true,
+                scopeSummary: true,
+                costCode: { select: { code: true } },
+              },
+            },
+          },
+        },
+      },
     });
+
+    await writeAudit({
+      prisma,
+      req,
+      userId: req.user?.id,
+      entity: 'BudgetLine',
+      entityId: id,
+      action: 'UPDATE',
+      changes: data,
+    });
+
+    res.json(shapeLine(updated));
   } catch (e) {
     console.error('[budgets/update]', e);
     res.status(500).json({ error: 'Failed to update budget line' });
@@ -317,9 +413,15 @@ router.delete('/:projectId/budgets/:id', requireProjectMember, async (req, res) 
     }
 
     await prisma.budgetLine.delete({ where: { id } });
-    await prisma.auditLog?.create?.({
-      data: { tenantId, userId: req.user.id, entity: 'BudgetLine', entityId: String(id), action: 'DELETE', changes: {} }
-    }).catch(() => {});
+    await writeAudit({
+      prisma,
+      req,
+      userId: req.user?.id,
+      entity: 'BudgetLine',
+      entityId: id,
+      action: 'DELETE',
+      changes: {},
+    });
     res.json({ ok: true });
   } catch (e) {
     console.error('[budgets/delete]', e);
@@ -374,6 +476,7 @@ router.patch('/:projectId/budgets/reorder', requireProjectMember, async (req, re
       const data = {};
       if (it.groupId !== undefined) data.groupId = it.groupId ? Number(it.groupId) : null;
       if (it.sortOrder !== undefined) data.sortOrder = Number(it.sortOrder);
+      if (it.position !== undefined) data.position = Number(it.position);
       if (Object.keys(data).length === 0) continue;
       // Scope by id; membership middleware enforces project access
       updates.push(prisma.budgetLine.update({ where: { id }, data }));
@@ -381,16 +484,15 @@ router.patch('/:projectId/budgets/reorder', requireProjectMember, async (req, re
 
     if (updates.length) await prisma.$transaction(updates);
 
-    await prisma.auditLog?.create?.({
-      data: {
-        tenantId,
-        userId: req.user.id,
-        entity: 'Budget',
-        entityId: 'bulk',
-        action: 'REORDER',
-        changes: { count: items.length, projectId },
-      },
-    }).catch(() => {});
+    await writeAudit({
+      prisma,
+      req,
+      userId: req.user?.id,
+      entity: 'Budget',
+      entityId: 'bulk',
+      action: 'REORDER',
+      changes: { count: items.length, projectId },
+    });
 
     res.json({ ok: true, count: items.length });
   } catch (e) {
@@ -416,13 +518,15 @@ router.patch('/:projectId/budget-groups/reorder', requireProjectMember, async (r
     }
     if (tx.length) await prisma.$transaction(tx);
 
-    await prisma.auditLog?.create?.({
-      data: {
-        tenantId, userId: req.user.id,
-        entity: 'BudgetGroup', entityId: 'bulk',
-        action: 'REORDER', changes: { count: items.length }
-      }
-    }).catch(() => {});
+    await writeAudit({
+      prisma,
+      req,
+      userId: req.user?.id,
+      entity: 'BudgetGroup',
+      entityId: 'bulk',
+      action: 'REORDER',
+      changes: { count: items.length },
+    });
 
     res.json({ ok: true, count: items.length });
   } catch (e) {
@@ -444,9 +548,15 @@ router.patch('/:projectId/budget-groups/:groupId', requireProjectMember, async (
       data: { ...(name != null ? { name: String(name) } : {}) },
     });
 
-    await prisma.auditLog?.create?.({
-      data: { tenantId, userId: req.user.id, entity: 'BudgetGroup', entityId: String(groupId), action: 'UPDATE', changes: { name } }
-    }).catch(() => {});
+    await writeAudit({
+      prisma,
+      req,
+      userId: req.user?.id,
+      entity: 'BudgetGroup',
+      entityId: groupId,
+      action: 'UPDATE',
+      changes: { name },
+    });
 
     res.json(updated);
   } catch (e) {
@@ -472,9 +582,15 @@ router.delete('/:projectId/budget-groups/:groupId', requireProjectMember, async 
     }
     await prisma.budgetGroup.delete({ where: { id: groupId } });
 
-    await prisma.auditLog?.create?.({
-      data: { tenantId, userId: req.user.id, entity: 'BudgetGroup', entityId: String(groupId), action: 'DELETE', changes: { withLines, deletedLines: withLines ? count : 0 } }
-    }).catch(() => {});
+    await writeAudit({
+      prisma,
+      req,
+      userId: req.user?.id,
+      entity: 'BudgetGroup',
+      entityId: groupId,
+      action: 'DELETE',
+      changes: { withLines, deletedLines: withLines ? count : 0 },
+    });
 
     res.json({ ok: true });
   } catch (e) {

@@ -40,8 +40,7 @@ async function createAfp(tenantId, userId, data) {
       tenantId,
       projectId: Number(data.projectId),
       supplierId: data.supplierId != null ? Number(data.supplierId) : null,
-      // contractId is BigInt; only set if provided
-      contractId: data.contractId != null ? BigInt(data.contractId) : null,
+      contractId: data.contractId != null ? Number(data.contractId) : null,
       applicationNo,
       applicationDate: new Date(data.applicationDate),
       periodStart: new Date(data.periodStart),
@@ -129,7 +128,7 @@ function mapNumericAndDates(src = {}) {
     else if (dateKeys.includes(k)) m[k] = v ? new Date(v) : null;
     else m[k] = v;
   }
-  if (src.contractId !== undefined) m.contractId = src.contractId == null ? null : BigInt(src.contractId);
+  if (src.contractId !== undefined) m.contractId = src.contractId == null ? null : Number(src.contractId);
   return m;
 }
 

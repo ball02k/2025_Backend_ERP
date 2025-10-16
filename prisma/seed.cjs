@@ -240,7 +240,7 @@ async function seedPackages(projectId, suppliers) {
       data: {
         projectId,
         name: def.name,
-        scope: `${def.trade} scope for level A & B`,
+        scopeSummary: `${def.trade} scope for level A & B`,
         trade: def.trade,
         status: def.status,
         budgetEstimate: 100000,
@@ -284,14 +284,17 @@ async function seedPackages(projectId, suppliers) {
       }).catch(()=>{});
       await prisma.contract.create({
         data: {
+          tenantId: TENANT,
           projectId,
           packageId: pkg.id,
           supplierId: best.s.id,
           title: `${def.name} Contract`,
-          value: best.sub.price,
-          status: 'Pending',
-          contractNumber: `CT-${projectId}-${pkg.id}`,
+          status: 'Draft',
+          awardValue: best.sub.price,
+          currency: 'GBP',
+          contractType: null,
           startDate: addDays(new Date(), 14),
+          endDate: null,
         }
       }).catch(()=>{});
     }
