@@ -12,15 +12,21 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 function shapeLine(b) {
+  const qty = num(b.qty) ?? 0;
+  const rate = num(b.rate) ?? 0;
+  const amount = num(b.total);
+  const legacyAmount = num(b.amount);
+  const total = amount != null ? amount : (legacyAmount != null && legacyAmount !== 0 ? legacyAmount : qty * rate);
+
   return {
     id: b.id,
     description: b.description ?? "",
-    quantity: num(b.qty),   // may be null if not set
-    qty: num(b.qty),
+    quantity: qty,
+    qty,
     unit: b.unit ?? "ea",
-    rate: num(b.rate),
-    total: num(b.total ?? b.amount),
-    amount: num(b.total ?? b.amount),
+    rate,
+    total,
+    amount: total,
     sortOrder: num(b.sortOrder) ?? 0,
     position: num(b.position) ?? 0,
     groupId: b.groupId ? Number(b.groupId) : null,
@@ -43,15 +49,15 @@ function shapeLine(b) {
 
 function lineAmountValue(line) {
   if (line.total != null) {
-    const t = num(line.total);
-    if (t != null) return t;
+    const t = Number(line.total);
+    if (Number.isFinite(t)) return t;
   }
   if (line.amount != null) {
-    const a = num(line.amount);
-    if (a != null) return a;
+    const a = Number(line.amount);
+    if (Number.isFinite(a)) return a;
   }
-  const qty = num(line.quantity) || 0;
-  const rate = num(line.rate) || 0;
+  const qty = Number(line.quantity ?? line.qty ?? 0) || 0;
+  const rate = Number(line.rate ?? 0) || 0;
   return qty * rate;
 }
 
