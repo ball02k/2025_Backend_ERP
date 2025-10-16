@@ -15,6 +15,19 @@ function calcTotal(qty, rate) {
   return qty.mul(rate);
 }
 
+function isBudgetColumnsMissing(err) {
+  if (!err) return false;
+  if (err.code === 'P2021') return true;
+  const msg = String(err.meta?.cause || err.message || '').toLowerCase();
+  return msg.includes('qty') || msg.includes('rate') || msg.includes('total');
+}
+
+function parseNumberOrNull(value) {
+  if (value === '' || value === undefined || value === null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Very small CSV parser (robust delimiter detection, quotes supported, headers required). */
 function parseCsvString(csvText) {
   // Normalise newlines to handle CRLF, LF and lone CR (old Mac)
@@ -364,19 +377,47 @@ async function commitHandler(req, res) {
       const rateDec = toDec(rate);
       const totalDec = amount != null ? toDec(amount) : calcTotal(qtyDec, rateDec);
 
-      await prisma.budgetLine.create({
-        data: {
-          tenantId,
-          projectId,
-          costCodeId: costCodeId,
-          description,
-          qty: qtyDec,
-          rate: rateDec,
-          total: totalDec,
-          amount: totalDec,
-          groupId,
-        },
-      });
+      let auditQty = quantity ?? null;
+      let auditRate = rate ?? null;
+      let auditTotal = Number(totalDec);
+
+      try {
+        await prisma.budgetLine.create({
+          data: {
+            tenantId,
+            projectId,
+            costCodeId: costCodeId,
+            description,
+            qty: qtyDec,
+            rate: rateDec,
+            total: totalDec,
+            amount: totalDec,
+            groupId,
+          },
+        });
+      } catch (err) {
+        if (!isBudgetColumnsMissing(err)) throw err;
+        const qtyNumber = parseNumberOrNull(quantity);
+        const rateNumber = parseNumberOrNull(rate);
+        const fallbackTotalCandidate =
+          parseNumberOrNull(amount) ?? Number(qtyNumber || 0) * Number(rateNumber || 0);
+        const fallbackTotalNumber = Number.isFinite(fallbackTotalCandidate) ? fallbackTotalCandidate : 0;
+
+        await prisma.budgetLine.create({
+          data: {
+            tenantId,
+            projectId,
+            costCodeId: costCodeId,
+            description,
+            amount: fallbackTotalNumber,
+            groupId,
+          },
+        });
+
+        auditQty = qtyNumber;
+        auditRate = rateNumber;
+        auditTotal = fallbackTotalNumber;
+      }
 
       created++;
       await prisma.auditLog?.create?.({
@@ -389,9 +430,9 @@ async function commitHandler(req, res) {
           changes: {
             costCode,
             description,
-            qty: quantity ?? null,
-            rate: rate ?? null,
-            total: Number(totalDec),
+            qty: auditQty,
+            rate: auditRate,
+            total: auditTotal,
           },
         },
       }).catch(()=>{});

@@ -43,6 +43,57 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function isBudgetColumnsMissing(err) {
+  if (!err) return false;
+  if (err.code === 'P2021') return true;
+  const msg = String(err.meta?.cause || err.message || '').toLowerCase();
+  return msg.includes('qty') || msg.includes('rate') || msg.includes('total');
+}
+
+function parseNumberOrNull(value) {
+  if (value === '' || value === undefined || value === null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function loadBudgetLines(tenantId, projectId) {
+  try {
+    const rows = await prisma.budgetLine.findMany({
+      where: { tenantId, projectId },
+      select: budgetLineSelect,
+      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+    });
+    return { rows, fallback: false };
+  } catch (err) {
+    if (!isBudgetColumnsMissing(err)) throw err;
+    const rows = await prisma.budgetLine.findMany({
+      where: { tenantId, projectId },
+      select: {
+        id: true,
+        description: true,
+        amount: true,
+        sortOrder: true,
+        groupId: true,
+        costCode: { select: { id: true, code: true, description: true } },
+        packageItems: {
+          select: {
+            package: {
+              select: {
+                id: true,
+                name: true,
+                status: true,
+                costCode: { select: { code: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+    });
+    return { rows, fallback: true };
+  }
+}
+
 const budgetLineSelect = {
   id: true,
   description: true,
@@ -110,13 +161,20 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
     const tenantId = req.user.tenantId;
 
     // 1) Load all lines (we'll coerce with shapeLine)
-    const linesRaw = await prisma.budgetLine.findMany({
-      where: { tenantId, projectId: Number(projectId) },
-      select: budgetLineSelect,
-      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-    });
+    const { rows: lineRows, fallback: usedFallback } = await loadBudgetLines(tenantId, Number(projectId));
 
-    const lines = linesRaw.map(shapeLine);
+    const lines = usedFallback
+      ? lineRows.map((line) =>
+          shapeLine({
+            ...line,
+            qty: line.qty ?? null,
+            rate: line.rate ?? null,
+            total: line.total ?? line.amount,
+            amount: line.amount,
+            packageItems: line.packageItems ?? [],
+          }),
+        )
+      : lineRows.map(shapeLine);
 
     // 2) Load all groups (so empty groups appear)
     const allGroups = await prisma.budgetGroup.findMany({
@@ -272,33 +330,85 @@ router.post('/:projectId/budgets', requireProjectMember, async (req, res) => {
     else if (b.amount !== undefined) total = toDec(b.amount);
     else total = calcTotal(qty, rate);
 
-    const created = await prisma.budgetLine.create({
-      data: {
-        tenantId,
-        projectId,
-        description: b.description ?? null,
-        qty,
-        rate,
-        total,
-        amount: total,
-        planned: null,
-        estimated: null,
-        actual: null,
-        costCodeId: b.costCodeId != null ? Number(b.costCodeId) : null,
-        groupId: b.groupId != null ? Number(b.groupId) : null,
-      },
-      select: budgetLineSelect,
-    });
+    try {
+      const created = await prisma.budgetLine.create({
+        data: {
+          tenantId,
+          projectId,
+          description: b.description ?? null,
+          qty,
+          rate,
+          total,
+          amount: total,
+          planned: null,
+          estimated: null,
+          actual: null,
+          costCodeId: b.costCodeId != null ? Number(b.costCodeId) : null,
+          groupId: b.groupId != null ? Number(b.groupId) : null,
+        },
+        select: budgetLineSelect,
+      });
 
-    await prisma.auditLog?.create?.({
-      data: {
-        tenantId, userId: req.user.id,
-        entity: 'BudgetLine', entityId: String(created.id),
-        action: 'CREATE', changes: { description: created.description, amount: created.amount }
-      }
-    }).catch(() => {});
+      await prisma.auditLog?.create?.({
+        data: {
+          tenantId,
+          userId: req.user.id,
+          entity: 'BudgetLine',
+          entityId: String(created.id),
+          action: 'CREATE',
+          changes: { description: created.description, amount: created.amount },
+        },
+      }).catch(() => {});
 
-    res.status(201).json(shapeLine(created));
+      res.status(201).json(shapeLine(created));
+      return;
+    } catch (err) {
+      if (!isBudgetColumnsMissing(err)) throw err;
+
+      const qtyNumber = parseNumberOrNull(rawQty);
+      const rateNumber = parseNumberOrNull(rawRate);
+      const candidateTotal =
+        parseNumberOrNull(b.total ?? b.amount) ?? Number(qtyNumber || 0) * Number(rateNumber || 0);
+      const amountNumber = Number.isFinite(candidateTotal) ? candidateTotal : 0;
+
+      const created = await prisma.budgetLine.create({
+        data: {
+          tenantId,
+          projectId,
+          description: b.description ?? null,
+          amount: amountNumber,
+          planned: null,
+          estimated: null,
+          actual: null,
+          costCodeId: b.costCodeId != null ? Number(b.costCodeId) : null,
+          groupId: b.groupId != null ? Number(b.groupId) : null,
+        },
+        include: { costCode: true },
+      });
+
+      await prisma.auditLog?.create?.({
+        data: {
+          tenantId,
+          userId: req.user.id,
+          entity: 'BudgetLine',
+          entityId: String(created.id),
+          action: 'CREATE',
+          changes: { description: created.description, amount: amountNumber },
+        },
+      }).catch(() => {});
+
+      res.status(201).json(
+        shapeLine({
+          ...created,
+          qty: qtyNumber,
+          rate: rateNumber,
+          total: amountNumber,
+          amount: amountNumber,
+          packageItems: [],
+        }),
+      );
+      return;
+    }
   } catch (e) {
     console.error('[budgets/create]', e);
     res.status(500).json({ error: 'Failed to create budget line' });
@@ -311,9 +421,16 @@ router.patch('/:projectId/budgets/:id', requireProjectMember, async (req, res) =
     const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
     const b = req.body || {};
+    let useFallback = false;
+    let existing;
+    try {
+      existing = await prisma.budgetLine.findUnique({ where: { id }, select: { qty: true, rate: true, total: true, amount: true } });
+    } catch (err) {
+      if (!isBudgetColumnsMissing(err)) throw err;
+      useFallback = true;
+      existing = await prisma.budgetLine.findUnique({ where: { id }, select: { amount: true } });
+    }
 
-    // Read existing to future‑proof recompute (qty/rate not persisted in current schema)
-    const existing = await prisma.budgetLine.findUnique({ where: { id }, select: { qty: true, rate: true, total: true, amount: true } });
     if (!existing) return res.status(404).json({ error: 'Not found' });
 
     const data = {};
@@ -326,48 +443,118 @@ router.patch('/:projectId/budgets/:id', requireProjectMember, async (req, res) =
     const rateInput = b.rate ?? b.unitCost;
     const totalInput = b.total ?? b.amount;
 
-    let qtyDec = new Prisma.Decimal(existing.qty ?? 0);
-    let rateDec = new Prisma.Decimal(existing.rate ?? 0);
-    let totalDec = new Prisma.Decimal(existing.total ?? existing.amount ?? 0);
+    if (!useFallback) {
+      try {
+        let qtyDec = existing.qty != null ? existing.qty : new Prisma.Decimal(0);
+        if (qtyInput !== undefined) {
+          qtyDec = toDec(qtyInput);
+          data.qty = qtyDec;
+        }
 
-    if (qtyInput !== undefined) {
-      qtyDec = toDec(qtyInput);
-      data.qty = qtyDec;
+        let rateDec = existing.rate != null ? existing.rate : new Prisma.Decimal(0);
+        if (rateInput !== undefined) {
+          rateDec = toDec(rateInput);
+          data.rate = rateDec;
+        }
+
+        const totalDec = totalInput !== undefined ? toDec(totalInput) : calcTotal(data.qty ?? qtyDec, data.rate ?? rateDec);
+        data.total = totalDec;
+        data.amount = totalDec;
+
+        const updated = await prisma.budgetLine.update({ where: { id }, data, select: budgetLineSelect });
+
+        const auditChanges = {
+          ...(b.description !== undefined ? { description: data.description } : {}),
+          ...(b.groupId !== undefined ? { groupId: data.groupId } : {}),
+          ...(b.costCodeId !== undefined ? { costCodeId: data.costCodeId } : {}),
+          ...(b.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
+          ...(qtyInput !== undefined ? { qty: Number(data.qty) } : {}),
+          ...(rateInput !== undefined ? { rate: Number(data.rate) } : {}),
+          total: Number(data.total),
+        };
+
+        await prisma.auditLog?.create?.({
+          data: {
+            tenantId,
+            userId: req.user.id,
+            entity: 'BudgetLine',
+            entityId: String(id),
+            action: 'UPDATE',
+            changes: auditChanges,
+          },
+        }).catch(() => {});
+
+        res.json(shapeLine(updated));
+        return;
+      } catch (err) {
+        if (!isBudgetColumnsMissing(err)) throw err;
+        useFallback = true;
+      }
     }
-    if (rateInput !== undefined) {
-      rateDec = toDec(rateInput);
-      data.rate = rateDec;
-    }
 
-    if (totalInput !== undefined) {
-      totalDec = toDec(totalInput);
-    } else {
-      totalDec = calcTotal(data.qty ?? qtyDec, data.rate ?? rateDec);
-    }
+    const qtyNumber = qtyInput !== undefined ? parseNumberOrNull(qtyInput) : null;
+    const rateNumber = rateInput !== undefined ? parseNumberOrNull(rateInput) : null;
+    const explicitTotal = parseNumberOrNull(totalInput);
+    const existingAmountNumber = Number(existing.total ?? existing.amount ?? 0) || 0;
+    let amountNumber;
+    if (explicitTotal != null) amountNumber = explicitTotal;
+    else if (qtyNumber != null || rateNumber != null) amountNumber = Number(qtyNumber || 0) * Number(rateNumber || 0);
+    else amountNumber = existingAmountNumber;
+    if (!Number.isFinite(amountNumber)) amountNumber = existingAmountNumber;
 
-    data.total = totalDec;
-    data.amount = totalDec;
+    const fallbackData = {
+      ...data,
+      amount: amountNumber,
+    };
 
-    const updated = await prisma.budgetLine.update({ where: { id }, data, select: budgetLineSelect });
+    const updated = await prisma.budgetLine.update({
+      where: { id },
+      data: fallbackData,
+      include: {
+        costCode: { select: { id: true, code: true, description: true } },
+        packageItems: {
+          select: {
+            package: {
+              select: {
+                id: true,
+                name: true,
+                status: true,
+                costCode: { select: { code: true } },
+              },
+            },
+          },
+        },
+      },
+    });
 
     await prisma.auditLog?.create?.({
       data: {
-        tenantId, userId: req.user.id,
-        entity: 'BudgetLine', entityId: String(id),
+        tenantId,
+        userId: req.user.id,
+        entity: 'BudgetLine',
+        entityId: String(id),
         action: 'UPDATE',
         changes: {
           ...(data.description !== undefined ? { description: data.description } : {}),
           ...(data.groupId !== undefined ? { groupId: data.groupId } : {}),
           ...(data.costCodeId !== undefined ? { costCodeId: data.costCodeId } : {}),
           ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
-          ...(data.qty !== undefined ? { qty: Number(data.qty) } : {}),
-          ...(data.rate !== undefined ? { rate: Number(data.rate) } : {}),
-          total: Number(data.total),
+          ...(qtyInput !== undefined ? { qty: qtyNumber } : {}),
+          ...(rateInput !== undefined ? { rate: rateNumber } : {}),
+          total: amountNumber,
         },
-      }
+      },
     }).catch(() => {});
 
-    res.json(shapeLine(updated));
+    res.json(
+      shapeLine({
+        ...updated,
+        qty: qtyNumber,
+        rate: rateNumber,
+        total: amountNumber,
+        amount: amountNumber,
+      }),
+    );
   } catch (e) {
     console.error('[budgets/update]', e);
     res.status(500).json({ error: 'Failed to update budget line' });
