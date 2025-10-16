@@ -1053,6 +1053,9 @@ model BudgetLine {
   category    String?
   periodMonth String?
   description String?
+  qty         Decimal  @default(0) @db.Decimal(18, 2)
+  rate        Decimal  @default(0) @db.Decimal(18, 2)
+  total       Decimal  @default(0) @db.Decimal(18, 2)
   amount      Decimal  @default(0)
   planned     Decimal? @db.Decimal(18, 2)
   estimated   Decimal? @db.Decimal(18, 2)
@@ -1083,6 +1086,7 @@ model BudgetGroup {
   projectId Int
   name      String
   sortOrder Int      @default(0)
+  position  Int      @default(0)
   isSystem  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1091,6 +1095,18 @@ model BudgetGroup {
   budgetLines BudgetLine[]
 
   @@index([tenantId, projectId])
+}
+
+model ScopeRun {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  projectId Int
+  status    String   @default("created")
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([projectId])
 }
 
 model Commitment {

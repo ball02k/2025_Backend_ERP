@@ -265,7 +265,7 @@ app.use('/api', requireAuth, scopeAssistRouter);
 app.use('/api', requireAuth, packagesSeedRouter);
 // Scope assist (feature-gated routes); route-level auth inside
 app.use('/api', scopeAssistRouter);
-app.use('/api/projects/:projectId/scope-runs', requireAuth, projectScopeRouter);
+app.use('/api/projects', projectScopeRouter);
 // Taxonomy admin routes
 app.use('/api', taxonomyRouter);
 // Top-level explicit mounts to avoid any router path ambiguity

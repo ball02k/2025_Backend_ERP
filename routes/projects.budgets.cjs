@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router({ mergeParams: true });
-const { prisma } = require('../utils/prisma.cjs');
+const { prisma, Prisma } = require('../lib/prisma');
 const { requireProjectMember } = require('../middleware/membership.cjs');
 
 // POST /api/projects/:projectId/budgets/suggest-packages
@@ -30,29 +30,75 @@ router.post('/:projectId/budgets/suggest-packages', requireProjectMember, async 
 });
 
 // --- helpers: coerce Prisma Decimal/strings to numbers, and shape outbound lines ---
+function toDec(v) {
+  if (v === '' || v === undefined || v === null) return new Prisma.Decimal(0);
+  return new Prisma.Decimal(v);
+}
+function calcTotal(qty, rate) {
+  return qty.mul(rate);
+}
 function num(v) {
   if (v === null || v === undefined) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
+
+const budgetLineSelect = {
+  id: true,
+  description: true,
+  qty: true,
+  rate: true,
+  total: true,
+  amount: true,
+  sortOrder: true,
+  groupId: true,
+  costCode: { select: { id: true, code: true, description: true } },
+  packageItems: {
+    select: {
+      package: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          costCode: { select: { code: true } },
+        },
+      },
+    },
+  },
+};
 function shapeLine(b) {
+  const qty = num(b.qty);
+  const rate = num(b.rate);
+  const total = num(b.total);
+  const amountRaw = num(b.amount);
+  const computedTotal = total != null ? total : (qty || 0) * (rate || 0);
+  const amount = amountRaw != null ? amountRaw : computedTotal;
   return {
     id: b.id,
     description: b.description ?? "",
-    quantity: num(b.quantity),   // may be null if not set
+    quantity: qty,
+    qty,
     unit: b.unit ?? "ea",
-    rate: num(b.rate),
-    amount: num(b.amount),
+    rate,
+    total: computedTotal,
+    amount,
     sortOrder: num(b.sortOrder) ?? 0,
     groupId: b.groupId ? Number(b.groupId) : null,
     costCode: b.costCode ? { id: b.costCode.id, code: b.costCode.code, description: b.costCode.description ?? "" } : null,
-    // Map through join table; include status if present
     packages: Array.isArray(b.packageItems)
       ? b.packageItems
-          .map(pi => (pi.package ? { id: pi.package.id, name: pi.package.name, status: pi.package.status, code: pi.package.costCode?.code } : null))
+          .map((pi) => (pi.package ? { id: pi.package.id, name: pi.package.name, status: pi.package.status, code: pi.package.costCode?.code } : null))
           .filter(Boolean)
       : [],
   };
+}
+
+function lineValue(line) {
+  if (line.total != null) return Number(line.total) || 0;
+  if (line.amount != null) return Number(line.amount) || 0;
+  const qty = line.qty ?? line.quantity ?? 0;
+  const rate = line.rate ?? 0;
+  return Number(qty || 0) * Number(rate || 0);
 }
 
 // GET grouped budgets — unified data for both views; includes empty groups for "user"
@@ -66,15 +112,7 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
     // 1) Load all lines (we'll coerce with shapeLine)
     const linesRaw = await prisma.budgetLine.findMany({
       where: { tenantId, projectId: Number(projectId) },
-      select: {
-        id: true,
-        description: true,
-        amount: true,
-        sortOrder: true,
-        groupId: true,
-        costCode: { select: { id: true, code: true, description: true } },
-        packageItems: { select: { package: { select: { id: true, name: true, status: true, costCode: { select: { code: true } } } } } },
-      },
+      select: budgetLineSelect,
       orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
     });
 
@@ -99,7 +137,7 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
       // Place each line into its group (or ungrouped)
       for (const l of lines) {
         const key = l.groupId ? `user:${l.groupId}` : 'user:0';
-        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
+        const amt = lineValue(l);
         if (!groups.has(key)) groups.set(key, { key, name: l.groupId ? (gmap.get(l.groupId)?.name || `Group ${l.groupId}`) : 'Ungrouped', sortOrder: l.groupId ? (gmap.get(l.groupId)?.sortOrder ?? 10000) : 0, subtotal: 0, items: [] });
         const g = groups.get(key);
         g.items.push(l);
@@ -110,7 +148,7 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
       groups.set('pkg:0', { key: 'pkg:0', name: 'Unassigned', sortOrder: 0, subtotal: 0, items: [] });
 
       for (const l of lines) {
-        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
+        const amt = lineValue(l);
         const pkgs = Array.isArray(l.packages) ? l.packages : [];
         if (!pkgs.length) {
           const g = groups.get('pkg:0');
@@ -138,8 +176,7 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
       const total = lines.reduce((s, l) => {
         if (seen.has(l.id)) return s;
         seen.add(l.id);
-        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
-        return s + (Number(amt) || 0);
+        return s + lineValue(l);
       }, 0);
       res.json({ groups: out, total });
       return;
@@ -152,7 +189,7 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
         const key = `code:${prefix}`;
         if (!groups.has(key)) groups.set(key, { key, name: prefix === 'UNGROUPED' ? 'Ungrouped' : prefix, sortOrder: prefix === 'UNGROUPED' ? 0 : 10000, subtotal: 0, items: [] });
         const g = groups.get(key);
-        const amt = l.amount != null ? l.amount : (num(l.quantity) || 0) * (num(l.rate) || 0);
+        const amt = lineValue(l);
         g.items.push(l);
         g.subtotal += amt;
       }
@@ -226,23 +263,31 @@ router.post('/:projectId/budgets', requireProjectMember, async (req, res) => {
     const tenantId = req.user.tenantId;
     const projectId = Number(req.params.projectId);
     const b = req.body || {};
-    const qty = Number(b.quantity || b.qty || 0) || 0;
-    const rate = Number(b.rate || b.unitCost || 0) || 0;
-    const amount = b.amount != null ? Number(b.amount) : (qty * rate);
+    const rawQty = b.quantity ?? b.qty;
+    const rawRate = b.rate ?? b.unitCost;
+    const qty = toDec(rawQty);
+    const rate = toDec(rawRate);
+    let total = null;
+    if (b.total !== undefined) total = toDec(b.total);
+    else if (b.amount !== undefined) total = toDec(b.amount);
+    else total = calcTotal(qty, rate);
 
     const created = await prisma.budgetLine.create({
       data: {
         tenantId,
         projectId,
         description: b.description ?? null,
-        amount: Number.isFinite(amount) ? amount : 0,
+        qty,
+        rate,
+        total,
+        amount: total,
         planned: null,
         estimated: null,
         actual: null,
         costCodeId: b.costCodeId != null ? Number(b.costCodeId) : null,
         groupId: b.groupId != null ? Number(b.groupId) : null,
       },
-      include: { costCode: true },
+      select: budgetLineSelect,
     });
 
     await prisma.auditLog?.create?.({
@@ -253,7 +298,7 @@ router.post('/:projectId/budgets', requireProjectMember, async (req, res) => {
       }
     }).catch(() => {});
 
-    res.status(201).json(created);
+    res.status(201).json(shapeLine(created));
   } catch (e) {
     console.error('[budgets/create]', e);
     res.status(500).json({ error: 'Failed to create budget line' });
@@ -268,7 +313,7 @@ router.patch('/:projectId/budgets/:id', requireProjectMember, async (req, res) =
     const b = req.body || {};
 
     // Read existing to future‑proof recompute (qty/rate not persisted in current schema)
-    const existing = await prisma.budgetLine.findUnique({ where: { id } });
+    const existing = await prisma.budgetLine.findUnique({ where: { id }, select: { qty: true, rate: true, total: true, amount: true } });
     if (!existing) return res.status(404).json({ error: 'Not found' });
 
     const data = {};
@@ -277,32 +322,52 @@ router.patch('/:projectId/budgets/:id', requireProjectMember, async (req, res) =
     if (b.sortOrder !== undefined) data.sortOrder = Number(b.sortOrder);
     if (b.costCodeId !== undefined) data.costCodeId = b.costCodeId ? Number(b.costCodeId) : null;
 
-    // Robust recompute: if amount provided, take it; else recompute from qty*rate provided by client
-    if (b.amount !== undefined) {
-      data.amount = Number(b.amount) || 0;
-    } else if (b.quantity !== undefined || b.rate !== undefined) {
-      const q = b.quantity != null ? Number(b.quantity) : 0;
-      const r = b.rate != null ? Number(b.rate) : 0;
-      data.amount = (Number.isFinite(q) ? q : 0) * (Number.isFinite(r) ? r : 0);
+    const qtyInput = b.quantity ?? b.qty;
+    const rateInput = b.rate ?? b.unitCost;
+    const totalInput = b.total ?? b.amount;
+
+    let qtyDec = new Prisma.Decimal(existing.qty ?? 0);
+    let rateDec = new Prisma.Decimal(existing.rate ?? 0);
+    let totalDec = new Prisma.Decimal(existing.total ?? existing.amount ?? 0);
+
+    if (qtyInput !== undefined) {
+      qtyDec = toDec(qtyInput);
+      data.qty = qtyDec;
+    }
+    if (rateInput !== undefined) {
+      rateDec = toDec(rateInput);
+      data.rate = rateDec;
     }
 
-    const updated = await prisma.budgetLine.update({ where: { id }, data, include: { costCode: true } });
+    if (totalInput !== undefined) {
+      totalDec = toDec(totalInput);
+    } else {
+      totalDec = calcTotal(data.qty ?? qtyDec, data.rate ?? rateDec);
+    }
+
+    data.total = totalDec;
+    data.amount = totalDec;
+
+    const updated = await prisma.budgetLine.update({ where: { id }, data, select: budgetLineSelect });
 
     await prisma.auditLog?.create?.({
       data: {
         tenantId, userId: req.user.id,
         entity: 'BudgetLine', entityId: String(id),
-        action: 'UPDATE', changes: data
+        action: 'UPDATE',
+        changes: {
+          ...(data.description !== undefined ? { description: data.description } : {}),
+          ...(data.groupId !== undefined ? { groupId: data.groupId } : {}),
+          ...(data.costCodeId !== undefined ? { costCodeId: data.costCodeId } : {}),
+          ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
+          ...(data.qty !== undefined ? { qty: Number(data.qty) } : {}),
+          ...(data.rate !== undefined ? { rate: Number(data.rate) } : {}),
+          total: Number(data.total),
+        },
       }
     }).catch(() => {});
 
-    // Coerce any Decimal/string numerics to plain numbers to keep client inputs stable
-    res.json({
-      ...updated,
-      quantity: Number(updated.quantity ?? 0),
-      rate: Number(updated.rate ?? 0),
-      amount: Number(updated.amount ?? 0),
-    });
+    res.json(shapeLine(updated));
   } catch (e) {
     console.error('[budgets/update]', e);
     res.status(500).json({ error: 'Failed to update budget line' });

@@ -1,10 +1,19 @@
 const express = require('express');
 const router = express.Router();
-const { prisma } = require('../utils/prisma.cjs');
+const { prisma, Prisma } = require('../lib/prisma');
 const requireAuth = require('../middleware/requireAuth.cjs');
 const fs = require('fs');
 const path = require('path');
 const { localPath } = require('../utils/storage.cjs');
+
+function toDec(v) {
+  if (v === '' || v === undefined || v === null) return new Prisma.Decimal(0);
+  return new Prisma.Decimal(v);
+}
+
+function calcTotal(qty, rate) {
+  return qty.mul(rate);
+}
 
 /** Very small CSV parser (robust delimiter detection, quotes supported, headers required). */
 function parseCsvString(csvText) {
@@ -351,20 +360,40 @@ async function commitHandler(req, res) {
       }).catch(()=>null);
       if (dup && duplicatePolicy === 'skip') { skipped++; continue; }
 
+      const qtyDec = toDec(quantity);
+      const rateDec = toDec(rate);
+      const totalDec = amount != null ? toDec(amount) : calcTotal(qtyDec, rateDec);
+
       await prisma.budgetLine.create({
         data: {
           tenantId,
           projectId,
           costCodeId: costCodeId,
           description,
-          amount: amount != null ? amount : 0,
+          qty: qtyDec,
+          rate: rateDec,
+          total: totalDec,
+          amount: totalDec,
           groupId,
         },
       });
 
       created++;
       await prisma.auditLog?.create?.({
-        data: { tenantId, userId, entity: 'BudgetLine', entityId: '0', action: 'CREATE', changes: { costCode, description, amount } },
+        data: {
+          tenantId,
+          userId,
+          entity: 'BudgetLine',
+          entityId: '0',
+          action: 'CREATE',
+          changes: {
+            costCode,
+            description,
+            qty: quantity ?? null,
+            rate: rate ?? null,
+            total: Number(totalDec),
+          },
+        },
       }).catch(()=>{});
     }
 
