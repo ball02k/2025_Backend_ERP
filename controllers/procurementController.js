@@ -1,4 +1,6 @@
 const { prisma, Prisma } = require('../utils/prisma.cjs');
+const { writeAudit } = require('../lib/audit.cjs');
+const { createContract } = require('../services/contracts.cjs');
 
 // Invite suppliers to a package
 exports.inviteSuppliers = async (req, res) => {
@@ -126,38 +128,59 @@ exports.scoreSubmission = async (req, res) => {
 exports.awardContract = async (req, res) => {
   try {
     const packageId = Number(req.params.packageId);
-    const { supplierId, contractValue } = req.body;
-    const pkg = await prisma.package.findUnique({ where: { id: packageId } });
-    const contract = await prisma.contract.create({
+    const tenantId = req.user?.tenantId || req.tenantId || 'demo';
+    const { supplierId, contractValue, currency, contractType, startDate, endDate, budgetLineIds } = req.body || {};
+    if (supplierId == null) return res.status(400).json({ error: 'supplierId required' });
+    const pkg = await prisma.package.findFirst({
+      where: { id: packageId, project: { tenantId } },
+      select: { id: true, projectId: true },
+    });
+    if (!pkg) return res.status(404).json({ error: 'Package not found' });
+
+    const contract = await createContract({
+      tenantId,
+      userId: req.user?.id,
+      req,
       data: {
         projectId: pkg.projectId,
         packageId,
         supplierId,
-        title: req.body.title || `Contract for Package ${packageId}`,
-        value: new Prisma.Decimal(contractValue),
-        status: 'Pending'
-      }
+        title: req.body?.title || `Contract for Package ${packageId}`,
+        awardValue: contractValue,
+        currency: currency || 'GBP',
+        contractType: contractType || null,
+        startDate,
+        endDate,
+        budgetLineIds: budgetLineIds || [],
+      },
     });
+
+    const awardValueNumber = contract?.awardValue != null ? Number(contract.awardValue) : Number(contractValue || 0);
     await prisma.package.update({
       where: { id: packageId },
-      data: { status: 'Awarded', awardSupplierId: supplierId, awardValue: contract.value }
+      data: {
+        status: 'Awarded',
+        awardSupplierId: supplierId,
+        awardValue: awardValueNumber,
+      },
     });
     await prisma.submission.updateMany({
       where: { packageId },
       data: { status: 'Awarded' }
     });
-    await prisma.auditLog.create({
-      data: {
-        userId: req.user.id,
-        entity: 'Package',
-        entityId: String(packageId),
-        action: 'AWARD',
-        changes: { set: { awardedTo: supplierId, contractId: String(contract.id) } }
-      }
+    await writeAudit({
+      prisma,
+      req,
+      userId: req.user?.id,
+      entity: 'Package',
+      entityId: packageId,
+      action: 'AWARD_CONTRACT',
+      changes: { awardedTo: supplierId, contractId: contract?.id, awardValue: awardValueNumber },
     });
-    res.status(201).json({ message: 'Contract awarded', contractId: contract.id });
+    res.status(201).json({ message: 'Contract awarded', contractId: contract?.id, contract });
   } catch (err) {
     console.error('Error awarding contract:', err);
+    if (err && err.status) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: 'Failed to award contract' });
   }
 };

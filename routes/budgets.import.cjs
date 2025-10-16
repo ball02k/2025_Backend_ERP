@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { prisma } = require('../utils/prisma.cjs');
+const { prisma, toDecimal, Prisma } = require('../lib/prisma.js');
+const { writeAudit } = require('../lib/audit.cjs');
 const requireAuth = require('../middleware/requireAuth.cjs');
 const fs = require('fs');
 const path = require('path');
@@ -195,14 +196,33 @@ function decodeCsvBuffer(buf) {
   return buf.toString('utf8');
 }
 
-function toNumber(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+function toNumber(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  const cleaned = String(raw)
+    .replace(/[,\s]+/g, '')
+    .replace(/[£$]/g, '')
+    .replace(/\(([^)]+)\)/, '-$1');
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
 
 /** Validate and normalise one preview row */
 function validateRow(r) {
   const errors = [];
   // Support a few header variants by looking at both underscored and condensed keys
   const quantity = toNumber(r.quantity ?? r.qty);
-  const rate = toNumber(r.rate ?? r.unit_rate);
+  let rate = toNumber(r.rate ?? r.unit_rate);
+  let total = toNumber(r.total ?? r.amount ?? r.value ?? r.line_total);
+  if (total == null && quantity != null && rate != null) {
+    total = Number(new Prisma.Decimal(quantity).mul(new Prisma.Decimal(rate)).toFixed(2));
+  }
+  if (rate == null && quantity != null && total != null) {
+    const qDec = new Prisma.Decimal(quantity);
+    if (!qDec.isZero()) {
+      rate = Number(new Prisma.Decimal(total).div(qDec).toFixed(2));
+    }
+  }
   const unit = (r.unit || '').trim();
   const cost_code = (r.cost_code ?? r.costcode ?? r.code ?? r.cost_code_id ?? '').trim();
   const description = (r.description ?? r.desc ?? '').trim();
@@ -211,9 +231,9 @@ function validateRow(r) {
   if (!description) errors.push('Missing description');
   if (!unit) errors.push('Missing unit');
   if (quantity == null || quantity < 0) errors.push('Invalid quantity');
-  if (rate == null) errors.push('Invalid rate');
+  if (rate == null && total == null) errors.push('Invalid rate/total');
 
-  const amount = (quantity != null && rate != null) ? (quantity * rate) : null;
+  const amount = total != null ? total : (quantity != null && rate != null ? Number(new Prisma.Decimal(quantity).mul(new Prisma.Decimal(rate)).toFixed(2)) : null);
 
   return {
     normalised: {
@@ -222,6 +242,7 @@ function validateRow(r) {
       quantity,
       unit,
       rate,
+      total: amount,
       amount,
       currency: r.currency || null,
       vatRate: r.vat_rate != null && r.vat_rate !== '' ? toNumber(r.vat_rate) : null,
@@ -266,6 +287,17 @@ async function previewHandler(req, res) {
       return { rowNumber: idx + 2, ...normalised, errors };
     });
 
+    const totals = {
+      sumAmount: Number(
+        previewRows
+          .reduce(
+            (acc, row) => acc.add(row.amount != null ? new Prisma.Decimal(row.amount) : new Prisma.Decimal(0)),
+            new Prisma.Decimal(0),
+          )
+          .toFixed(2),
+      ),
+    };
+
     // Persist preview as ImportJob when table exists; otherwise fall back to ephemeral preview
     try {
       const job = await prisma.importJob.create({
@@ -273,16 +305,22 @@ async function previewHandler(req, res) {
           tenantId, projectId, filename, status: 'preview',
           rowCount: previewRows.length,
           errorCount,
-          preview: { headers, sample: previewRows.slice(0, 200), totals: { sumAmount: previewRows.reduce((a, b) => a + (b.amount || 0), 0) } },
+          preview: { headers, sample: previewRows.slice(0, 200), totals },
         },
       });
-      await prisma.auditLog?.create?.({
-        data: { tenantId, userId, entity: 'ImportJob', entityId: String(job.id), action: 'CREATE', changes: { filename, status: 'preview' } },
-      }).catch(()=>{});
+      await writeAudit({
+        prisma,
+        req,
+        userId,
+        entity: 'ImportJob',
+        entityId: job.id,
+        action: 'IMPORT_PREVIEW',
+        changes: { filename, status: 'preview', totals },
+      });
       return res.json({ jobId: job.id, rowCount: job.rowCount, errorCount, preview: job.preview });
     } catch (e) {
       // P2021: relation does not exist (migrations not applied) — return ephemeral preview
-      return res.json({ jobId: null, rowCount: previewRows.length, errorCount, preview: { headers, sample: previewRows.slice(0, 200), totals: { sumAmount: previewRows.reduce((a, b) => a + (b.amount || 0), 0) } } });
+      return res.json({ jobId: null, rowCount: previewRows.length, errorCount, preview: { headers, sample: previewRows.slice(0, 200), totals } });
     }
   } catch (e) {
     console.error('[budgets:import]', e);
@@ -323,7 +361,7 @@ async function commitHandler(req, res) {
       const { normalised, errors: rowErrors } = validateRow(r);
       if (rowErrors.length) { errors++; continue; }
 
-      const { costCode, description, quantity, unit, rate, amount, currency, vatRate, group } = normalised;
+      const { costCode, description, quantity, unit, rate, amount, total, currency, vatRate, group } = normalised;
 
       // Ensure cost code
       let cc = await prisma.costCode.findFirst({ where: { tenantId, code: costCode } });
@@ -351,21 +389,42 @@ async function commitHandler(req, res) {
       }).catch(()=>null);
       if (dup && duplicatePolicy === 'skip') { skipped++; continue; }
 
-      await prisma.budgetLine.create({
+      const qtyDec = toDecimal(quantity ?? 0);
+      const rateDec = toDecimal(rate ?? 0);
+      const totalDec = toDecimal(total ?? amount ?? 0);
+
+      const createdLine = await prisma.budgetLine.create({
         data: {
           tenantId,
           projectId,
           costCodeId: costCodeId,
           description,
-          amount: amount != null ? amount : 0,
+          qty: qtyDec,
+          unit: unit ? String(unit) : 'ea',
+          rate: rateDec,
+          total: totalDec,
+          amount: totalDec,
           groupId,
         },
       });
 
       created++;
-      await prisma.auditLog?.create?.({
-        data: { tenantId, userId, entity: 'BudgetLine', entityId: '0', action: 'CREATE', changes: { costCode, description, amount } },
-      }).catch(()=>{});
+      await writeAudit({
+        prisma,
+        req,
+        userId,
+        entity: 'BudgetLine',
+        entityId: createdLine.id,
+        action: 'BUDGET_IMPORT_CREATE',
+        changes: {
+          costCode,
+          description,
+          qty: Number(qtyDec),
+          rate: Number(rateDec),
+          total: Number(totalDec),
+          groupId,
+        },
+      });
     }
 
     if (job && job.id) {
@@ -376,6 +435,16 @@ async function commitHandler(req, res) {
       const { recomputeProjectFinancials } = require('./hooks.recompute.cjs');
       await recomputeProjectFinancials(tenantId, projectId);
     } catch (_) {}
+
+    await writeAudit({
+      prisma,
+      req,
+      userId,
+      entity: 'BudgetImport',
+      entityId: job?.id ?? `file:${fileId}`,
+      action: 'IMPORT_COMMIT',
+      changes: { created, skipped, errors, projectId },
+    });
 
     res.json({ created, skipped, errors, status: 'committed' });
   } catch (e) {
