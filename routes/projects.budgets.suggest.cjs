@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router({ mergeParams: true });
 const { z } = require('zod');
 const { prisma, toDecimal } = require('../lib/prisma.js');
-const { callClaude } = require('../lib/llm.claude.cjs');
+const { callLLMJSON } = require('../lib/llm.provider.cjs');
 const { matchCostCode } = require('../lib/costCodeMatcher.cjs');
 const { requireProjectMember } = require('../middleware/membership.cjs');
 
@@ -207,17 +207,17 @@ OUTPUT REQUIREMENTS:
       required: ['items'],
     };
 
-    // 6. Call Claude
+    // 6. Call LLM (provider-agnostic)
     let aiResponse;
     try {
-      aiResponse = await callClaude({
+      aiResponse = await callLLMJSON({
         system: systemPrompt,
         user: userPrompt,
         jsonSchema,
         maxTokens: 4096,
       });
     } catch (error) {
-      console.error('[suggest] Claude error:', {
+      console.error('[suggest] LLM error:', {
         message: error.message,
         code: error.code,
         preview: JSON.stringify(error).substring(0, 200),
