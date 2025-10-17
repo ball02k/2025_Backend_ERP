@@ -1,30 +1,40 @@
--- AlterTable
-ALTER TABLE "public"."BudgetLine" ALTER COLUMN "qty" SET DATA TYPE DECIMAL(18,2),
-ALTER COLUMN "rate" SET DATA TYPE DECIMAL(18,4);
+-- 1) Add required columns first
+ALTER TABLE "Contract" ADD COLUMN IF NOT EXISTS "tenantId" VARCHAR(64);
+CREATE INDEX IF NOT EXISTS "Contract_tenantId_idx" ON "Contract" ("tenantId");
 
--- AlterTable
-ALTER TABLE "public"."Contract" ALTER COLUMN "tenantId" DROP NOT NULL,
-ALTER COLUMN "tenantId" DROP DEFAULT,
-ALTER COLUMN "tenantId" SET DATA TYPE VARCHAR(64);
+ALTER TABLE "BudgetLine" ADD COLUMN IF NOT EXISTS "qty"  DECIMAL(18,2) DEFAULT 0 NOT NULL;
+ALTER TABLE "BudgetLine" ADD COLUMN IF NOT EXISTS "rate" DECIMAL(18,4) DEFAULT 0 NOT NULL;
 
-
--- Backfill Contract.tenantId from related Package -> Project
-UPDATE "Contract" c
-SET "tenantId" = p."tenantId"
-FROM "Package" pk
-JOIN "Project" p ON pk."projectId" = p."id"
-WHERE c."packageId" = pk."id"
-  AND c."tenantId" IS NULL;
-
--- Optional backfill from legacy quantity/unitRate columns
+-- 2) Guarded backfills (safe for shadow DB)
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns
-             WHERE table_name='BudgetLine' AND column_name='quantity') THEN
-    EXECUTE 'UPDATE "BudgetLine" SET "qty" = COALESCE("quantity", 0) WHERE "qty" = 0';
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'Project' AND column_name = 'tenantId'
+  ) THEN
+    UPDATE "Contract" c
+    SET "tenantId" = p."tenantId"
+    FROM "Package" pk
+    JOIN "Project" p ON pk."projectId" = p."id"
+    WHERE c."packageId" = pk."id"
+      AND c."tenantId" IS NULL;
   END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.columns
-             WHERE table_name='BudgetLine' AND column_name='unitRate') THEN
-    EXECUTE 'UPDATE "BudgetLine" SET "rate" = COALESCE("unitRate", 0) WHERE "rate" = 0';
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'BudgetLine' AND column_name = 'quantity'
+  ) THEN
+    UPDATE "BudgetLine"
+    SET "qty" = COALESCE("quantity", 0)
+    WHERE "qty" = 0;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'BudgetLine' AND column_name = 'unitRate'
+  ) THEN
+    UPDATE "BudgetLine"
+    SET "rate" = COALESCE("unitRate", 0)
+    WHERE "rate" = 0;
   END IF;
 END$$;
