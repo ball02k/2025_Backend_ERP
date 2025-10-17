@@ -61,6 +61,23 @@ router.get('/projects/:projectId/scope/runs/:runId', (req, res) => {
   res.json(run);
 });
 
+router.post('/projects/:projectId/scope/runs/:runId/suggest', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const projectId = Number(req.params.projectId);
+    const run = scopeRuns.get(req.params.runId);
+    if (!run) return res.status(404).json({ error: 'Run not found' });
+    if (run.projectId !== projectId || run.tenantId !== tenantId) {
+      return res.status(403).json({ error: 'Run does not belong to project' });
+    }
+
+    // For now, just acknowledge the request - suggestions will be generated on-the-fly when fetched
+    res.json({ runId: run.id, status: 'processing' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/projects/:projectId/scope/runs/:runId/suggestions', async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
@@ -121,6 +138,53 @@ router.get('/projects/:projectId/scope/runs/:runId/suggestions', async (req, res
 
     scored.sort((a, b) => b.score - a.score || a.package.name.localeCompare(b.package.name));
     res.json({ runId: run.id, projectId, count: scored.length, items: scored.slice(0, limit) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/projects/:projectId/scope/runs/:runId/accept', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const projectId = Number(req.params.projectId);
+    const run = scopeRuns.get(req.params.runId);
+    if (!run) return res.status(404).json({ error: 'Run not found' });
+    if (run.projectId !== projectId || run.tenantId !== tenantId) {
+      return res.status(403).json({ error: 'Run does not belong to project' });
+    }
+
+    const { mappings = [], createPackages = [] } = req.body || {};
+
+    // Create new packages if needed
+    for (const pkg of createPackages) {
+      if (!pkg.code) continue;
+      const existing = await prisma.package.findFirst({
+        where: { projectId, project: { tenantId }, code: pkg.code },
+      });
+      if (!existing) {
+        await prisma.package.create({
+          data: {
+            projectId,
+            code: pkg.code,
+            name: pkg.name || pkg.code,
+            status: 'draft',
+          },
+        });
+      }
+    }
+
+    // Apply mappings to budget lines
+    for (const mapping of mappings) {
+      const budgetId = Number(mapping.budgetId);
+      if (!Number.isFinite(budgetId)) continue;
+
+      await prisma.budgetLine.update({
+        where: { id: budgetId },
+        data: { packageCode: mapping.packageCode },
+      });
+    }
+
+    res.json({ success: true, applied: mappings.length, packagesCreated: createPackages.length });
   } catch (err) {
     next(err);
   }
