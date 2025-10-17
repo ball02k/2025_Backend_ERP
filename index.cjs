@@ -73,6 +73,7 @@ const scopeAssistRouter = require('./routes/scope.assist.cjs');
 const budgetsImportRouter = require('./routes/budgets.import.cjs');
 const packagesSeedRouter = require('./routes/packages.seed.cjs');
 const taxonomyRouter = require('./routes/taxonomy.cjs');
+const budgetsSuggestRouter = require('./routes/projects.budgets.suggest.cjs');
 // Also import handlers directly for top-level mounting
 const { previewHandler: budgetsPreview, commitHandler: budgetsCommit } = require('./routes/budgets.import.cjs');
 const { ensureFeature } = require('./middleware/featureGuard.js');
@@ -196,6 +197,8 @@ app.use('/api/projects', requireAuth, projectsOverviewRouter);
 app.use('/api', requireAuth, projectBudgetRouter);
 // Grouped budgets + budget group management
 app.use('/api/projects', require('./routes/projects.budgets.cjs'));
+// AI Budget Suggestions
+app.use('/api', requireAuth, budgetsSuggestRouter);
 app.use('/api', requireAuth, projectPackagesRouter);
 app.use('/api', requireAuth, projectContractsRouter);
 app.use('/api', requireAuth, packagesRouter);
