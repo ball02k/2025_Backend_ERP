@@ -20,9 +20,9 @@ router.get('/:projectId/info', requireProjectMember, async (req, res) => {
         _count: {
           select: {
             packages: true,
-            suppliers: true,
-            documents: true,
             tasks: true,
+            contracts: true,
+            invoices: true,
           },
         },
       },
@@ -40,7 +40,7 @@ router.get('/:projectId/info', requireProjectMember, async (req, res) => {
       status: project.status,
       startDate: project.startDate,
       endDate: project.endDate,
-      value: project.value,
+      value: project.budget ?? project.actualSpend ?? 0,
       client: project.client
         ? { id: project.client.id, name: project.client.name }
         : null,
