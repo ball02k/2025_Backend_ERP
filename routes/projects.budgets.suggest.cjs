@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router({ mergeParams: true });
 const { z } = require('zod');
 const { prisma, toDecimal } = require('../lib/prisma.js');
-const { callLLMJSON } = require('../lib/llm.provider.cjs');
+const { generateJSON } = require('../lib/llm.provider.cjs');
 const { matchCostCode } = require('../lib/costCodeMatcher.cjs');
 const { requireProjectMember } = require('../middleware/membership.cjs');
+const { log } = require('../lib/logger.cjs');
 
 // Validation schemas
 const SuggestionRequestSchema = z.object({
@@ -49,7 +50,9 @@ const AcceptRequestSchema = z.object({
  * Generate AI budget line suggestions
  */
 router.post('/:projectId/budgets/suggest', requireProjectMember, async (req, res) => {
+  const rid = req._rid;
   try {
+    log(`[BUDGET:SUGGEST ${rid}] start projectId=${req.params.projectId}`);
     const projectId = Number(req.params.projectId);
     if (!Number.isFinite(projectId)) {
       return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Invalid projectId' } });
@@ -182,41 +185,20 @@ OUTPUT REQUIREMENTS:
   ]
 }`;
 
-    // JSON Schema for structured output
-    const jsonSchema = {
-      type: 'object',
-      properties: {
-        items: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              description: { type: 'string', minLength: 3, maxLength: 280 },
-              qty: { type: 'number', minimum: 0 },
-              rate: { type: 'number', minimum: 0 },
-              unit: { type: 'string', maxLength: 32 },
-              packageId: { type: 'integer' },
-              costCodeId: { type: 'integer' },
-              costCodeText: { type: 'string', maxLength: 64 },
-              rationale: { type: 'string', maxLength: 500 },
-            },
-            required: ['description', 'qty', 'rate'],
-          },
-        },
-      },
-      required: ['items'],
-    };
-
     // 6. Call LLM (provider-agnostic)
+    const schemaHint = 'object { items: array<{ description: string, qty: number, rate: number, unit?: string, packageId?: number, costCodeId?: number, costCodeText?: string, rationale?: string }> }';
+
     let aiResponse;
     try {
-      aiResponse = await callLLMJSON({
+      log(`[BUDGET:SUGGEST ${rid}] calling LLM`);
+      aiResponse = await generateJSON({
         system: systemPrompt,
-        user: userPrompt,
-        jsonSchema,
-        maxTokens: 4096,
+        prompt: userPrompt,
+        schemaHint,
       });
+      log(`[BUDGET:SUGGEST ${rid}] LLM ok`);
     } catch (error) {
+      log(`[BUDGET:SUGGEST ${rid}] LLM error:`, error?.message);
       console.error('[suggest] LLM error:', {
         message: error.message,
         code: error.code,
@@ -274,6 +256,7 @@ OUTPUT REQUIREMENTS:
       };
     });
 
+    log(`[BUDGET:SUGGEST ${rid}] success count=${suggestions.length}`);
     return res.json({
       projectId,
       count: suggestions.length,
@@ -281,11 +264,13 @@ OUTPUT REQUIREMENTS:
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
+      log(`[BUDGET:SUGGEST ${rid}] validation error:`, error.message);
       return res.status(400).json({
         error: { code: 'VALIDATION_ERROR', message: 'Invalid request', details: error.errors },
       });
     }
 
+    log(`[BUDGET:SUGGEST ${rid}] ERROR`, error?.message);
     console.error('[suggest] Unexpected error:', error);
     return res.status(500).json({
       error: { code: 'INTERNAL', message: 'Failed to generate suggestions' },

@@ -22,6 +22,8 @@ const TENANT_DEFAULT = process.env.TENANT_DEFAULT || 'demo';
 console.log('[API Catalog] hash:', getCatalogHash());
 console.log(getDeltaPrompt());
 
+// Request tracing logger
+const { withReqId, onFinish } = require('./lib/logger.cjs');
 
 const variationsRouter = require('./routes/variations.cjs');
 const documentsRouter = require('./routes/documents_v2.cjs');
@@ -121,6 +123,9 @@ app.use(
 app.options('*', cors());
 app.use(express.json({ limit: '5mb' }));
 app.use(morgan('dev'));
+// Request tracing middleware - log every request with unique ID
+app.use(withReqId);
+app.use(onFinish);
 app.use(attachUser);
 // In dev, allow bypass to attach a demo user when no token is provided
 app.use(devAuth); // must be before routes that use requireAuth
@@ -198,7 +203,7 @@ app.use('/api', requireAuth, projectBudgetRouter);
 // Grouped budgets + budget group management
 app.use('/api/projects', require('./routes/projects.budgets.cjs'));
 // AI Budget Suggestions
-app.use('/api', requireAuth, budgetsSuggestRouter);
+app.use('/api/projects', requireAuth, budgetsSuggestRouter);
 app.use('/api', requireAuth, projectPackagesRouter);
 app.use('/api', requireAuth, projectContractsRouter);
 app.use('/api', requireAuth, packagesRouter);
@@ -444,6 +449,7 @@ if (isDevEnv()) {
   // Dev-only routes
   app.use('/api/dev', require('./routes/dev.cjs'));
   app.use('/api/dev/snapshot', requireAuth, require('./routes/dev_snapshot.cjs'));
+  app.use('/api/dev/ai', require('./routes/dev.ai.cjs'));
 }
 
 // Dev-only: expose /api/dev-token when enabled
