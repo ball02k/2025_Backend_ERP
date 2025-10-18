@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "e7b7ccf"
+    "version": "20c554a"
   },
   "paths": {
     "*": {
@@ -1959,6 +1959,62 @@
         }
       }
     },
+    "//api/projects/{projectId}/budgets/suggest": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/budgets/suggest",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/budgets/suggest/accept": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/budgets/suggest/accept",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/projects/{projectId}/packages/{packageId}": {
       "get": {
         "summary": "GET //api/projects/:projectId/packages/:packageId",
@@ -2360,6 +2416,42 @@
         }
       }
     },
+    "//api/projects/{projectId}/scope/runs/{runId}/suggest": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/scope/runs/:runId/suggest",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/projects/{projectId}/scope/runs/{runId}/suggestions": {
       "get": {
         "summary": "GET //api/projects/:projectId/scope/runs/:runId/suggestions",
@@ -2389,6 +2481,42 @@
                 "example": {
                   "id": 1,
                   "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/scope/runs/{runId}/accept": {
+      "patch": {
+        "summary": "PATCH //api/projects/:projectId/scope/runs/:runId/accept",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
                 }
               }
             }
@@ -13290,6 +13418,25 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/dev/ai/echo": {
+      "post": {
+        "summary": "POST //api/dev/ai/echo",
+        "parameters": [],
         "responses": {
           "200": {
             "description": "OK",
