@@ -13,7 +13,7 @@ function serializePackage(pkg) {
     id: c.id,
     title: c.title,
     status: c.status,
-    awardValue: c.awardValue instanceof Prisma.Decimal ? Number(c.awardValue) : c.awardValue,
+    awardValue: c.value instanceof Prisma.Decimal ? Number(c.value) : c.value,
     supplier: c.supplier ? { id: c.supplier.id, name: c.supplier.name } : null,
     currency: c.currency,
     contractType: c.contractType,

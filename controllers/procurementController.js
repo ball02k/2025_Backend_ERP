@@ -155,7 +155,7 @@ exports.awardContract = async (req, res) => {
       },
     });
 
-    const awardValueNumber = contract?.awardValue != null ? Number(contract.awardValue) : Number(contractValue || 0);
+    const awardValueNumber = contract?.value != null ? Number(contract.value) : Number(contractValue || 0);
     await prisma.package.update({
       where: { id: packageId },
       data: {

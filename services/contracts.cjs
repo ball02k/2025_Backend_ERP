@@ -129,7 +129,7 @@ async function createContract({ tenantId, userId, data = {}, req }) {
     ? data.budgetLineIds.map(Number).filter(Number.isFinite)
     : [];
   const lines = await fetchBudgetLines(tenantId, projectId, budgetLineIds);
-  const awardValue = computeAwardValue(lines, data.awardValue);
+  const awardValue = computeAwardValue(lines, data.value);
 
   const created = await prisma.contract.create({
     data: {
@@ -139,7 +139,7 @@ async function createContract({ tenantId, userId, data = {}, req }) {
       supplierId,
       title: String(data.title || `Contract ${new Date().toISOString()}`),
       status: 'Draft',
-      awardValue,
+      value: awardValue,
       currency: data.currency || 'GBP',
       contractType: data.contractType || null,
       startDate: data.startDate ? new Date(data.startDate) : null,
@@ -182,7 +182,7 @@ async function approveContract({ tenantId, contractId, userId, req }) {
   if (!existing) throw Object.assign(new Error('Contract not found'), { status: 404 });
   if (existing.status === 'Approved') return enrichContract(existing, tenantId);
 
-  let awardValue = existing.awardValue;
+  let awardValue = existing.value;
   if (existing.packageId) {
     const items = await prisma.packageItem.findMany({
       where: { tenantId, packageId: existing.packageId },
@@ -196,7 +196,7 @@ async function approveContract({ tenantId, contractId, userId, req }) {
     where: { id: existing.id },
     data: {
       status: 'Approved',
-      awardValue,
+      value: awardValue,
     },
     include: {
       supplier: { select: { id: true, name: true } },

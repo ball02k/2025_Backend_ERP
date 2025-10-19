@@ -1,0 +1,1733 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+
+  shadowDatabaseUrl = env("PRISMA_MIGRATE_SHADOW_DATABASE_URL")
+}
+
+// Supplier Onboarding
+model OnboardingProject {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  name      String
+  status    String   @default("draft")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status])
+}
+
+model OnboardingForm {
+  id          Int     @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  title       String
+  version     String  @default("v1")
+  isPublished Boolean @default(false)
+  sections    Json?
+
+  @@index([tenantId, projectId])
+}
+
+model OnboardingInvite {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  supplierId  Int
+  email       String
+  token       String
+  status      String    @default("invited")
+  invitedAt   DateTime  @default(now())
+  respondedAt DateTime?
+
+  @@index([tenantId, projectId, status])
+}
+
+model OnboardingResponse {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  supplierId  Int? // link to Supplier when approved
+  formId      Int
+  answers     Json
+  files       Json?
+  status      String    @default("in_progress")
+  submittedAt DateTime?
+  reviewedBy  Int?
+  reviewedAt  DateTime?
+  decision    String?
+
+  @@index([tenantId, projectId, supplierId, status])
+}
+
+model ProjectStatus {
+  id        Int       @id @default(autoincrement())
+  tenantId  Int?
+  key       String
+  label     String
+  colorHex  String?
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  projects  Project[] @relation("ProjectStatusRel")
+
+  @@unique([tenantId, key])
+}
+
+model ProjectType {
+  id        Int       @id @default(autoincrement())
+  tenantId  Int?
+  key       String
+  label     String
+  colorHex  String?
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  projects  Project[] @relation("ProjectTypeRel")
+
+  @@unique([tenantId, key])
+}
+
+model TaskStatus {
+  id        Int     @id @default(autoincrement())
+  tenantId  Int?
+  key       String
+  label     String
+  colorHex  String?
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+  tasks     Task[]  @relation("TaskStatusRel")
+
+  @@unique([tenantId, key])
+}
+
+model Client {
+  id           Int       @id @default(autoincrement())
+  name         String
+  companyRegNo String?
+  vatNo        String?
+  address1     String?
+  address2     String?
+  city         String?
+  county       String?
+  postcode     String?
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  projects     Project[]
+  contacts     Contact[] // REQUIRED for includes/counts
+
+  @@index([name])
+  @@index([vatNo])
+  @@index([companyRegNo])
+}
+
+model Project {
+  id          Int     @id @default(autoincrement())
+  tenantId    String  @default("demo")
+  code        String  @unique
+  name        String
+  description String?
+
+  clientId Int?
+  client   Client? @relation(fields: [clientId], references: [id])
+
+  // Legacy lookup relations (retain for compatibility)
+  statusId  Int?
+  statusRel ProjectStatus? @relation("ProjectStatusRel", fields: [statusId], references: [id])
+  typeId    Int?
+  typeRel   ProjectType?   @relation("ProjectTypeRel", fields: [typeId], references: [id])
+
+  // Simple string fields for lean project
+  status           String   @default("Active")
+  type             String   @default("General")
+  projectManagerId Int?
+  country          String?
+  currency         String?
+  unitSystem       String?
+  taxScheme        String?
+  contractForm     String?
+  // Additive project info fields
+  clientContactId  Int?
+  sitePostcode     String?
+  siteLat          Decimal? @db.Decimal(10, 7)
+  siteLng          Decimal? @db.Decimal(10, 7)
+  // commercial basics (additive)
+  contractType     String?
+  paymentTermsDays Int?
+  retentionPct     Decimal? @db.Decimal(5, 2)
+
+  // internal roles (additive)
+  projectManagerUserId   Int?
+  quantitySurveyorUserId Int?
+  startPlanned           DateTime?
+  endPlanned             DateTime?
+  startActual            DateTime?
+  endActual              DateTime?
+  labels                 Json?
+
+  // Existing financial/schedule fields retained
+  budget      Decimal?  @db.Decimal(18, 2)
+  actualSpend Decimal?  @db.Decimal(18, 2)
+  startDate   DateTime?
+  endDate     DateTime?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tasks          Task[]
+  variations     Variation[]
+  snapshot       ProjectSnapshot?
+  memberships    ProjectMembership[]
+  purchaseOrders PurchaseOrder[]
+
+  budgetLines    BudgetLine[]
+  commitments    Commitment[]
+  actualCosts    ActualCost[]
+  forecasts      Forecast[]
+  financialItems FinancialItem[]
+  packages       Package[]
+  contracts      Contract[]
+  invoices       Invoice[]
+
+  // Back-relation for ImportJob → Project
+  importJobs ImportJob[]
+
+  // Additive relations to new modules
+  rfis                  Rfi[]
+  qaRecords             QaRecord[]
+  hsEvents              HsEvent[]
+  carbonEntries         CarbonEntry[]
+  ApplicationForPayment ApplicationForPayment[]
+  // MVP additive
+  tenders               Tender[]
+
+  // Additive relations for new info fields
+  clientContact    Contact? @relation("Project_ClientContact", fields: [clientContactId], references: [id])
+  // Disambiguate multiple relations to User
+  projectManager   User?    @relation("Project_ProjectManager", fields: [projectManagerUserId], references: [id])
+  quantitySurveyor User?    @relation("Project_QuantitySurveyor", fields: [quantitySurveyorUserId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, name])
+  // Hot paths: client-filtered project lists and planned end sorting
+  @@index([tenantId, clientId])
+  @@index([tenantId, endPlanned])
+  // Additive indexes for new info fields
+  @@index([tenantId, clientContactId])
+  @@index([tenantId, projectManagerUserId])
+  @@index([tenantId, quantitySurveyorUserId])
+}
+
+model CostCode {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  code        String
+  description String?
+  parentId    Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent      CostCode?    @relation("CostCodeHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children    CostCode[]   @relation("CostCodeHierarchy")
+  budgetLines BudgetLine[]
+  packages    Package[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, parentId])
+}
+
+model Task {
+  id        Int     @id @default(autoincrement())
+  projectId Int
+  tenantId  String  @default("demo")
+  project   Project @relation(fields: [projectId], references: [id])
+
+  title       String
+  description String?
+  dueDate     DateTime?
+  assignee    String?
+
+  status String @default("Open")
+
+  statusId  Int
+  statusRel TaskStatus @relation("TaskStatusRel", fields: [statusId], references: [id])
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, projectId, status])
+  @@index([projectId, dueDate])
+  @@index([tenantId, title])
+}
+
+model Contact {
+  id       Int    @id @default(autoincrement())
+  clientId Int
+  client   Client @relation(fields: [clientId], references: [id])
+
+  tenantId String @default("demo")
+
+  firstName String
+  lastName  String?
+  email     String?
+  phone     String?
+  role      String?
+  isPrimary Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Back-relation to projects where this contact is the client contact
+  projectsAsClientContact Project[] @relation("Project_ClientContact")
+
+  @@unique([clientId, email])
+  @@index([tenantId, clientId])
+  @@index([clientId, isPrimary])
+  @@index([email])
+  @@index([role])
+}
+
+model Variation {
+  id           Int     @id @default(autoincrement())
+  projectId    Int
+  tenantId     String
+  project      Project @relation(fields: [projectId], references: [id])
+  packageId    Int?
+  budgetLineId Int?
+  contractId   Int?
+
+  // Core identifiers
+  reference     String? @db.VarChar(64)
+  referenceCode String? @db.VarChar(64) // legacy
+  title         String  @db.VarChar(255)
+  description   String? @db.Text
+  contractType  String  @db.VarChar(24)
+
+  // Strings (avoid Prisma enums)
+  type        String  @db.VarChar(24)
+  status      String  @db.VarChar(24)
+  reason      String? @db.VarChar(255)
+  reason_code String? @db.VarChar(64) // legacy
+
+  // Commercials
+  // New spec fields
+  amount         Decimal @default(0) @db.Decimal(18, 2)
+  value          Decimal @db.Decimal(18, 2)
+  costImpact     Decimal @db.Decimal(18, 2)
+  timeImpactDays Int?
+  notes          String?
+  justification  String?
+
+  // Legacy/computed fields retained for compatibility
+  estimated_cost Decimal? @db.Decimal(18, 2)
+  estimated_sell Decimal? @db.Decimal(18, 2)
+  agreed_cost    Decimal? @db.Decimal(18, 2)
+  agreed_sell    Decimal? @db.Decimal(18, 2)
+
+  // Dates
+  notifiedDate   DateTime?
+  submittedDate  DateTime?
+  submissionDate DateTime?
+  decisionDate   DateTime?
+  reviewedDate   DateTime?
+  approvedDate   DateTime?
+  approvedAt     DateTime?
+  rejectedDate   DateTime?
+  instructedDate DateTime?
+  pricedDate     DateTime?
+  agreedDate     DateTime?
+  voIssuedDate   DateTime?
+  voAcceptedDate DateTime?
+  approvedBy     Int?
+
+  // Meta
+  is_deleted Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  lines         VariationLine[]
+  statusHistory VariationStatusHistory[]
+
+  @@index([projectId])
+  @@index([type])
+  @@index([status])
+  @@index([reference])
+  @@index([referenceCode])
+  @@index([tenantId, projectId])
+  @@index([tenantId, status])
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, projectId, status, updatedAt])
+  @@index([tenantId, contractId])
+  @@index([tenantId, budgetLineId])
+  @@index([tenantId, packageId])
+  @@index([createdAt])
+  @@index([updatedAt])
+  @@index([tenantId, title])
+  @@index([tenantId, reference])
+}
+
+model VariationLine {
+  id          Int       @id @default(autoincrement())
+  variationId Int
+  variation   Variation @relation(fields: [variationId], references: [id])
+  tenantId    String
+
+  cost_code   String?  @db.VarChar(64) // legacy
+  description String   @db.VarChar(255)
+  qty         Decimal  @db.Decimal(18, 3)
+  rate        Decimal  @db.Decimal(18, 2)
+  value       Decimal  @db.Decimal(18, 2)
+  sort        Int      @default(0)
+  unit        String?  @db.VarChar(32) // legacy
+  unit_cost   Decimal? @db.Decimal(18, 2) // legacy
+  unit_sell   Decimal? @db.Decimal(18, 2) // legacy
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([variationId])
+  @@index([tenantId])
+}
+
+model VariationStatusHistory {
+  id          Int       @id @default(autoincrement())
+  variationId Int
+  variation   Variation @relation(fields: [variationId], references: [id])
+  tenantId    String
+
+  fromStatus String?  @db.VarChar(24)
+  toStatus   String   @db.VarChar(24)
+  note       String?  @db.VarChar(255)
+  changedAt  DateTime @default(now())
+
+  @@index([variationId])
+  @@index([tenantId, variationId, changedAt])
+}
+
+model ProjectSnapshot {
+  projectId Int    @id
+  tenantId  String
+
+  // Financial
+  budget             Decimal? @db.Decimal(18, 2)
+  committed          Decimal? @db.Decimal(18, 2)
+  actual             Decimal? @db.Decimal(18, 2)
+  retentionHeld      Decimal? @db.Decimal(18, 2)
+  forecastAtComplete Decimal? @db.Decimal(18, 2)
+  variance           Decimal? @db.Decimal(18, 2)
+
+  financialBudget    Decimal @default(0)
+  financialCommitted Decimal @default(0)
+  financialActual    Decimal @default(0)
+  financialForecast  Decimal @default(0)
+
+  // Schedule
+  schedulePct    Int?
+  criticalAtRisk Int?
+
+  // Variations
+  variationsDraft         Int?
+  variationsSubmitted     Int?
+  variationsApproved      Int?
+  variationsValueApproved Decimal? @db.Decimal(18, 2)
+
+  // Tasks
+  tasksOverdue     Int?
+  tasksDueThisWeek Int?
+
+  // RFIs (placeholder counts until RFI module lands)
+  rfisOpen       Int?
+  rfisAvgAgeDays Int?
+
+  // QA/QC
+  qaOpenNCR   Int?
+  qaOpenPunch Int?
+
+  // H&S
+  hsIncidentsThisMonth Int?
+  hsOpenPermits        Int?
+
+  // Procurement
+  procurementCriticalLate Int?
+  procurementPOsOpen      Int?
+
+  // Carbon
+  carbonTarget Decimal? @db.Decimal(18, 2)
+  carbonToDate Decimal? @db.Decimal(18, 2)
+  carbonUnit   String?
+
+  updatedAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model Document {
+  id           BigInt         @id @default(autoincrement())
+  tenantId     String
+  filename     String
+  mimeType     String
+  size         Int
+  storageKey   String         @unique
+  sha256       String?
+  uploadedAt   DateTime       @default(now())
+  uploadedById String?
+  links        DocumentLink[]
+
+  @@index([tenantId])
+  @@index([tenantId, uploadedAt])
+}
+
+model DocumentLink {
+  id            Int      @id @default(autoincrement())
+  tenantId      String
+  documentId    BigInt
+  projectId     Int?
+  variationId   Int?
+  // NEW optional link targets (additive)
+  rfiId         Int?
+  qaRecordId    Int?
+  hsEventId     Int?
+  carbonEntryId Int?
+  poId          Int?
+  linkType      String
+  // Polymorphic linking (additive)
+  // Allows generic linking to any entity type without adding columns per type
+  entityType    String?
+  entityId      Int?
+  // Optional category for further grouping (e.g. 'spec', 'photo')
+  category      String?
+  createdAt     DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id])
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, variationId])
+  @@index([tenantId, documentId])
+  @@index([tenantId, entityType, entityId])
+  @@index([projectId])
+  @@index([variationId])
+  @@index([tenantId, rfiId])
+  @@index([tenantId, qaRecordId])
+  @@index([tenantId, hsEventId])
+  @@index([tenantId, carbonEntryId])
+  @@index([tenantId, poId])
+}
+
+// --- Additive optional links to new modules ---
+// Extend DocumentLink with nullable foreign keys to RFI/QA/H&S/Carbon entries
+// Note: This is additive; existing behavior remains unchanged
+
+/// NEW MODELS (Additive): RFI, QA/QC, H&S, Carbon
+
+model Rfi {
+  id                Int       @id @default(autoincrement())
+  tenantId          String
+  projectId         Int
+  rfiNumber         String
+  subject           String
+  question          String
+  status            String    @default("open")
+  priority          String    @default("med")
+  discipline        String?
+  packageId         Int?
+  requestedByUserId String?
+  assignedToUserId  String?
+  toCompanyId       Int?
+  dueDate           DateTime?
+  responseText      String?
+  responseByUserId  String?
+  respondedAt       DateTime?
+  costImpact        String?
+  scheduleImpact    String?
+  changeRequired    Boolean?
+  ccEmails          String?
+  tags              String?
+  location          String?
+  originatorRef     String?
+  closedAt          DateTime?
+  voidReason        String?
+  createdByUserId   String?
+  updatedByUserId   String?
+  isDeleted         Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, rfiNumber])
+}
+
+model QaRecord {
+  id                 Int       @id @default(autoincrement())
+  tenantId           String
+  projectId          Int
+  type               String
+  title              String
+  description        String?
+  trade              String?
+  location           String?
+  lot                String?
+  status             String    @default("open")
+  raisedByUserId     String?
+  assignedToUserId   String?
+  dueDate            DateTime?
+  itpRef             String?
+  testMethod         String?
+  acceptanceCriteria String?
+  remedialAction     String?
+  targetClose        DateTime?
+  closedAt           DateTime?
+  tags               String?
+  reference          String?
+  createdByUserId    String?
+  updatedByUserId    String?
+  isDeleted          Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  project Project  @relation(fields: [projectId], references: [id])
+  items   QaItem[]
+
+  @@index([tenantId, projectId, status, type])
+}
+
+model QaItem {
+  id               Int       @id @default(autoincrement())
+  tenantId         String
+  qaRecordId       Int
+  item             String
+  result           String    @default("open")
+  notes            String?
+  responsibleParty String?
+  dueDate          DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  record QaRecord @relation(fields: [qaRecordId], references: [id])
+
+  @@index([tenantId, qaRecordId])
+}
+
+model HsEvent {
+  id                 Int       @id @default(autoincrement())
+  tenantId           String
+  projectId          Int
+  type               String
+  title              String
+  description        String
+  eventDate          DateTime
+  location           String?
+  reportedByUserId   String?
+  assignedToUserId   String?
+  status             String    @default("open")
+  severity           String?
+  initialRiskRating  String?
+  residualRiskRating String?
+  personsInvolved    Json?
+  lostTimeHours      Int?
+  isRIDDOR           Boolean?
+  riddorRef          String?
+  regulatorNotified  Boolean?
+  regulatorName      String?
+  notificationDate   DateTime?
+  immediateAction    String?
+  rootCause          String?
+  correctiveActions  String?
+  targetClose        DateTime?
+  closedAt           DateTime?
+  tags               String?
+  createdByUserId    String?
+  updatedByUserId    String?
+  isDeleted          Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId, type, status])
+}
+
+model CarbonEntry {
+  id               Int      @id @default(autoincrement())
+  tenantId         String
+  projectId        Int
+  scope            String
+  category         String
+  activityDate     DateTime
+  quantity         Decimal  @db.Decimal(18, 6)
+  unit             String
+  emissionFactor   Decimal  @db.Decimal(18, 6)
+  factorUnit       String
+  calculatedKgCO2e Decimal  @db.Decimal(18, 6)
+  supplierId       Int?
+  purchaseOrderId  Int?
+  poLineId         Int?
+  deliveryId       Int?
+  factorSource     String?
+  factorRef        String?
+  materialOrFuel   String?
+  vehicleType      String?
+  fuelType         String?
+  notes            String?
+  periodMonth      Int?
+  periodYear       Int?
+  createdByUserId  String?
+  updatedByUserId  String?
+  isDeleted        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId, scope, periodYear, periodMonth])
+}
+
+model User {
+  id          Int                 @id @default(autoincrement())
+  tenantId    String              @default("demo")
+  email       String              @unique
+  name        String
+  passwordSHA String
+  isActive    Boolean             @default(true)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  memberships ProjectMembership[]
+  userRoles   UserRole[]
+  auditLogs   AuditLog[]
+
+  // Back-relations to projects for role assignments
+  projectsManaged        Project[] @relation("Project_ProjectManager")
+  projectsQuantitySurvey Project[] @relation("Project_QuantitySurveyor")
+
+  // Back-relations for Package relations
+  ownedPackages  Package[] @relation("PackageOwnerUser")
+  buyingPackages Package[] @relation("PackageBuyerUser")
+
+  @@index([tenantId, email])
+}
+
+model Role {
+  id              Int              @id @default(autoincrement())
+  tenantId        String           @default("demo")
+  name            String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@unique([tenantId, name], name: "tenantId_name")
+  @@index([tenantId, name])
+}
+
+model Permission {
+  id              Int              @id @default(autoincrement())
+  tenantId        String           @default("demo")
+  key             String
+  label           String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  rolePermissions RolePermission[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId, key])
+}
+
+model UserRole {
+  id       Int    @id @default(autoincrement())
+  tenantId String @default("demo")
+  userId   Int
+  roleId   Int
+  user     User   @relation(fields: [userId], references: [id])
+  role     Role   @relation(fields: [roleId], references: [id])
+
+  @@unique([tenantId, userId, roleId], name: "tenantId_userId_roleId")
+  @@index([tenantId, userId])
+  @@index([tenantId, roleId])
+}
+
+model RolePermission {
+  id           Int        @id @default(autoincrement())
+  tenantId     String     @default("demo")
+  roleId       Int
+  permissionId Int
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@unique([tenantId, roleId, permissionId])
+  @@index([tenantId, roleId])
+  @@index([tenantId, permissionId])
+}
+
+// Supplier Management
+model Supplier {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  name                  String
+  status                String    @default("active")
+  // Contact details (additive)
+  email                 String?
+  phone                 String?
+  companyRegNo          String?
+  vatNo                 String?
+  // Insurance details (additive)
+  insurancePolicyNumber String?
+  insuranceExpiry       DateTime?
+  hsAccreditations      String?
+  performanceScore      Decimal?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  capabilities          SupplierCapability[]
+  invites               TenderInvite[]            @relation("SupplierInvites")
+  submissions           Submission[]              @relation("SupplierSubmissions")
+  // Additive relations for tendering module
+  tenderInvites         TenderSupplierInvite[]
+  tenderResponses       TenderResponse[]
+  contracts             Contract[]                @relation("SupplierContracts")
+  awardedPackages       Package[]                 @relation("PackageAwardSupplier")
+  invoices              Invoice[]
+  onboardingTokens      SupplierOnboardingToken[]
+  ApplicationForPayment ApplicationForPayment[]
+
+  @@index([tenantId, name])
+  @@index([tenantId, status])
+}
+
+/// Token store for supplier self-onboarding links (additive)
+model SupplierOnboardingToken {
+  id         Int      @id @default(autoincrement())
+  token      String   @unique
+  supplierId Int
+  tenantId   String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([supplierId])
+  @@index([tenantId])
+  @@index([expiresAt])
+}
+
+model SupplierCapability {
+  id         Int      @id @default(autoincrement())
+  supplierId Int
+  tag        String
+  tenantId   String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([tenantId, supplierId, tag])
+}
+
+model ProjectMembership {
+  id        Int      @id @default(autoincrement())
+  tenantId  String   @default("demo")
+  projectId Int
+  userId    Int
+  role      String   @default("Member")
+  createdAt DateTime @default(now())
+  project   Project  @relation(fields: [projectId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, projectId, userId], name: "tenantId_projectId_userId")
+  @@index([tenantId, projectId])
+  @@index([tenantId, userId])
+}
+
+model PurchaseOrder {
+  id         Int        @id @default(autoincrement())
+  tenantId   String     @default("demo")
+  projectId  Int
+  code       String
+  supplier   String
+  supplierId Int?
+  status     String     @default("Open")
+  orderDate  DateTime   @default(now())
+  total      Decimal    @default(0)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  project    Project    @relation(fields: [projectId], references: [id])
+  lines      POLine[]
+  deliveries Delivery[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, supplierId])
+}
+
+model POLine {
+  id        Int           @id @default(autoincrement())
+  tenantId  String        @default("demo")
+  poId      Int
+  item      String
+  qty       Decimal       @default(0)
+  unit      String
+  unitCost  Decimal       @default(0)
+  lineTotal Decimal       @default(0)
+  po        PurchaseOrder @relation(fields: [poId], references: [id])
+
+  @@index([tenantId, poId])
+}
+
+model Delivery {
+  id         Int           @id @default(autoincrement())
+  tenantId   String        @default("demo")
+  poId       Int
+  expectedAt DateTime
+  receivedAt DateTime?
+  note       String?
+  po         PurchaseOrder @relation(fields: [poId], references: [id])
+
+  @@index([tenantId, poId])
+  @@index([poId, expectedAt])
+}
+
+// RFx / Tendering
+model Request {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  title       String
+  type        String    @default("RFP")
+  status      String    @default("draft")
+  deadline    DateTime?
+  stage       Int       @default(1)
+  totalStages Int       @default(1)
+  weighting   Json?
+  addenda     String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Optional link to a procurement package when RFx is created from/for a package
+  packageId Int?
+  package   Package? @relation(fields: [packageId], references: [id])
+
+  @@index([tenantId, status, deadline])
+  @@index([tenantId, packageId, status])
+}
+
+// Additive: RFx submission payloads for XML flows (Spreadsheet import)
+model RFxSubmission {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  rfxId      Int
+  supplierId Int
+  // Parsed payloads
+  pricing    Json?
+  answers    Json?
+  score      Decimal? @db.Decimal(8, 2)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([tenantId, rfxId, supplierId], name: "tenantId_rfxId_supplierId")
+  @@index([tenantId, rfxId])
+  @@index([tenantId, supplierId])
+}
+
+model RequestSection {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  requestId Int
+  title     String
+  weight    Decimal?
+  order     Int
+
+  @@index([tenantId, requestId])
+}
+
+model RequestQuestion {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  requestId Int
+  sectionId Int
+  qType     String
+  prompt    String
+  required  Boolean  @default(false)
+  options   Json?
+  weight    Decimal?
+  calc      Json?
+  order     Int
+}
+
+model RequestInvite {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  requestId   Int
+  supplierId  Int
+  email       String
+  status      String    @default("invited")
+  respondedAt DateTime?
+
+  @@index([tenantId, requestId, status])
+}
+
+model RequestResponse {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  requestId   Int
+  supplierId  Int
+  stage       Int
+  answers     Json
+  files       Json?
+  submittedAt DateTime?
+  score       Decimal?
+  status      String    @default("in_progress")
+
+  @@index([tenantId, requestId, supplierId, stage])
+}
+
+model RequestQna {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  requestId   Int
+  supplierId  Int?
+  question    String
+  answer      String?
+  attachments Json?
+  createdAt   DateTime  @default(now())
+  answeredAt  DateTime?
+}
+
+model AwardDecision {
+  id         Int       @id @default(autoincrement())
+  tenantId   String
+  requestId  Int
+  supplierId Int
+  decision   String    @default("pending")
+  reason     String?
+  decidedBy  Int?
+  decidedAt  DateTime?
+
+  @@index([tenantId, requestId, decision])
+}
+
+// Supplier Performance Management (SPM)
+model SpmTemplate {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  name       String
+  categories Json?
+  kpis       Json?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
+model SpmScorecard {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  supplierId  Int
+  templateId  Int
+  periodMonth String
+  status      String   @default("open")
+  totalScore  Decimal?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, supplierId, periodMonth])
+}
+
+model SpmScore {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  scorecardId Int
+  category    String
+  kpi         String
+  weight      Decimal
+  value       Decimal?
+  comment     String?
+}
+
+model BudgetLine {
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  projectId   Int
+  code        String?
+  category    String?
+  periodMonth String?
+  description String?
+  qty         Decimal  @default(0) @db.Decimal(18, 2)
+  unit        String?
+  rate        Decimal  @default(0) @db.Decimal(18, 4)
+  total       Decimal  @default(0) @db.Decimal(18, 2)
+  amount      Decimal  @default(0)
+  planned     Decimal? @db.Decimal(18, 2)
+  estimated   Decimal? @db.Decimal(18, 2)
+  actual      Decimal? @db.Decimal(18, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  costCodeId  Int?
+  // Grouping (additive)
+  groupId     Int?
+  sortOrder   Int?     @default(0)
+  position    Int      @default(0)
+
+  project      Project       @relation(fields: [projectId], references: [id])
+  costCode     CostCode?     @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  group        BudgetGroup?  @relation(fields: [groupId], references: [id])
+  // Link budget lines to procurement packages
+  packageItems PackageItem[]
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, projectId, periodMonth])
+  @@index([tenantId, costCodeId])
+  @@index([tenantId, groupId])
+}
+
+// Budget line grouping (system/user groups)
+model BudgetGroup {
+  id        Int      @id @default(autoincrement())
+  tenantId  String   @default("demo")
+  projectId Int
+  name      String
+  sortOrder Int      @default(0)
+  position  Int      @default(0)
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Opposite relation for BudgetLine.group
+  budgetLines BudgetLine[]
+
+  @@index([tenantId, projectId])
+}
+
+model Commitment {
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  projectId   Int
+  linkedPoId  Int?
+  ref         String?
+  supplier    String?
+  description String?
+  category    String?
+  periodMonth String?
+  amount      Decimal  @default(0)
+  status      String   @default("Open")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, projectId, periodMonth])
+}
+
+model ActualCost {
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  projectId   Int
+  ref         String?
+  supplier    String?
+  description String?
+  category    String?
+  amount      Decimal  @default(0)
+  incurredAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  periodMonth String?
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId, incurredAt])
+  @@index([tenantId, projectId, periodMonth])
+}
+
+model Forecast {
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  projectId   Int
+  period      String
+  periodMonth String?
+  description String?
+  amount      Decimal  @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@unique([tenantId, projectId, period])
+  @@index([tenantId, projectId])
+  @@index([tenantId, projectId, periodMonth])
+}
+
+model FinancialItem {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  projectId Int
+  name      String
+  amount    Decimal  @db.Decimal(18, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId])
+}
+
+// Invoices (project-scoped)
+model Invoice {
+  id            Int       @id @default(autoincrement())
+  tenantId      String
+  projectId     Int
+  project       Project   @relation(fields: [projectId], references: [id])
+  supplierId    Int?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id])
+  number        String
+  issueDate     DateTime?
+  dueDate       DateTime?
+  net           Decimal   @default(0)
+  vat           Decimal   @default(0)
+  gross         Decimal   @default(0)
+  status        String    @default("Open")
+  // Additive finance fields
+  documentId    BigInt?
+  ocrStatus     String?
+  ocrResultJson Json?
+  poNumberRef   String?
+  matchStatus   String?
+  matchedPoId   Int?
+  source        String?
+  // Additive links to tie into budget/contract rollups
+  packageId     Int?
+  contractId    Int?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, supplierId])
+  @@index([tenantId, projectId])
+  @@index([tenantId, packageId])
+  @@index([tenantId, contractId])
+  @@index([tenantId, projectId, dueDate])
+  @@index([tenantId, projectId, source])
+}
+
+/// Finance: Invoice line items (additive)
+model InvoiceLine {
+  id          Int     @id @default(autoincrement())
+  tenantId    String  @default("demo")
+  invoiceId   Int
+  lineNo      Int
+  description String
+  costCode    String?
+  qty         Decimal @default(0)
+  unit        String?
+  rate        Decimal @default(0)
+  vatRatePct  Float?
+  totalExVat  Decimal @default(0)
+  totalVat    Decimal @default(0)
+  totalIncVat Decimal @default(0)
+
+  @@index([tenantId, invoiceId])
+}
+
+/// Finance: Matching records (additive)
+model FinanceMatch {
+  id            Int      @id @default(autoincrement())
+  tenantId      String   @default("demo")
+  type          String // po_invoice|po_receipt|invoice_receipt|three_way
+  status        String // proposed|accepted|rejected
+  reason        String?
+  varianceExVat Decimal? @default(0)
+  varianceVat   Decimal? @default(0)
+  varianceTotal Decimal? @default(0)
+  toleranceUsed Decimal? @default(0)
+  poId          Int?
+  invoiceId     Int?
+  receiptId     Int?
+  createdAt     DateTime @default(now())
+  createdById   Int?
+
+  @@index([tenantId, type, status])
+  @@index([tenantId, poId])
+  @@index([tenantId, invoiceId])
+}
+
+/// Finance: Inbound email storage (additive)
+model InboundEmail {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  inbox      String
+  fromAddr   String
+  subject    String?
+  bodyText   String?
+  rawId      String?
+  receivedAt DateTime @default(now())
+  invoiceId  Int?
+  status     String   @default("stored")
+  error      String?
+
+  attachments EmailAttachment[]
+
+  @@index([tenantId, inbox, receivedAt])
+}
+
+model EmailAttachment {
+  id             Int          @id @default(autoincrement())
+  inboundEmailId Int
+  inboundEmail   InboundEmail @relation(fields: [inboundEmailId], references: [id])
+  filename       String
+  mimeType       String?
+  size           Int?
+  documentId     BigInt?
+}
+
+// --- Applications for Payment (AfP) ---
+model ApplicationForPayment {
+  id              Int       @id @default(autoincrement())
+  tenantId        String
+  projectId       Int
+  supplierId      Int?
+  contractId      Int?
+  applicationNo   String // e.g. "AFP-2025-00012", unique per tenant
+  applicationDate DateTime // date submitted
+  periodStart     DateTime
+  periodEnd       DateTime
+  assessmentDate  DateTime? // JCT IVD / NEC assessment date
+  dueDate         DateTime? // contractual due date for payment
+  currency        String // "GBP" default
+  // Claimed
+  grossToDate     Decimal   @db.Decimal(18, 2)
+  variationsValue Decimal   @db.Decimal(18, 2)
+  prelimsValue    Decimal   @db.Decimal(18, 2)
+  retentionValue  Decimal   @db.Decimal(18, 2)
+  mosValue        Decimal   @db.Decimal(18, 2) // materials on site
+  offsiteValue    Decimal   @db.Decimal(18, 2) // materials off site
+  deductionsValue Decimal   @db.Decimal(18, 2) // contra charges etc.
+  netClaimed      Decimal   @db.Decimal(18, 2)
+
+  // Certification
+  certifiedAmount    Decimal?  @db.Decimal(18, 2)
+  certifiedDate      DateTime?
+  certifiedByUserId  Int?
+  certificationNotes String?
+
+  // Notices timeline
+  paymentNoticeIssuedAt DateTime?
+  payLessNoticeIssuedAt DateTime?
+  payLessReason         String?
+
+  status    String // draft | submitted | payment_notice | pay_less_notice | certified | rejected | paid
+  reference String? // free text: invoice ref, CA note etc.
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project       Project         @relation(fields: [projectId], references: [id])
+  supplier      Supplier?       @relation(fields: [supplierId], references: [id])
+  contract      Contract?       @relation(fields: [contractId], references: [id])
+  AfpAttachment AfpAttachment[]
+
+  @@unique([tenantId, applicationNo])
+  @@index([tenantId, projectId, applicationDate])
+  @@index([tenantId, supplierId])
+  @@index([tenantId, status])
+}
+
+model AfpAttachment {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  afpId      Int
+  documentId BigInt
+  label      String?
+  createdAt  DateTime @default(now())
+
+  afp ApplicationForPayment @relation(fields: [afpId], references: [id])
+  // Document.id remains BigInt elsewhere
+}
+
+/// Finance: OCR job queue (additive)
+model OcrJob {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  documentId BigInt
+  kind       String   @default("invoice") // invoice|po
+  status     String   @default("queued") // queued|processing|done|failed
+  provider   String?
+  resultJson Json?
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  invoiceId  Int?
+  poId       Int?
+
+  @@index([tenantId, status])
+}
+
+// Feature flags removed by Task-14 rollback: FeatureGrant model deleted
+
+model Package {
+  id              Int       @id @default(autoincrement())
+  projectId       Int
+  project         Project   @relation(fields: [projectId], references: [id])
+  name            String
+  scopeSummary    String?   @map("scope")
+  trade           String?
+  status          String    @default("Draft")
+  budgetEstimate  Decimal?
+  deadline        DateTime?
+  // Additional scheduling + info fields
+  targetAwardDate DateTime?
+  requiredOnSite  DateTime?
+  leadTimeWeeks   Int?
+  contractForm    String?
+  retentionPct    Decimal?  @db.Decimal(5, 2)
+  paymentTerms    String?
+  currency        String?
+  awardValue      Decimal?
+  awardSupplierId Int?
+  awardSupplier   Supplier? @relation("PackageAwardSupplier", fields: [awardSupplierId], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  costCodeId      Int?
+  // New additive fields for tender packaging
+  attachments     Json?
+  // Optional: explicitly store a trade category label
+  tradeCategory   String?
+  // Ownership (optional)
+  ownerUserId     Int?
+  buyerUserId     Int?
+  ownerUser       User?     @relation("PackageOwnerUser", fields: [ownerUserId], references: [id])
+  buyerUser       User?     @relation("PackageBuyerUser", fields: [buyerUserId], references: [id])
+
+  submissions Submission[]   @relation("PackageSubmissions")
+  invites     TenderInvite[] @relation("PackageInvites")
+  contracts   Contract[]     @relation("PackageContracts")
+  requests    Request[]
+  tenders     Tender[]
+  costCode    CostCode?      @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  // Link to selected budget lines
+  budgetItems PackageItem[]
+
+  @@index([projectId])
+  @@index([projectId, costCodeId])
+  @@index([projectId, status])
+}
+
+// Join model linking packages to budget lines
+model PackageItem {
+  id           Int      @id @default(autoincrement())
+  tenantId     String   @default("demo")
+  packageId    Int
+  budgetLineId Int
+  createdAt    DateTime @default(now())
+
+  package    Package    @relation(fields: [packageId], references: [id])
+  budgetLine BudgetLine @relation(fields: [budgetLineId], references: [id])
+
+  @@index([tenantId, packageId])
+  @@index([tenantId, budgetLineId])
+}
+
+// Additive lightweight tendering models (separate from existing Request/Submission)
+model Tender {
+  id              Int       @id @default(autoincrement())
+  tenantId        String    @default("demo")
+  projectId       Int
+  packageId       Int?
+  title           String
+  description     String?
+  status          String
+  // Additive fields for consolidated tenders list
+  deadlineAt      DateTime?
+  invitedCount    Int       @default(0)
+  submissionCount Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  project   Project                @relation(fields: [projectId], references: [id])
+  package   Package?               @relation(fields: [packageId], references: [id])
+  bids      TenderBid[]
+  // Additive relations for questions, responses, and invites
+  questions TenderQuestion[]
+  responses TenderResponse[]
+  invites   TenderSupplierInvite[]
+
+  @@unique([id, tenantId], name: "id_tenantId")
+  @@index([tenantId, projectId])
+}
+
+// Additive: questions for tender scoring
+model TenderQuestion {
+  id       Int    @id @default(autoincrement())
+  tenantId String @default("demo")
+  tenderId Int
+  text     String
+  type     String // 'text' | 'number' | 'single' | 'multi' | 'file'
+  weight   Float
+  options  Json?
+
+  tender Tender @relation(fields: [tenderId], references: [id])
+
+  @@index([tenantId, tenderId])
+}
+
+// Additive: token-based invites per tender (distinct from legacy package invites)
+model TenderSupplierInvite {
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  tenderId    Int
+  supplierId  Int
+  inviteToken String   @unique
+  status      String   @default("invited") // invited | responded | withdrawn
+  createdAt   DateTime @default(now())
+
+  tender   Tender   @relation(fields: [tenderId], references: [id])
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([tenantId, tenderId, supplierId])
+}
+
+// Additive: supplier response to a tender
+model TenderResponse {
+  id           Int      @id @default(autoincrement())
+  tenantId     String   @default("demo")
+  tenderId     Int
+  supplierId   Int
+  priceTotal   Decimal  @db.Decimal(18, 2)
+  leadTimeDays Int?
+  submittedAt  DateTime @default(now())
+  answers      Json
+  autoScore    Float    @default(0)
+  manualScore  Float    @default(0)
+  notes        String?
+
+  // Additive fields for buyer-entered responses and file attachments
+  source      String @default("supplier") // 'supplier' | 'buyer'
+  attachments Json?
+
+  tender   Tender   @relation(fields: [tenderId], references: [id])
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([tenantId, tenderId, supplierId])
+}
+
+model TenderBid {
+  id         Int      @id @default(autoincrement())
+  tenantId   String   @default("demo")
+  tenderId   Int
+  supplierId Int
+  price      Decimal  @db.Decimal(18, 2)
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  tender Tender @relation(fields: [tenderId], references: [id])
+
+  @@index([tenantId, tenderId])
+}
+
+model TenderInvite {
+  id          Int       @id @default(autoincrement())
+  packageId   Int
+  package     Package   @relation(name: "PackageInvites", fields: [packageId], references: [id])
+  supplierId  Int
+  supplier    Supplier  @relation("SupplierInvites", fields: [supplierId], references: [id])
+  invitedAt   DateTime  @default(now())
+  respondedAt DateTime?
+  status      String    @default("Invited")
+
+  submission Submission? @relation("TenderInviteSubmission")
+
+  @@unique([packageId, supplierId])
+  @@index([supplierId])
+}
+
+model Submission {
+  id             Int      @id @default(autoincrement())
+  packageId      Int
+  package        Package  @relation(name: "PackageSubmissions", fields: [packageId], references: [id])
+  supplierId     Int
+  supplier       Supplier @relation("SupplierSubmissions", fields: [supplierId], references: [id])
+  submittedAt    DateTime @default(now())
+  price          Decimal?
+  durationWeeks  Int?
+  technicalScore Float?
+  priceScore     Float?
+  overallScore   Float?
+  rank           Int?
+  status         String   @default("Submitted")
+  details        Json?
+
+  invite TenderInvite? @relation("TenderInviteSubmission", fields: [packageId, supplierId], references: [packageId, supplierId])
+
+  @@unique([packageId, supplierId])
+  @@index([packageId])
+  @@index([supplierId])
+}
+
+model Contract {
+  id                   Int       @id @default(autoincrement())
+  tenantId             String?   @db.VarChar(64) @map("tenantId")
+  projectId            Int
+  project              Project   @relation(fields: [projectId], references: [id])
+  packageId            Int?
+  package              Package?  @relation("PackageContracts", fields: [packageId], references: [id])
+  supplierId           Int
+  supplier             Supplier  @relation("SupplierContracts", fields: [supplierId], references: [id])
+  title                String
+  status               String    @default("Draft")
+  awardValue           Decimal   @db.Decimal(18, 2)
+  currency             String    @default("GBP")
+  contractType         String?
+  startDate            DateTime?
+  endDate              DateTime?
+  createdAt            DateTime  @default(now())
+  createdByUserId      Int?
+  updatedAt            DateTime  @updatedAt
+  ApplicationForPayment ApplicationForPayment[]
+
+  @@index([tenantId])
+  @@index([tenantId, projectId])
+  @@index([tenantId, packageId])
+  @@index([tenantId, supplierId])
+}
+
+// --- Cost Value Reconciliation (additive) ---
+model CostValueReconciliation {
+  id             Int      @id @default(autoincrement())
+  tenantId       String
+  projectId      Int
+  period         String // YYYY-MM
+  budget         Decimal  @default(0) @db.Decimal(18, 2)
+  committed      Decimal  @default(0) @db.Decimal(18, 2)
+  actual         Decimal  @default(0) @db.Decimal(18, 2)
+  earnedValue    Decimal  @default(0) @db.Decimal(18, 2)
+  costVariance   Decimal  @default(0) @db.Decimal(18, 2)
+  costToComplete Decimal  @default(0) @db.Decimal(18, 2)
+  marginPct      Decimal  @default(0) @db.Decimal(9, 4)
+  notes          String?
+  justification  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  lines CVRLine[]
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, period])
+}
+
+model CVRLine {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  cvrId       Int
+  packageId   Int?
+  costCode    String?
+  budget      Decimal  @default(0) @db.Decimal(18, 2)
+  committed   Decimal  @default(0) @db.Decimal(18, 2)
+  actual      Decimal  @default(0) @db.Decimal(18, 2)
+  earnedValue Decimal  @default(0) @db.Decimal(18, 2)
+  variance    Decimal  @default(0) @db.Decimal(18, 2)
+  adjustment  Decimal  @default(0) @db.Decimal(18, 2)
+  adjusted    Decimal  @default(0) @db.Decimal(18, 2)
+  variationId Int?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cvr CostValueReconciliation @relation(fields: [cvrId], references: [id])
+
+  @@index([tenantId, cvrId])
+  @@index([tenantId, packageId])
+}
+
+// --- Project Diary (additive) ---
+model DiaryEntry {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  date        DateTime
+  description String
+  issues      String?
+  createdBy   Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, projectId, date])
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  timestamp DateTime @default(now())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id])
+  entity    String
+  entityId  String
+  action    String
+  changes   Json?
+  ipAddress String?
+
+  @@index([entity, entityId])
+}
+
+model CVRSnapshot {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  projectId Int
+  period    String // "YYYY-MM"
+  status    String? // "draft" | "submitted" | "approved" (string, not enum)
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines CVRSnapshotLine[]
+
+  @@index([tenantId, projectId, period])
+  @@index([tenantId, status])
+}
+
+model CVRSnapshotLine {
+  id           Int     @id @default(autoincrement())
+  tenantId     String
+  snapshotId   Int
+  projectId    Int
+  budgetLineId Int?
+  packageId    Int?
+  contractId   Int?
+  code         String?
+  name         String?
+
+  planned      Decimal @default(0) @db.Decimal(18, 2) // from BudgetLine.planned at seed
+  estimate     Decimal @default(0) @db.Decimal(18, 2) // from Contract value (sum per package)
+  actualToDate Decimal @default(0) @db.Decimal(18, 2) // sum of invoices up to period end
+
+  progressPct Decimal @default(0) @db.Decimal(5, 2) // editable % complete this period (0-100)
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  snapshot CVRSnapshot @relation(fields: [snapshotId], references: [id])
+
+  @@index([tenantId, snapshotId])
+  @@index([tenantId, projectId])
+  @@index([tenantId, packageId])
+  @@index([tenantId, budgetLineId])
+  @@index([tenantId, contractId])
+}
+
+// --- Additive: Budget CSV import tracking (preview/commit) ---
+model ImportJob {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  projectId  Int
+  filename   String
+  status     String // 'preview' | 'committed' | 'failed' (kept as string for flexibility)
+  rowCount   Int      @default(0)
+  errorCount Int      @default(0)
+  preview    Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId])
+}
