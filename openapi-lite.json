@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "ab4512f"
+    "version": "fa97ada"
   },
   "paths": {
     "*": {
@@ -2607,10 +2607,19 @@
         }
       }
     },
-    "//api/awards": {
+    "//api/packages/{id}/award": {
       "post": {
-        "summary": "POST //api/awards",
-        "parameters": [],
+        "summary": "POST //api/packages/:id/award",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -2652,34 +2661,6 @@
             "bearerAuth": []
           }
         ]
-      }
-    },
-    "//api/packages/{packageId}/award": {
-      "post": {
-        "summary": "POST //api/packages/:packageId/award",
-        "parameters": [
-          {
-            "name": "packageId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
       }
     },
     "//api/projects/{projectId}/scope/runs": {
@@ -7069,6 +7050,34 @@
         "parameters": [
           {
             "name": "submissionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/packages/{packageId}/award": {
+      "post": {
+        "summary": "POST //api/packages/:packageId/award",
+        "parameters": [
+          {
+            "name": "packageId",
             "in": "path",
             "required": true,
             "schema": {
