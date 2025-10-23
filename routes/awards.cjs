@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { prisma } = require('../lib/prisma');
-const { requireAuth } = require('../lib/auth');
+const { requireAuth } = require('../lib/auth.cjs');
 const { checkSupplierCompliance } = require('../lib/compliance');
 const { writeAudit } = require('../lib/audit');
 
