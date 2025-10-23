@@ -81,7 +81,6 @@ const contractsReadRouter = require('./routes/contracts.read.cjs');
 const settingsV1Router = require('./routes/settings.v1.cjs');
 const contractTemplatesRouter = require('./routes/contract.templates.cjs');
 const tradesRouter = require('./routes/trades.cjs');
-const awardsRouter = require('./routes/awards.cjs');
 // Also import handlers directly for top-level mounting
 const { previewHandler: budgetsPreview, commitHandler: budgetsCommit } = require('./routes/budgets.import.cjs');
 const { ensureFeature } = require('./middleware/featureGuard.js');
@@ -214,7 +213,7 @@ app.use('/api', requireAuth, projectPackagesRouter);
 app.use('/api', requireAuth, projectContractsRouter);
 app.use('/api', requireAuth, packagesRouter);
 app.use('/api', requireAuth, contractsRouter);
-app.use('/api', requireAuth, awardsRouter);
+app.use('/api', require('./routes/awards.cjs'));
 app.use('/api', requireAuth, projectsScopeRouter);
 app.use('/api', requireAuth, projectOverviewRouter2);
 app.use('/api', requireAuth, costCodesRouter);
