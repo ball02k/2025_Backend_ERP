@@ -73,10 +73,14 @@ async function enrichContract(contract, tenantId) {
         };
       });
   }
+  const contractLines = await prisma.contractLineItem.findMany({
+    where: { tenantId, contractId: contract.id },
+    orderBy: [{ id: 'asc' }],
+  });
   const pkg = contract.package
     ? { ...contract.package, scope: contract.package.scopeSummary ?? null }
     : null;
-  return toJson({ ...contract, package: pkg, budgetLines });
+  return toJson({ ...contract, package: pkg, budgetLines, lines: contractLines });
 }
 
 async function listContracts({ tenantId, projectId }) {
@@ -131,26 +135,51 @@ async function createContract({ tenantId, userId, data = {}, req }) {
   const lines = await fetchBudgetLines(tenantId, projectId, budgetLineIds);
   const awardValue = computeAwardValue(lines, data.value);
 
+  const netValue = data.value != null ? toDecimal(data.value) : awardValue;
+
+  const retentionDecimal = data.retentionPct != null ? toDecimal(data.retentionPct, { allowNull: true }) : null;
+
   const created = await prisma.contract.create({
     data: {
       tenantId,
       projectId,
       packageId,
       supplierId,
-      title: String(data.title || `Contract ${new Date().toISOString()}`),
-      status: 'Draft',
-      value: awardValue,
+      title: String(data.title || data.name || `Contract ${new Date().toISOString()}`),
+      contractRef: data.reference || data.contractRef || null,
+      status: data.status ? String(data.status).toLowerCase() : 'draft',
+      value: netValue,
       currency: data.currency || 'GBP',
-      contractType: data.contractType || null,
       startDate: data.startDate ? new Date(data.startDate) : null,
       endDate: data.endDate ? new Date(data.endDate) : null,
-      createdByUserId: userId != null ? Number(userId) : null,
+      retentionPct: retentionDecimal,
+      paymentTerms: data.paymentTerms || null,
+      notes: data.notes || null,
     },
     include: {
       supplier: { select: { id: true, name: true } },
       package: { select: { id: true, name: true, scopeSummary: true } },
     },
   });
+
+  if (lines.length) {
+    for (const line of lines) {
+      const qty = toDecimal(line.qty ?? line.quantity ?? 0, { allowNull: true });
+      const rate = toDecimal(line.rate ?? line.unitRate ?? 0, { allowNull: true });
+      const total = toDecimal(line.total ?? line.amount ?? 0, { allowNull: true });
+      await prisma.contractLineItem.create({
+        data: {
+          tenantId,
+          contractId: created.id,
+          description: line.description || line.code || 'Line',
+          qty,
+          rate,
+          total,
+          costCode: line.costCode ? line.costCode.code || line.costCode : null,
+        },
+      });
+    }
+  }
 
   await writeAudit({
     prisma,
@@ -180,22 +209,22 @@ async function approveContract({ tenantId, contractId, userId, req }) {
     },
   });
   if (!existing) throw Object.assign(new Error('Contract not found'), { status: 404 });
-  if (existing.status === 'Approved') return enrichContract(existing, tenantId);
+  if (existing.status && existing.status.toLowerCase() === 'approved') {
+    return enrichContract(existing, tenantId);
+  }
 
   let awardValue = existing.value;
   if (existing.packageId) {
-    const items = await prisma.packageItem.findMany({
+    const items = await prisma.packageLineItem.findMany({
       where: { tenantId, packageId: existing.packageId },
-      include: { budgetLine: true },
     });
-    const lines = items.map((it) => it.budgetLine).filter(Boolean);
-    if (lines.length) awardValue = computeAwardValue(lines, awardValue);
+    if (items.length) awardValue = computeAwardValue(items, awardValue);
   }
 
   const updated = await prisma.contract.update({
     where: { id: existing.id },
     data: {
-      status: 'Approved',
+      status: 'approved',
       value: awardValue,
     },
     include: {
@@ -211,7 +240,7 @@ async function approveContract({ tenantId, contractId, userId, req }) {
     entity: 'Contract',
     entityId: updated.id,
     action: 'CONTRACT_APPROVE',
-    changes: { status: 'Approved', awardValue: Number(awardValue) },
+    changes: { status: 'approved', awardValue: Number(awardValue) },
   });
 
   return enrichContract(updated, tenantId);

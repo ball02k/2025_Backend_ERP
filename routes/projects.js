@@ -1,10 +1,38 @@
 const express = require('express');
 const { z } = require('zod');
 const { requireProjectMember } = require('../middleware/membership.cjs');
+const { requireTenant } = require('../middleware/tenant.cjs');
+const { writeAudit } = require('../lib/audit.cjs');
 const { projectBodySchema } = require('../lib/validation');
+const { Prisma } = require('@prisma/client');
 const PackageController = require('../controllers/packageController.js');
 module.exports = (prisma) => {
   const router = express.Router();
+
+  async function generateProjectCode(name, tenantId) {
+    const base = String(name || 'PROJECT')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 16) || 'PROJECT';
+    let attempt = 0;
+    while (attempt < 10) {
+      const code = attempt === 0 ? base : `${base}-${attempt}`;
+      const existing = await prisma.project.findFirst({ where: { code } });
+      if (!existing) return code;
+      attempt += 1;
+    }
+    return `${base}-${Date.now().toString(36).toUpperCase()}`;
+  }
+
+  const toDecimal = (value) => {
+    if (value == null || value === '') return null;
+    try {
+      return new Prisma.Decimal(value);
+    } catch (_) {
+      return null;
+    }
+  };
   function toCsvRow(values) {
     return values
       .map((v) => {
@@ -134,27 +162,140 @@ module.exports = (prisma) => {
         ...(req.query.status ? { status: String(req.query.status) } : {}),
         ...(req.query.type ? { type: String(req.query.type) } : {}),
       };
-      const [total, rows] = await Promise.all([
+      const [total, rows, aggregates] = await Promise.all([
         prisma.project.count({ where }),
         prisma.project.findMany({
           where,
           orderBy,
           skip,
           take,
-          include: {
+          select: {
+            id: true,
+            tenantId: true,
+            code: true,
+            name: true,
+            description: true,
+            clientId: true,
+            statusId: true,
+            typeId: true,
+            status: true,
+            type: true,
+            projectManagerId: true,
+            country: true,
+            currency: true,
+            unitSystem: true,
+            taxScheme: true,
+            contractForm: true,
+            contractType: true,
+            startDate: true,
+            endDate: true,
+            startPlanned: true,
+            endPlanned: true,
+            startActual: true,
+            endActual: true,
+            budget: true,
+            actualSpend: true,
+            paymentTermsDays: true,
+            retentionPct: true,
+            sitePostcode: true,
+            siteLat: true,
+            siteLng: true,
+            labels: true,
+            createdAt: true,
+            updatedAt: true,
+            deletedAt: true,
             client: { select: { id: true, name: true } },
             statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
             typeRel: { select: { id: true, key: true, label: true, colorHex: true } },
+            // Include budget lines to calculate actual project budget
+            budgetLines: {
+              select: {
+                id: true,
+                total: true,
+                amount: true,
+              },
+            },
+          },
+        }),
+        // Aggregate totals for ALL filtered projects (not just current page)
+        prisma.project.aggregate({
+          where,
+          _sum: {
+            budget: true,
+            actualSpend: true,
           },
         }),
       ]);
+
+      // Count projects by status for dashboard widgets
+      const statusCounts = await prisma.project.groupBy({
+        by: ['status'],
+        where,
+        _count: { status: true },
+      });
       const { buildLinks } = require('../lib/buildLinks.cjs');
+      const { Prisma } = require('@prisma/client');
       const projects = rows.map((p) => {
-        const row = { ...p, clientName: p.client ? p.client.name : null };
+        // Calculate actual budget from sum of BudgetLine totals
+        let calculatedBudget = 0;
+        if (Array.isArray(p.budgetLines) && p.budgetLines.length > 0) {
+          calculatedBudget = p.budgetLines.reduce((sum, line) => {
+            const lineTotal = line.total != null ? line.total : line.amount;
+            const numValue = lineTotal instanceof Prisma.Decimal ? Number(lineTotal) : Number(lineTotal || 0);
+            return sum + numValue;
+          }, 0);
+        }
+
+        const row = {
+          ...p,
+          clientName: p.client ? p.client.name : null,
+          // Use calculated budget from BudgetLines, fallback to static budget field
+          budget: calculatedBudget > 0 ? calculatedBudget : (p.budget != null ? (p.budget instanceof Prisma.Decimal ? Number(p.budget) : Number(p.budget)) : null),
+          actualSpend: p.actualSpend != null ? (p.actualSpend instanceof Prisma.Decimal ? Number(p.actualSpend) : Number(p.actualSpend)) : null,
+        };
+        // Remove budgetLines from output (only needed for calculation)
+        delete row.budgetLines;
         row.links = buildLinks('project', { ...row, client: p.client });
         return row;
       });
-      res.json({ total, projects, items: projects, data: { items: projects, total } });
+
+      // Calculate total budget from BudgetLines across ALL filtered projects
+      const allProjectIds = await prisma.project.findMany({
+        where,
+        select: { id: true },
+      });
+      const projectIds = allProjectIds.map(p => p.id);
+
+      const budgetLinesAgg = await prisma.budgetLine.aggregate({
+        where: {
+          projectId: { in: projectIds },
+        },
+        _sum: {
+          total: true,
+          amount: true,
+        },
+      });
+
+      const totalBudget = budgetLinesAgg._sum.total != null
+        ? (budgetLinesAgg._sum.total instanceof Prisma.Decimal ? Number(budgetLinesAgg._sum.total) : Number(budgetLinesAgg._sum.total))
+        : (budgetLinesAgg._sum.amount != null
+          ? (budgetLinesAgg._sum.amount instanceof Prisma.Decimal ? Number(budgetLinesAgg._sum.amount) : Number(budgetLinesAgg._sum.amount))
+          : 0);
+
+      // Include aggregated totals for all filtered projects
+      const totals = {
+        budget: totalBudget,
+        actualSpend: aggregates._sum.actualSpend != null ? (aggregates._sum.actualSpend instanceof Prisma.Decimal ? Number(aggregates._sum.actualSpend) : Number(aggregates._sum.actualSpend)) : 0,
+        committedCost: 0, // TODO: Calculate from related POs/Contracts when available
+      };
+
+      // Convert status counts to object for easy lookup
+      const statusCountsObj = statusCounts.reduce((acc, item) => {
+        acc[item.status || 'Unknown'] = item._count.status;
+        return acc;
+      }, {});
+
+      res.json({ total, projects, items: projects, data: { items: projects, total }, totals, statusCounts: statusCountsObj });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: err.message || 'Failed to fetch projects' });
@@ -216,21 +357,28 @@ module.exports = (prisma) => {
       const packages = await prisma.package.findMany({
         where: { projectId },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
-        // IMPORTANT: Do NOT list scalar fields here; schema drifts will crash.
-        // Only include relations that EXIST in your current Prisma schema.
-        include: {
-          project: true,
-          awardSupplier: true,
-          ownerUser: true,
-          buyerUser: true,
-          submissions: true,
-          invites: true,
-          contracts: true,
-          requests: true,
-          costCode: true,
-          budgetItems: true,
-          tenders: true,
-          _count: true,
+        // Use selective includes to avoid schema drift crashes
+        select: {
+          id: true,
+          projectId: true,
+          name: true,
+          scopeSummary: true,
+          trade: true,
+          tradeCategory: true,
+          status: true,
+          budgetEstimate: true,
+          deadline: true,
+          requiredOnSite: true,
+          leadTimeWeeks: true,
+          awardValue: true,
+          awardSupplierId: true,
+          targetAwardDate: true,
+          costCodeId: true,
+          createdAt: true,
+          updatedAt: true,
+          awardSupplier: { select: { id: true, name: true } },
+          costCode: { select: { id: true, code: true, description: true } },
+          _count: { select: { budgetItems: true, submissions: true, invites: true } },
         },
       });
 
@@ -564,7 +712,7 @@ module.exports = (prisma) => {
           startDate: true,
           endDate: true,
           client: { select: { id: true, name: true, vatNo: true, companyRegNo: true } },
-          _count: { select: { packages: true, contracts: true } },
+          _count: { select: { packages: true } }, // contracts: true removed - causes P2022 error
         },
       });
 
@@ -625,139 +773,233 @@ module.exports = (prisma) => {
 
   // POST /api/projects
   router.post('/', async (req, res) => {
+    let tenantId;
     try {
-      const tenantId = req.user && req.user.tenantId;
-      const roles = Array.isArray(req.user?.roles)
-        ? req.user.roles
-        : req.user?.role
-        ? [req.user.role]
-        : [];
-      const allowed = new Set(['admin', 'pm']);
-      const canCreate = roles.some((r) => allowed.has(String(r)));
-      if (!canCreate) return res.status(403).json({ error: 'FORBIDDEN' });
-      const body = projectBodySchema.parse(req.body);
-      if (!body.code) return res.status(400).json({ error: 'code is required' });
-
-      // validate client
-      const client = await prisma.client.findFirst({ where: { id: body.clientId, deletedAt: null } });
-      if (!client) return res.status(400).json({ error: 'Invalid clientId' });
-      // optional: validate lookups exist
-      if (body.statusId) {
-        const st = await prisma.projectStatus.findFirst({ where: { id: body.statusId } });
-        if (!st) return res.status(400).json({ error: 'Invalid statusId' });
-      }
-      if (body.typeId) {
-        const tp = await prisma.projectType.findFirst({ where: { id: body.typeId } });
-        if (!tp) return res.status(400).json({ error: 'Invalid typeId' });
-      }
-      if (body.projectManagerId !== undefined) {
-        const pm = await prisma.user.findFirst({ where: { id: Number(body.projectManagerId), tenantId } });
-        if (!pm) return res.status(400).json({ error: 'Invalid projectManagerId' });
-      }
-
-      const created = await prisma.project.create({
-        data: {
-          tenantId,
-          code: body.code,
-          name: body.name,
-          description: body.description ?? null,
-          clientId: body.clientId,
-          projectManagerId: body.projectManagerId,
-          statusId: body.statusId,
-          typeId: body.typeId,
-          budget: body.budget != null ? body.budget : undefined,
-          actualSpend: body.actualSpend != null ? body.actualSpend : undefined,
-          startDate: body.startDate ? new Date(body.startDate) : undefined,
-          endDate: body.endDate ? new Date(body.endDate) : undefined,
-        },
-        include: {
-          client: { select: { id: true, name: true } },
-          statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
-          typeRel: { select: { id: true, key: true, label: true, colorHex: true } },
-        },
-      });
-      res.status(201).json(created);
+      tenantId = requireTenant(req);
     } catch (err) {
-      if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed', details: err.errors });
-      console.error(err);
-      res.status(500).json({ error: err.message || 'Failed to create project' });
+      return res.status(err.status || 400).json({ error: err.message || 'Tenant context required' });
     }
+    const roles = Array.isArray(req.user?.roles)
+      ? req.user.roles
+      : req.user?.role
+      ? [req.user.role]
+      : [];
+    const allowed = new Set(['admin', 'pm']);
+    const canCreate = roles.some((r) => allowed.has(String(r)));
+    if (!canCreate) return res.status(403).json({ error: 'FORBIDDEN' });
+
+    let body;
+    try {
+      body = projectBodySchema.parse(req.body ?? {});
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Validation failed', details: err.errors });
+      }
+      return res.status(400).json({ error: err.message || 'Invalid request body' });
+    }
+
+    const clientId = body.clientId != null ? Number(body.clientId) : null;
+    if (clientId != null) {
+      const client = await prisma.client.findFirst({ where: { id: clientId, deletedAt: null } });
+      if (!client) return res.status(400).json({ error: 'Invalid clientId' });
+    }
+
+    if (body.statusId) {
+      const st = await prisma.projectStatus.findFirst({ where: { id: Number(body.statusId) } });
+      if (!st) return res.status(400).json({ error: 'Invalid statusId' });
+    }
+    if (body.typeId) {
+      const tp = await prisma.projectType.findFirst({ where: { id: Number(body.typeId) } });
+      if (!tp) return res.status(400).json({ error: 'Invalid typeId' });
+    }
+    if (body.projectManagerId !== undefined && body.projectManagerId !== null) {
+      const pm = await prisma.user.findFirst({ where: { id: Number(body.projectManagerId), tenantId } });
+      if (!pm) return res.status(400).json({ error: 'Invalid projectManagerId' });
+    }
+
+    const rawCode = (body.code || '').trim();
+    const code = rawCode || (await generateProjectCode(body.name, tenantId));
+
+    const siteLatDecimal = body.siteLat != null ? toDecimal(body.siteLat) : undefined;
+    if (body.siteLat != null && siteLatDecimal == null) {
+      return res.status(400).json({ error: 'Invalid siteLat' });
+    }
+    const siteLngDecimal = body.siteLng != null ? toDecimal(body.siteLng) : undefined;
+    if (body.siteLng != null && siteLngDecimal == null) {
+      return res.status(400).json({ error: 'Invalid siteLng' });
+    }
+
+    const retentionDecimal = body.retentionPct != null ? toDecimal(body.retentionPct) : undefined;
+    if (body.retentionPct != null && retentionDecimal == null) {
+      return res.status(400).json({ error: 'Invalid retentionPct' });
+    }
+
+    const data = {
+      tenantId,
+      code,
+      name: body.name,
+      description: body.description ?? null,
+      clientId: clientId ?? undefined,
+      projectManagerId: body.projectManagerId ?? undefined,
+      statusId: body.statusId ?? undefined,
+      typeId: body.typeId ?? undefined,
+      status: body.status ?? undefined,
+      type: body.type ?? undefined,
+      contractType: body.contractType ?? undefined,
+      budget: body.budget != null ? body.budget : undefined,
+      actualSpend: body.actualSpend != null ? body.actualSpend : undefined,
+      startDate: body.startDate ? new Date(body.startDate) : undefined,
+      endDate: body.endDate ? new Date(body.endDate) : undefined,
+      country: body.country ?? undefined,
+      currency: body.currency ?? undefined,
+      unitSystem: body.unitSystem ?? undefined,
+      taxScheme: body.taxScheme ?? undefined,
+      contractForm: body.contractForm ?? undefined,
+      startPlanned: body.startPlanned ? new Date(body.startPlanned) : undefined,
+      endPlanned: body.endPlanned ? new Date(body.endPlanned) : undefined,
+      startActual: body.startActual ? new Date(body.startActual) : undefined,
+      endActual: body.endActual ? new Date(body.endActual) : undefined,
+      paymentTermsDays: body.paymentTermsDays != null ? Number(body.paymentTermsDays) : undefined,
+      retentionPct: retentionDecimal,
+      sitePostcode: body.sitePostcode ?? undefined,
+      siteLat: siteLatDecimal,
+      siteLng: siteLngDecimal,
+      labels: Array.isArray(body.labels) ? body.labels : undefined,
+    };
+
+    const created = await prisma.project.create({
+      data,
+      include: {
+        client: { select: { id: true, name: true } },
+        statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
+        typeRel: { select: { id: true, key: true, label: true, colorHex: true } },
+      },
+    });
+
+    await writeAudit({
+      prisma,
+      req,
+      entity: 'Project',
+      entityId: created.id,
+      action: 'create',
+      changes: { after: { id: created.id, code: created.code, name: created.name } },
+    });
+
+    res.status(201).json(created);
   });
 
   // PUT /api/projects/:id
   router.put('/:id', requireProjectMember, async (req, res) => {
+    let tenantId;
     try {
-      const tenantId = req.user && req.user.tenantId;
-      const id = Number(req.params.id);
-      if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
-      const existing = await prisma.project.findFirst({ where: { id, tenantId, deletedAt: null } });
-      if (!existing) return res.status(404).json({ error: 'Project not found' });
-      const body = projectBodySchema.partial().parse(req.body);
-
-      if (body.clientId !== undefined) {
-        if (body.clientId !== null) {
-          const client = await prisma.client.findFirst({ where: { id: Number(body.clientId), deletedAt: null } });
-          if (!client) return res.status(400).json({ error: 'Invalid clientId' });
-        }
-      }
-      if (body.statusId !== undefined) {
-        if (body.statusId !== null) {
-          const st = await prisma.projectStatus.findFirst({ where: { id: Number(body.statusId) } });
-          if (!st) return res.status(400).json({ error: 'Invalid statusId' });
-        }
-      }
-      if (body.typeId !== undefined) {
-        if (body.typeId !== null) {
-          const tp = await prisma.projectType.findFirst({ where: { id: Number(body.typeId) } });
-          if (!tp) return res.status(400).json({ error: 'Invalid typeId' });
-        }
-      }
-      if (body.projectManagerId !== undefined) {
-        if (body.projectManagerId !== null) {
-          const pm = await prisma.user.findFirst({ where: { id: Number(body.projectManagerId), tenantId } });
-          if (!pm) return res.status(400).json({ error: 'Invalid projectManagerId' });
-        }
-      }
-
-      const updated = await prisma.project.update({
-        where: { id },
-        data: {
-          ...(body.code !== undefined ? { code: body.code } : {}),
-          ...(body.name !== undefined ? { name: body.name } : {}),
-          ...(body.description !== undefined ? { description: body.description } : {}),
-          ...(body.clientId !== undefined ? { clientId: body.clientId == null ? null : Number(body.clientId) } : {}),
-          ...(body.projectManagerId !== undefined ? { projectManagerId: body.projectManagerId == null ? null : Number(body.projectManagerId) } : {}),
-          ...(body.statusId !== undefined ? { statusId: body.statusId == null ? null : Number(body.statusId) } : {}),
-          ...(body.typeId !== undefined ? { typeId: body.typeId == null ? null : Number(body.typeId) } : {}),
-          ...(body.status !== undefined ? { status: body.status } : {}),
-          ...(body.type !== undefined ? { type: body.type } : {}),
-          ...(body.country !== undefined ? { country: body.country } : {}),
-          ...(body.currency !== undefined ? { currency: body.currency } : {}),
-          ...(body.unitSystem !== undefined ? { unitSystem: body.unitSystem } : {}),
-          ...(body.taxScheme !== undefined ? { taxScheme: body.taxScheme } : {}),
-          ...(body.contractForm !== undefined ? { contractForm: body.contractForm } : {}),
-          ...(body.startPlanned !== undefined ? { startPlanned: body.startPlanned ? new Date(body.startPlanned) : null } : {}),
-          ...(body.endPlanned !== undefined ? { endPlanned: body.endPlanned ? new Date(body.endPlanned) : null } : {}),
-          ...(body.startActual !== undefined ? { startActual: body.startActual ? new Date(body.startActual) : null } : {}),
-          ...(body.endActual !== undefined ? { endActual: body.endActual ? new Date(body.endActual) : null } : {}),
-          ...(body.budget !== undefined ? { budget: body.budget } : {}),
-          ...(body.actualSpend !== undefined ? { actualSpend: body.actualSpend } : {}),
-          ...(body.startDate !== undefined ? { startDate: body.startDate ? new Date(body.startDate) : null } : {}),
-          ...(body.endDate !== undefined ? { endDate: body.endDate ? new Date(body.endDate) : null } : {}),
-        },
-        include: {
-          client: { select: { id: true, name: true } },
-          statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
-          typeRel: { select: { id: true, key: true, label: true, colorHex: true } },
-        },
-      });
-      // Compatibility alias for FE variants
-      res.json({ ...updated, data: updated });
+      tenantId = requireTenant(req);
     } catch (err) {
-      if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed', details: err.errors });
-      console.error(err);
-      res.status(500).json({ error: err.message || 'Failed to update project' });
+      return res.status(err.status || 400).json({ error: err.message || 'Tenant context required' });
     }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+    const existing = await prisma.project.findFirst({
+      where: { id, tenantId, deletedAt: null },
+      select: { id: true, code: true, name: true },
+    });
+    if (!existing) return res.status(404).json({ error: 'Project not found' });
+
+    let body;
+    try {
+      body = projectBodySchema.partial().parse(req.body ?? {});
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Validation failed', details: err.errors });
+      }
+      return res.status(400).json({ error: err.message || 'Invalid request body' });
+    }
+
+    if (body.clientId !== undefined && body.clientId !== null) {
+      const client = await prisma.client.findFirst({ where: { id: Number(body.clientId), deletedAt: null } });
+      if (!client) return res.status(400).json({ error: 'Invalid clientId' });
+    }
+    if (body.statusId !== undefined && body.statusId !== null) {
+      const st = await prisma.projectStatus.findFirst({ where: { id: Number(body.statusId) } });
+      if (!st) return res.status(400).json({ error: 'Invalid statusId' });
+    }
+    if (body.typeId !== undefined && body.typeId !== null) {
+      const tp = await prisma.projectType.findFirst({ where: { id: Number(body.typeId) } });
+      if (!tp) return res.status(400).json({ error: 'Invalid typeId' });
+    }
+    if (body.projectManagerId !== undefined && body.projectManagerId !== null) {
+      const pm = await prisma.user.findFirst({ where: { id: Number(body.projectManagerId), tenantId } });
+      if (!pm) return res.status(400).json({ error: 'Invalid projectManagerId' });
+    }
+
+    const siteLatDecimal = body.siteLat !== undefined ? toDecimal(body.siteLat) : undefined;
+    if (body.siteLat !== undefined && body.siteLat !== null && siteLatDecimal == null) {
+      return res.status(400).json({ error: 'Invalid siteLat' });
+    }
+    const siteLngDecimal = body.siteLng !== undefined ? toDecimal(body.siteLng) : undefined;
+    if (body.siteLng !== undefined && body.siteLng !== null && siteLngDecimal == null) {
+      return res.status(400).json({ error: 'Invalid siteLng' });
+    }
+    const retentionDecimal = body.retentionPct !== undefined ? toDecimal(body.retentionPct) : undefined;
+    if (body.retentionPct !== undefined && body.retentionPct !== null && retentionDecimal == null) {
+      return res.status(400).json({ error: 'Invalid retentionPct' });
+    }
+
+    const patch = {};
+    if (body.code !== undefined) patch.code = body.code || existing.code;
+    if (body.name !== undefined) patch.name = body.name;
+    if (body.description !== undefined) patch.description = body.description ?? null;
+    if (body.clientId !== undefined) patch.clientId = body.clientId == null ? null : Number(body.clientId);
+    if (body.projectManagerId !== undefined) patch.projectManagerId = body.projectManagerId == null ? null : Number(body.projectManagerId);
+    if (body.statusId !== undefined) patch.statusId = body.statusId == null ? null : Number(body.statusId);
+    if (body.typeId !== undefined) patch.typeId = body.typeId == null ? null : Number(body.typeId);
+    if (body.status !== undefined) patch.status = body.status ?? null;
+    if (body.type !== undefined) patch.type = body.type ?? null;
+    if (body.contractType !== undefined) patch.contractType = body.contractType ?? null;
+    if (body.country !== undefined) patch.country = body.country ?? null;
+    if (body.currency !== undefined) patch.currency = body.currency ?? null;
+    if (body.unitSystem !== undefined) patch.unitSystem = body.unitSystem ?? null;
+    if (body.taxScheme !== undefined) patch.taxScheme = body.taxScheme ?? null;
+    if (body.contractForm !== undefined) patch.contractForm = body.contractForm ?? null;
+    if (body.startPlanned !== undefined) patch.startPlanned = body.startPlanned ? new Date(body.startPlanned) : null;
+    if (body.endPlanned !== undefined) patch.endPlanned = body.endPlanned ? new Date(body.endPlanned) : null;
+    if (body.startActual !== undefined) patch.startActual = body.startActual ? new Date(body.startActual) : null;
+    if (body.endActual !== undefined) patch.endActual = body.endActual ? new Date(body.endActual) : null;
+    if (body.budget !== undefined) patch.budget = body.budget != null ? body.budget : null;
+    if (body.actualSpend !== undefined) patch.actualSpend = body.actualSpend != null ? body.actualSpend : null;
+    if (body.startDate !== undefined) patch.startDate = body.startDate ? new Date(body.startDate) : null;
+    if (body.endDate !== undefined) patch.endDate = body.endDate ? new Date(body.endDate) : null;
+    if (body.paymentTermsDays !== undefined) patch.paymentTermsDays = body.paymentTermsDays == null ? null : Number(body.paymentTermsDays);
+    if (body.retentionPct !== undefined) patch.retentionPct = retentionDecimal;
+    if (body.sitePostcode !== undefined) patch.sitePostcode = body.sitePostcode ?? null;
+    if (body.siteLat !== undefined) patch.siteLat = body.siteLat == null ? null : siteLatDecimal;
+    if (body.siteLng !== undefined) patch.siteLng = body.siteLng == null ? null : siteLngDecimal;
+    if (body.labels !== undefined) patch.labels = Array.isArray(body.labels) ? body.labels : null;
+
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: 'No changes supplied' });
+    }
+
+    const updated = await prisma.project.update({
+      where: { id },
+      data: patch,
+      include: {
+        client: { select: { id: true, name: true } },
+        statusRel: { select: { id: true, key: true, label: true, colorHex: true } },
+        typeRel: { select: { id: true, key: true, label: true, colorHex: true } },
+      },
+    });
+
+    await writeAudit({
+      prisma,
+      req,
+      entity: 'Project',
+      entityId: id,
+      action: 'update',
+      changes: { set: patch },
+    });
+
+    res.json({ ...updated, data: updated });
   });
 
   // PATCH /api/projects/:id (partial update with audit)

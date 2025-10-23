@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { prisma } = require('../lib/prisma.js');
-const { requireProjectMember } = require('../middleware/membership.cjs');
+const requireAuth = require('../middleware/requireAuth.cjs');
 
 // GET /api/projects/:projectId/info → minimal project “info” snapshot
-router.get('/:projectId/info', requireProjectMember, async (req, res) => {
+router.get('/projects/:projectId/info', requireAuth, async (req, res) => {
   try {
     const projectId = Number(req.params.projectId);
     if (!Number.isFinite(projectId)) {
@@ -13,10 +13,20 @@ router.get('/:projectId/info', requireProjectMember, async (req, res) => {
         .json({ error: { code: 'BAD_REQUEST', message: 'Invalid projectId' } });
     }
 
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      include: {
-        client: true,
+    const tenantId = req.user?.tenantId || req.tenantId || 'demo';
+
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, tenantId },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        startDate: true,
+        endDate: true,
+        budget: true,
+        actualSpend: true,
+        updatedAt: true,
+        client: { select: { id: true, name: true } },
         _count: {
           select: {
             packages: true,
@@ -48,7 +58,7 @@ router.get('/:projectId/info', requireProjectMember, async (req, res) => {
       updatedAt: project.updatedAt,
     };
 
-    return res.json({ data: payload });
+    return res.json(payload);
   } catch (e) {
     console.error('[projects/info] ', e);
     return res.status(500).json({

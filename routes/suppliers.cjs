@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { prisma } = require('../utils/prisma.cjs');
+const { checkSupplierCompliance } = require('../services/compliance.service.cjs');
 const jwt = require('jsonwebtoken');
 const { requireAuth } = require('../middleware/auth.cjs') || { requireAuth: (_req,_res,next)=>next() };
 
@@ -124,6 +125,21 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
+router.get('/:id/compliance', async (req, res) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const supplierId = Number(req.params.id);
+    if (!tenantId || !Number.isFinite(supplierId)) {
+      return res.status(400).json({ ok: false, summary: 'Bad request' });
+    }
+    const result = await checkSupplierCompliance(tenantId, supplierId);
+    res.json(result);
+  } catch (err) {
+    console.error('supplier compliance error', err);
+    res.status(500).json({ ok: false, summary: 'Compliance check error' });
+  }
+});
+
 // POST /api/suppliers
 // Body: { name, status?, category?, rating? }
 router.post('/', async (req, res, next) => {
@@ -236,17 +252,23 @@ router.get('/:id/contracts', async (req, res, next) => {
     const rows = await prisma.contract.findMany({
       // Contract has no tenantId column; filter via related project
       where: { supplierId, project: { tenantId } },
-      include: { project: { select: { id: true, name: true } } },
+      include: {
+        project: { select: { id: true, name: true } },
+        package: { select: { id: true, name: true } }
+      },
       orderBy: { createdAt: 'desc' },
     });
     const data = rows.map((r) => ({
       id: Number(r.id),
       projectId: r.projectId,
       projectName: r.project?.name || `Project #${r.projectId}`,
+      packageId: r.packageId,
+      packageName: r.package?.name || (r.packageId ? `Package #${r.packageId}` : null),
       title: r.title,
       contractNumber: r.contractNumber,
       value: Number(r.value || 0),
       status: r.status,
+      updatedAt: r.updatedAt,
     }));
     res.json({ data });
   } catch (err) {

@@ -1,8 +1,10 @@
 const router = require('express').Router({ mergeParams: true });
 const { randomUUID } = require('crypto');
 const { prisma } = require('../lib/prisma.js');
+const { generatePackageSuggestions } = require('../lib/packageSuggestor.cjs');
 
 const scopeRuns = new Map();
+const scopeRunResults = new Map();
 
 function getTenantId(req) {
   return req.user?.tenantId || req.tenantId || 'demo';
@@ -43,6 +45,7 @@ router.post('/projects/:projectId/scope/runs', async (req, res, next) => {
       summary: summary || null,
       createdAt: new Date().toISOString(),
       createdBy: req.user?.id || null,
+      status: 'pending',
     };
     scopeRuns.set(run.id, run);
     res.status(201).json(run);
@@ -58,7 +61,15 @@ router.get('/projects/:projectId/scope/runs/:runId', (req, res) => {
   if (run.projectId !== Number(req.params.projectId) || run.tenantId !== tenantId) {
     return res.status(403).json({ error: 'Run does not belong to project' });
   }
-  res.json(run);
+  const detail = scopeRunResults.get(run.id);
+  res.json({
+    ...run,
+    status: detail ? 'ready' : run.status || 'pending',
+    generatedAt: detail?.generatedAt ?? null,
+    suggestions: detail?.suggestions ?? [],
+    groups: detail?.groups ?? [],
+    packages: detail?.packages ?? {},
+  });
 });
 
 router.post('/projects/:projectId/scope/runs/:runId/suggest', async (req, res, next) => {
@@ -71,8 +82,10 @@ router.post('/projects/:projectId/scope/runs/:runId/suggest', async (req, res, n
       return res.status(403).json({ error: 'Run does not belong to project' });
     }
 
-    // For now, just acknowledge the request - suggestions will be generated on-the-fly when fetched
-    res.json({ runId: run.id, status: 'processing' });
+    const result = await generatePackageSuggestions({ prisma, tenantId, projectId });
+    scopeRunResults.set(run.id, result);
+    scopeRuns.set(run.id, { ...run, status: 'ready', generatedAt: result.generatedAt });
+    res.json({ runId: run.id, status: 'ready', suggestionCount: result.suggestions.length });
   } catch (err) {
     next(err);
   }
@@ -89,55 +102,22 @@ router.get('/projects/:projectId/scope/runs/:runId/suggestions', async (req, res
       return res.status(403).json({ error: 'Run does not belong to project' });
     }
 
-    const packages = await prisma.package.findMany({
-      where: { projectId, project: { tenantId } },
-      include: {
-        awardSupplier: { select: { id: true, name: true } },
-        contracts: {
-          where: { tenantId },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          include: { supplier: { select: { id: true, name: true } } },
-        },
-      },
-    });
+    let detail = scopeRunResults.get(run.id);
+    if (!detail) {
+      detail = await generatePackageSuggestions({ prisma, tenantId, projectId });
+      scopeRunResults.set(run.id, detail);
+      scopeRuns.set(run.id, { ...run, status: 'ready', generatedAt: detail.generatedAt });
+    }
 
-    const keywords = new Set(run.keywords || []);
-    const scored = packages.map((pkg) => {
-      const haystack = [pkg.name, pkg.scopeSummary, pkg.trade, pkg.status]
-        .concat(pkg.contracts.map((c) => c.title))
-        .join(' ') // combine
-        .toLowerCase();
-      let score = 0;
-      for (const kw of keywords) {
-        if (kw && haystack.includes(kw)) score += 1;
-      }
-      return {
-        package: {
-          id: pkg.id,
-          name: pkg.name,
-          scopeSummary: pkg.scopeSummary,
-          scope: pkg.scopeSummary,
-          trade: pkg.trade,
-          status: pkg.status,
-          awardSupplier: pkg.awardSupplier ? { id: pkg.awardSupplier.id, name: pkg.awardSupplier.name } : null,
-          contract: pkg.contracts[0]
-            ? {
-                id: pkg.contracts[0].id,
-                title: pkg.contracts[0].title,
-                status: pkg.contracts[0].status,
-                supplier: pkg.contracts[0].supplier
-                  ? { id: pkg.contracts[0].supplier.id, name: pkg.contracts[0].supplier.name }
-                  : null,
-              }
-            : null,
-        },
-        score,
-      };
+    res.json({
+      runId: run.id,
+      projectId,
+      generatedAt: detail.generatedAt,
+      count: detail.suggestions.length,
+      suggestions: detail.suggestions.slice(0, limit),
+      groups: detail.groups,
+      packages: detail.packages,
     });
-
-    scored.sort((a, b) => b.score - a.score || a.package.name.localeCompare(b.package.name));
-    res.json({ runId: run.id, projectId, count: scored.length, items: scored.slice(0, limit) });
   } catch (err) {
     next(err);
   }
@@ -155,22 +135,39 @@ router.patch('/projects/:projectId/scope/runs/:runId/accept', async (req, res, n
 
     const { mappings = [], createPackages = [] } = req.body || {};
 
+    const createdPackages = new Map();
+
     // Create new packages if needed
     for (const pkg of createPackages) {
-      if (!pkg.code) continue;
-      const existing = await prisma.package.findFirst({
-        where: { projectId, project: { tenantId }, code: pkg.code },
-      });
-      if (!existing) {
-        await prisma.package.create({
-          data: {
-            projectId,
-            code: pkg.code,
-            name: pkg.name || pkg.code,
-            status: 'draft',
-          },
-        });
+      if (!pkg.code || pkg.code === 'UNASSIGNED') continue;
+
+      if (pkg.code.startsWith('pkg:')) {
+        const existingId = Number(pkg.code.slice(4));
+        if (Number.isFinite(existingId)) {
+          createdPackages.set(pkg.code, existingId);
+        }
+        continue;
       }
+
+      const fallbackName = pkg.name || pkg.code.replace(/^new:/, '');
+      const existingByName = await prisma.package.findFirst({
+        where: { projectId, project: { tenantId }, name: fallbackName },
+      });
+      if (existingByName) {
+        createdPackages.set(pkg.code, existingByName.id);
+        continue;
+      }
+
+      const created = await prisma.package.create({
+        data: {
+          projectId,
+          name: fallbackName,
+          status: pkg.status || 'Draft',
+          trade: pkg.trade || null,
+          scopeSummary: pkg.scope || null,
+        },
+      });
+      createdPackages.set(pkg.code, created.id);
     }
 
     // Apply mappings to budget lines
@@ -178,10 +175,34 @@ router.patch('/projects/:projectId/scope/runs/:runId/accept', async (req, res, n
       const budgetId = Number(mapping.budgetId);
       if (!Number.isFinite(budgetId)) continue;
 
-      await prisma.budgetLine.update({
-        where: { id: budgetId },
-        data: { packageCode: mapping.packageCode },
+      const explicitId = Number(mapping.packageId);
+      let targetPackageId = Number.isFinite(explicitId) ? explicitId : null;
+      const code = mapping.packageCode || null;
+
+      if (!targetPackageId && code) {
+        if (code === 'UNASSIGNED') {
+          targetPackageId = null;
+        } else if (code.startsWith('pkg:')) {
+          const idFromCode = Number(code.slice(4));
+          if (Number.isFinite(idFromCode)) targetPackageId = idFromCode;
+        } else if (createdPackages.has(code)) {
+          targetPackageId = createdPackages.get(code);
+        }
+      }
+
+      await prisma.packageItem.deleteMany({
+        where: { tenantId, budgetLineId: budgetId },
       });
+
+      if (targetPackageId) {
+        await prisma.packageItem.create({
+          data: {
+            tenantId,
+            packageId: targetPackageId,
+            budgetLineId: budgetId,
+          },
+        });
+      }
     }
 
     res.json({ success: true, applied: mappings.length, packagesCreated: createPackages.length });

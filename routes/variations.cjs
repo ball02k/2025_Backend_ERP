@@ -57,6 +57,37 @@ function variationDelta(v) {
   return candidate instanceof Prisma.Decimal ? candidate : new Prisma.Decimal(candidate);
 }
 
+// List variations with query parameters (?projectId=)
+router.get('/variations', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    if (!tenantId) return res.status(400).json({ error: 'tenantId required' });
+    const projectId = Number(req.query.projectId);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'projectId required' });
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 20;
+    const rawOffset = Number(req.query.offset);
+    const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
+
+    const rows = await prisma.variation.findMany({
+      where: { tenantId, projectId },
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+      skip: offset,
+    });
+
+    res.json({
+      items: rows.map((r) => withLinks('variation', r)),
+      total: rows.length,
+      limit,
+      offset,
+    });
+  } catch (e) {
+    if (e && e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
+});
+
 // List variations by project
 router.get('/projects/:projectId/variations', async (req, res, next) => {
   try {

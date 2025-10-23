@@ -76,6 +76,12 @@ const budgetsImportRouter = require('./routes/budgets.import.cjs');
 const packagesSeedRouter = require('./routes/packages.seed.cjs');
 const taxonomyRouter = require('./routes/taxonomy.cjs');
 const budgetsSuggestRouter = require('./routes/projects.budgets.suggest.cjs');
+const directAwardRouter = require('./routes/packages.directAward.cjs');
+const contractsReadRouter = require('./routes/contracts.read.cjs');
+const settingsV1Router = require('./routes/settings.v1.cjs');
+const contractTemplatesRouter = require('./routes/contract.templates.cjs');
+const tradesRouter = require('./routes/trades.cjs');
+const awardsRouter = require('./routes/awards.cjs');
 // Also import handlers directly for top-level mounting
 const { previewHandler: budgetsPreview, commitHandler: budgetsCommit } = require('./routes/budgets.import.cjs');
 const { ensureFeature } = require('./middleware/featureGuard.js');
@@ -208,6 +214,7 @@ app.use('/api', requireAuth, projectPackagesRouter);
 app.use('/api', requireAuth, projectContractsRouter);
 app.use('/api', requireAuth, packagesRouter);
 app.use('/api', requireAuth, contractsRouter);
+app.use('/api', requireAuth, awardsRouter);
 app.use('/api', requireAuth, projectsScopeRouter);
 app.use('/api', requireAuth, projectOverviewRouter2);
 app.use('/api', requireAuth, costCodesRouter);
@@ -253,6 +260,7 @@ app.use('/api/spm', requireAuth, spmRouter);
 app.use('/api/search', requireAuth, searchRouter);
 app.use('/api', requireAuth, lookupsRouter);
 app.use('/api', requireAuth, documentLinksRouter);
+app.use('/api', requireAuth, tradesRouter(prisma));
 app.use('/api/integrations', requireAuth, integrationsRouter());
 // Meta, Geo, and Project Info (additive)
 app.use('/api', requireAuth, require('./routes/meta.cjs'));
@@ -287,26 +295,17 @@ app.use('/api', requireAuth, financeOcrRouter);
 app.use('/api', requireAuth, financeReceiptsRouter);
 app.use('/api', financeInboundRouter);
 
+app.use('/api/v1/settings', requireAuth, settingsV1Router);
 app.get('/api/v1/tenants/modules', requireAuth, (req, res) => {
   const tenantId = req.user?.tenantId || TENANT_DEFAULT;
   res.json({ tenantId, modules: ['scope_suggest'] });
 });
 
-app.get('/api/trades', requireAuth, async (req, res) => {
-  try {
-    const tenantId = req.user?.tenantId || TENANT_DEFAULT;
-    const rows = await prisma.package.findMany({
-      where: { project: { tenantId }, trade: { not: null } },
-      distinct: ['trade'],
-      select: { trade: true },
-      orderBy: { trade: 'asc' },
-    });
-    res.json({ items: rows.map((r) => r.trade).filter(Boolean) });
-  } catch (err) {
-    console.warn('[trades] failed to fetch', err);
-    res.status(500).json({ error: 'Failed to load trades', items: [] });
-  }
-});
+app.use('/api', directAwardRouter);
+app.use('/api', contractsReadRouter);
+app.use('/api', contractsRouter);
+app.use('/api', contractTemplatesRouter);
+
 // Public, no auth routes (e.g., supplier onboarding)
 app.use('/public', publicRoutes);
 

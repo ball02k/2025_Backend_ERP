@@ -192,6 +192,7 @@ model Project {
   packages       Package[]
   contracts      Contract[]
   invoices       Invoice[]
+  awardDecisions AwardDecision[]
 
   // Back-relation for ImportJob → Project
   importJobs ImportJob[]
@@ -783,6 +784,7 @@ model Supplier {
   insuranceExpiry       DateTime?
   hsAccreditations      String?
   performanceScore      Decimal?
+  complianceStatus      String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -792,7 +794,9 @@ model Supplier {
   // Additive relations for tendering module
   tenderInvites         TenderSupplierInvite[]
   tenderResponses       TenderResponse[]
-  contracts             Contract[]                @relation("SupplierContracts")
+  contracts             Contract[]
+  awardDecisions        AwardDecision[]
+  complianceOverrides   ComplianceOverride[]
   awardedPackages       Package[]                 @relation("PackageAwardSupplier")
   invoices              Invoice[]
   onboardingTokens      SupplierOnboardingToken[]
@@ -850,18 +854,21 @@ model PurchaseOrder {
   code       String
   supplier   String
   supplierId Int?
+  contractId Int?
   status     String     @default("Open")
   orderDate  DateTime   @default(now())
   total      Decimal    @default(0)
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
   project    Project    @relation(fields: [projectId], references: [id])
+  contract   Contract?  @relation(fields: [contractId], references: [id])
   lines      POLine[]
   deliveries Delivery[]
 
   @@unique([tenantId, code])
   @@index([tenantId, projectId, status])
   @@index([tenantId, supplierId])
+  @@index([tenantId, contractId])
 }
 
 model POLine {
@@ -997,17 +1004,90 @@ model RequestQna {
   answeredAt  DateTime?
 }
 
-model AwardDecision {
-  id         Int       @id @default(autoincrement())
-  tenantId   String
-  requestId  Int
-  supplierId Int
-  decision   String    @default("pending")
-  reason     String?
-  decidedBy  Int?
-  decidedAt  DateTime?
+/// ===============================
+/// Tender/Award/Contracts (Additive)
+/// ===============================
 
-  @@index([tenantId, requestId, decision])
+model Trade {
+  id        Int      @id @default(autoincrement())
+  name      String
+  tenantId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, name])
+}
+
+/// Snapshot of budget lines added into a package at the time of selection.
+/// We intentionally keep a loose link to the source (budgetLineItemId) without a relation
+/// to avoid coupling migrations. Quantities/rates are snapshotted for auditability.
+model PackageLineItem {
+  id               Int      @id @default(autoincrement())
+  packageId        Int
+  budgetLineItemId Int?
+  description      String
+  qty              Decimal  @db.Decimal(18, 4)
+  rate             Decimal  @db.Decimal(18, 4)
+  total            Decimal  @db.Decimal(18, 2)
+  costCode         String?
+  snapshotAt       DateTime @default(now())
+  tenantId         String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // relations (safe assumptions: Package exists)
+  package          Package  @relation(fields: [packageId], references: [id])
+  contractLines    ContractLineItem[] @relation("PackageLineContractLines")
+
+  @@index([tenantId, packageId])
+  @@index([tenantId, costCode])
+}
+
+/// An award decision created from Direct Award or Tender evaluation.
+/// decision: 'approved' | 'approved_with_override' | 'rejected' (stored as String)
+model AwardDecision {
+  id           Int      @id @default(autoincrement())
+  projectId    Int
+  packageId    Int
+  supplierId   Int?
+  awardType    String   // 'direct' | 'tender'
+  decision     String   // as above, string (no enums)
+  reason       String?
+  decidedById  Int?     // store user id scalar; avoid relation to keep additive safety
+  decidedAt    DateTime @default(now())
+  tenantId     String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // relations (safe assumptions: Project, Package, Supplier exist)
+  project      Project  @relation(fields: [projectId], references: [id])
+  package      Package  @relation(fields: [packageId], references: [id])
+  supplier     Supplier? @relation(fields: [supplierId], references: [id])
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, packageId])
+  @@index([tenantId, supplierId])
+  @@index([tenantId, awardType])
+  @@index([tenantId, decision])
+}
+
+/// If compliance fails but user overrides, we capture the reason.
+/// This does not change compliance data; it documents governance.
+model ComplianceOverride {
+  id          Int      @id @default(autoincrement())
+  supplierId  Int
+  packageId   Int?
+  reason      String
+  createdById Int?     // store user id scalar
+  createdAt   DateTime @default(now())
+  tenantId    String
+
+  // relations
+  supplier    Supplier @relation(fields: [supplierId], references: [id])
+  package     Package? @relation(fields: [packageId], references: [id])
+
+  @@index([tenantId, supplierId])
+  @@index([tenantId, packageId])
 }
 
 // Supplier Performance Management (SPM)
@@ -1074,6 +1154,7 @@ model BudgetLine {
   group        BudgetGroup?  @relation(fields: [groupId], references: [id])
   // Link budget lines to procurement packages
   packageItems PackageItem[]
+  contractLines ContractLineItem[] @relation("BudgetLineContractLines")
 
   @@index([tenantId, projectId])
   @@index([tenantId, projectId, periodMonth])
@@ -1198,6 +1279,7 @@ model Invoice {
   // Additive links to tie into budget/contract rollups
   packageId     Int?
   contractId    Int?
+  contract      Contract? @relation(fields: [contractId], references: [id])
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -1401,12 +1483,15 @@ model Package {
 
   submissions Submission[]   @relation("PackageSubmissions")
   invites     TenderInvite[] @relation("PackageInvites")
-  contracts   Contract[]     @relation("PackageContracts")
+  contracts   Contract[]
   requests    Request[]
   tenders     Tender[]
   costCode    CostCode?      @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
   // Link to selected budget lines
   budgetItems PackageItem[]
+  lineItems   PackageLineItem[]
+  awardDecisions AwardDecision[]
+  complianceOverrides ComplianceOverride[]
 
   @@index([projectId])
   @@index([projectId, costCodeId])
@@ -1565,32 +1650,81 @@ model Submission {
 }
 
 model Contract {
-  id                   Int       @id @default(autoincrement()) 
-  tenantId             String?   @db.VarChar(64)
-  projectId            Int
-  project              Project   @relation(fields: [projectId], references: [id])
-  packageId            Int?      @unique
-  package              Package?  @relation("PackageContracts", fields: [packageId], references: [id])
-  supplierId           Int
-  supplier             Supplier  @relation("SupplierContracts", fields: [supplierId], references: [id])
-  title                String
-  contractNumber       String?
-  value                Decimal   @db.Decimal(65, 30)
-  status               String    @default("Pending")
-  signedAt             DateTime?
-  startDate            DateTime?
-  endDate              DateTime?
-  retentionPct         Float?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  originalValue        Decimal?  @db.Decimal(18, 2)
-  managedByUserId      Int?
-  pdfUrl               String?
-  ApplicationForPayment ApplicationForPayment[]
+  id              Int      @id @default(autoincrement())
+  projectId       Int
+  packageId       Int?
+  supplierId      Int
+  title           String
+  contractRef     String?
+  value           Decimal  @db.Decimal(65, 30)
+  currency        String?  @default("GBP")
+  status          String   @default("Pending")
+  signedAt        DateTime?
+  startDate       DateTime?
+  endDate         DateTime?
+  retentionPct    Decimal? @db.Decimal(5, 2)
+  paymentTerms    String?
+  notes           String?
+  internalTeam    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  originalValue   Decimal? @db.Decimal(18, 2)
+  managedByUserId Int?
+  pdfUrl          String?
+  tenantId        String?
+
+  // relations
+  project        Project                 @relation(fields: [projectId], references: [id])
+  package        Package?                @relation(fields: [packageId], references: [id])
+  supplier       Supplier                @relation(fields: [supplierId], references: [id])
+  lineItems      ContractLineItem[]
+  applications   ApplicationForPayment[]
+  invoices       Invoice[]
+  purchaseOrders PurchaseOrder[]
 
   @@index([projectId])
   @@index([supplierId])
   @@index([tenantId])
+}
+
+/// Line items copied initially from PackageLineItem snapshot (or entered manually).
+model ContractLineItem {
+  id         Int      @id @default(autoincrement())
+  contractId Int
+  packageLineItemId Int?
+  budgetLineId Int?
+  description String
+  qty        Decimal  @db.Decimal(18, 4)
+  rate       Decimal  @db.Decimal(18, 4)
+  total      Decimal  @db.Decimal(18, 2)
+  costCode   String?
+  tenantId   String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // relations
+  contract   Contract @relation(fields: [contractId], references: [id])
+  packageLineItem PackageLineItem? @relation("PackageLineContractLines", fields: [packageLineItemId], references: [id])
+  budgetLine BudgetLine? @relation("BudgetLineContractLines", fields: [budgetLineId], references: [id])
+
+  @@index([tenantId, contractId])
+  @@index([tenantId, costCode])
+  @@index([tenantId, budgetLineId])
+  @@index([tenantId, packageLineItemId])
+}
+
+model ContractTemplate {
+  id        Int      @id @default(autoincrement())
+  tenantId  String   @db.VarChar(64)
+  key       String
+  name      String
+  version   String?
+  bodyHtml  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, key])
+  @@index([tenantId, updatedAt])
 }
 
 

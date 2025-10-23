@@ -874,11 +874,11 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 
 ### POST //api/packages/:packageId/award
 
-- Middlewares: <anonymous>, <anonymous>
-- Controller: anonymous (/Users/Baller/Documents/2025_ERP/2025_Backend_ERP/controllers/procurementController.js#awardContract)
-- Auth/Guards: none
+- Middlewares: requireAuth, (inline) requireTenant
+- Controller: awardsRouter (/Users/Baller/Documents/2025_ERP/2025_Backend_ERP/routes/awards.cjs#createPackageAward)
+- Auth/Guards: requireAuth
 - Path params: packageId
-- Lint: Missing requireAuth; Missing tenant scoping
+- Responses: 201 { awardId, contractId, packageId, supplierId, committed }, 404 { code: "NOT_FOUND" }, 409 { code: "ALREADY_AWARDED" | "COMPLIANCE_MISSING" }
 
 ### GET //api/financials
 
@@ -2311,4 +2311,3 @@ Any time a new route is added, run `npm run api:catalog` and commit the updated 
 - Auth/Guards: none
 - Path params: none
 - Lint: Missing requireAuth
-

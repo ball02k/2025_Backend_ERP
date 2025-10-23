@@ -1,5 +1,5 @@
 const router = require('express').Router({ mergeParams: true });
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient, Prisma } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { buildLinks } = require('../lib/buildLinks.cjs');
 const { safeJson } = require('../lib/serialize.cjs');
@@ -29,6 +29,146 @@ const packageSelect = {
   buyerUserId: true,
 };
 
+function decimalToNumber(value) {
+  if (value == null) return null;
+  if (value instanceof Prisma.Decimal) {
+    try { return Number(value); } catch (_) { return null; }
+  }
+  if (typeof value === 'bigint') {
+    try { return Number(value); } catch (_) { return null; }
+  }
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function extractContracts(pkg) {
+  const packageLineMap = new Map();
+  if (Array.isArray(pkg?.lineItems)) {
+    for (const li of pkg.lineItems) {
+      if (!li || li.id == null) continue;
+      packageLineMap.set(li.id, li.budgetLineItemId ?? null);
+    }
+  }
+  const source = Array.isArray(pkg?.contracts) ? pkg.contracts : [];
+  const summaries = source.map((contract) => {
+    const supplier = contract?.supplier ? { id: contract.supplier.id, name: contract.supplier.name } : null;
+    const lineItems = Array.isArray(contract?.lineItems)
+      ? contract.lineItems.map((line) => {
+          const budgetLineId =
+            line?.budgetLineId != null
+              ? line.budgetLineId
+              : (line?.packageLineItemId != null ? packageLineMap.get(line.packageLineItemId) ?? null : null);
+          return {
+            id: line.id,
+            budgetLineId,
+            packageLineItemId: line.packageLineItemId ?? null,
+            total: decimalToNumber(line.total),
+          };
+        })
+      : [];
+    return {
+      id: contract.id,
+      title: contract.title,
+      contractRef: contract.contractRef,
+      status: contract.status,
+      value: decimalToNumber(contract.value),
+      currency: contract.currency,
+      supplier,
+      lineItems,
+    };
+  });
+
+  const assignmentMap = new Map();
+  for (const summary of summaries) {
+    const base = {
+      contractId: summary.id,
+      contractTitle: summary.title,
+      contractRef: summary.contractRef,
+      status: summary.status,
+      supplier: summary.supplier,
+      currency: summary.currency,
+      awardValue: summary.value,
+    };
+    for (const line of summary.lineItems || []) {
+      if (line?.budgetLineId == null) continue;
+      if (!assignmentMap.has(line.budgetLineId)) {
+        assignmentMap.set(line.budgetLineId, []);
+      }
+      assignmentMap.get(line.budgetLineId).push(base);
+    }
+  }
+
+  return { summaries, assignmentMap };
+}
+
+function buildBudgetLines(pkg, assignmentMap) {
+  const items = Array.isArray(pkg?.budgetItems) ? pkg.budgetItems : [];
+  return items
+    .map((item) => {
+      const bl = item?.budgetLine;
+      if (!bl) return null;
+      const assignments = assignmentMap.get(bl.id) || [];
+      const primary = assignments[0] || null;
+      const qty = decimalToNumber(bl.qty);
+      const rate = decimalToNumber(bl.rate);
+      const explicitTotal = bl.total != null ? decimalToNumber(bl.total) : decimalToNumber(bl.amount);
+      const computedTotal =
+        explicitTotal != null
+          ? explicitTotal
+          : (qty != null && rate != null ? qty * rate : null);
+      return {
+        id: bl.id,
+        description: bl.description,
+        qty,
+        unit: bl.unit || null,
+        rate,
+        total: computedTotal ?? 0,
+        costCode: bl.costCode
+          ? { id: bl.costCode.id, code: bl.costCode.code, description: bl.costCode.description || '' }
+          : null,
+        assignments,
+        supplier: primary?.supplier || null,
+        supplierName: primary?.supplier?.name || null,
+        contract: primary
+          ? {
+              id: primary.contractId,
+              title: primary.contractTitle,
+              contractRef: primary.contractRef,
+              status: primary.status,
+            }
+          : null,
+        contractTitle: primary?.contractTitle || null,
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizePackageRow(pkg, projectId) {
+  const row = safeJson(pkg);
+  row.scopeSummary = row.scopeSummary ?? row.scope ?? null;
+  row.scope = row.scope ?? row.scopeSummary ?? null;
+  if (pkg?.awardSupplier) {
+    row.awardSupplier = { id: pkg.awardSupplier.id, name: pkg.awardSupplier.name };
+  }
+  const { summaries, assignmentMap } = extractContracts(pkg);
+  row.contracts = summaries;
+  row.contract = summaries.length
+    ? {
+        id: summaries[0].id,
+        title: summaries[0].title,
+        contractRef: summaries[0].contractRef,
+        status: summaries[0].status,
+        currency: summaries[0].currency,
+        awardValue: summaries[0].value,
+        supplier: summaries[0].supplier || null,
+      }
+    : null;
+  row.budgetLines = buildBudgetLines(pkg, assignmentMap);
+  row.budgetTotal = row.budgetLines.reduce((sum, line) => sum + Number(line.total || 0), 0);
+  row.links = buildLinks('package', { ...row, projectId });
+  return row;
+}
+
 // GET /api/projects/:projectId/packages — list packages with linked budget items
 router.get('/projects/:projectId/packages', async (req, res, next) => {
   try {
@@ -38,20 +178,47 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
       rows = await prisma.package.findMany({
         where: { projectId },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
-        select: packageSelect,
+        select: {
+          ...packageSelect,
+          awardSupplier: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          contracts: {
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              title: true,
+              contractRef: true,
+              status: true,
+              value: true,
+              currency: true,
+              supplier: { select: { id: true, name: true } },
+              lineItems: {
+                select: {
+                  id: true,
+                  budgetLineId: true,
+                  packageLineItemId: true,
+                  total: true,
+                },
+              },
+            },
+          },
+          budgetItems: {
+            include: { budgetLine: { include: { costCode: true } } },
+          },
+          lineItems: {
+            select: { id: true, budgetLineItemId: true },
+          },
+        },
       });
     } catch (e) {
       // Fallback minimal selection if schema migrations not applied yet
       rows = await prisma.package.findMany({ where: { projectId }, orderBy: [{ name: 'asc' }, { id: 'asc' }], select: packageSelect });
     }
-    const data = rows.map(r => {
-      const row = safeJson(r);
-      row.scopeSummary = row.scopeSummary ?? row.scope ?? null;
-      row.scope = row.scope ?? row.scopeSummary ?? null;
-      row.budgetTotal = 0;
-      row.links = buildLinks('package', { ...row, projectId });
-      return row;
-    });
+    const data = rows.map((pkg) => normalizePackageRow(pkg, projectId));
     res.json({ items: data, total: data.length });
   } catch (e) { next(e); }
 });
@@ -163,10 +330,43 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
     const projectId = Number(req.params.projectId);
     const packageId = Number(req.params.packageId);
     let pkg = null;
+    let minimalMode = false;
     try {
-      pkg = await prisma.package.findFirst({ where: { id: packageId, projectId }, select: { ...packageSelect, tenders: { select: { id: true, status: true, title: true } } } });
+      pkg = await prisma.package.findFirst({
+        where: { id: packageId, projectId },
+        select: {
+          ...packageSelect,
+          awardSupplier: { select: { id: true, name: true } },
+          contracts: {
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              title: true,
+              contractRef: true,
+              status: true,
+              value: true,
+              currency: true,
+              supplier: { select: { id: true, name: true } },
+              lineItems: {
+                select: {
+                  id: true,
+                  budgetLineId: true,
+                  packageLineItemId: true,
+                  total: true,
+                },
+              },
+            },
+          },
+          budgetItems: {
+            include: { budgetLine: { include: { costCode: true } } },
+          },
+          lineItems: { select: { id: true, budgetLineItemId: true } },
+          tenders: { select: { id: true, status: true, title: true } },
+        },
+      });
     } catch (_e) {
       // Fallback for older schemas (before extra fields were added)
+      minimalMode = true;
       pkg = await prisma.package.findFirst({
         where: { id: packageId, projectId },
         select: {
@@ -178,41 +378,62 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
       });
     }
     if (!pkg) return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
-    const row = safeJson(pkg);
-    row.scopeSummary = row.scopeSummary ?? row.scope ?? null;
-    row.scope = row.scope ?? row.scopeSummary ?? null;
-    // Attach budget lines via join table (robust to schema variants)
-    try {
-      const items = await prisma.packageItem.findMany({
-        where: { packageId },
-        select: {
-          budgetLine: {
-            select: {
-              id: true,
-              description: true,
-              amount: true,
-              // quantity/rate/unit may not exist in schema; omit for safety
-              costCode: { select: { id: true, code: true, description: true } },
+    let row;
+    if (!minimalMode && Array.isArray(pkg?.budgetItems)) {
+      row = normalizePackageRow(pkg, projectId);
+    } else {
+      row = safeJson(pkg);
+      row.scopeSummary = row.scopeSummary ?? row.scope ?? null;
+      row.scope = row.scope ?? row.scopeSummary ?? null;
+      // Attach budget lines via join table (legacy path)
+      try {
+        const items = await prisma.packageItem.findMany({
+          where: { packageId },
+          select: {
+            budgetLine: {
+              select: {
+                id: true,
+                description: true,
+                amount: true,
+                total: true,
+                qty: true,
+                rate: true,
+                unit: true,
+                costCode: { select: { id: true, code: true, description: true } },
+              },
             },
           },
-        },
-        orderBy: { id: 'asc' },
-      });
-      row.budgetLines = items
-        .map((it) => (it && it.budgetLine ? {
-          id: it.budgetLine.id,
-          description: it.budgetLine.description,
-          amount: Number(it.budgetLine.amount || 0),
-          quantity: null,
-          unit: 'ea',
-          rate: null,
-          costCode: it.budgetLine.costCode ? { id: it.budgetLine.costCode.id, code: it.budgetLine.costCode.code, description: it.budgetLine.costCode.description || '' } : null,
-        } : null))
-        .filter(Boolean);
-    } catch (_) {
-      row.budgetLines = [];
+          orderBy: { id: 'asc' },
+        });
+        row.budgetLines = items
+          .map((it) => {
+            if (!it || !it.budgetLine) return null;
+            const bl = it.budgetLine;
+            const qty = bl.qty ?? null;
+            const rate = bl.rate ?? null;
+            const total = bl.total ?? bl.amount ?? (qty && rate ? Number(qty) * Number(rate) : null);
+            return {
+              id: bl.id,
+              description: bl.description,
+              amount: Number(total || bl.amount || 0),
+              total: total != null ? Number(total) : null,
+              qty: qty != null ? Number(qty) : null,
+              quantity: qty != null ? Number(qty) : null,
+              unit: bl.unit || 'ea',
+              rate: rate != null ? Number(rate) : null,
+              costCode: bl.costCode ? { id: bl.costCode.id, code: bl.costCode.code, description: bl.costCode.description || '' } : null,
+            };
+          })
+          .filter(Boolean);
+      } catch (e) {
+        console.error('[projects/:projectId/packages/:packageId] budgetLines error:', e.message);
+        row.budgetLines = [];
+      }
+      row.links = buildLinks('package', { ...row, projectId });
     }
-    row.links = buildLinks('package', { ...row, projectId });
+    if (!Array.isArray(row.tenders) && Array.isArray(pkg?.tenders)) {
+      row.tenders = pkg.tenders.map((t) => safeJson(t));
+    }
     res.json(row);
   } catch (e) { next(e); }
 });
@@ -341,15 +562,108 @@ router.get('/packages/:packageId', async (req, res, next) => {
     const tenantId = req.user?.tenantId || req.tenantId;
     const packageId = Number(req.params.packageId);
     if (!Number.isFinite(packageId)) return res.status(400).json({ error: 'Invalid packageId' });
-    const pkg = await prisma.package.findFirst({
-      where: { id: packageId, project: { tenantId } },
-      select: { id: true, projectId: true, name: true, scopeSummary: true, trade: true, status: true, budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true, createdAt: true, updatedAt: true, costCodeId: true },
-    });
+    let pkg;
+    let minimalMode = false;
+    try {
+      pkg = await prisma.package.findFirst({
+        where: { id: packageId, project: { tenantId } },
+        select: {
+          ...packageSelect,
+          awardSupplier: { select: { id: true, name: true } },
+          contracts: {
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              title: true,
+              contractRef: true,
+              status: true,
+              value: true,
+              currency: true,
+              supplier: { select: { id: true, name: true } },
+              lineItems: {
+                select: {
+                  id: true,
+                  budgetLineId: true,
+                  packageLineItemId: true,
+                  total: true,
+                },
+              },
+            },
+          },
+          budgetItems: {
+            include: { budgetLine: { include: { costCode: true } } },
+          },
+          lineItems: { select: { id: true, budgetLineItemId: true } },
+          project: { select: { id: true, name: true } },
+        },
+      });
+    } catch (err) {
+      minimalMode = true;
+      pkg = await prisma.package.findFirst({
+        where: { id: packageId, project: { tenantId } },
+        select: {
+          id: true, projectId: true, name: true, scopeSummary: true, trade: true, status: true,
+          budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true,
+          createdAt: true, updatedAt: true, costCodeId: true,
+          project: { select: { id: true, name: true } },
+        },
+      });
+    }
     if (!pkg) return res.status(404).json({ error: 'Not found' });
-    const row = safeJson(pkg);
-    row.scopeSummary = row.scopeSummary ?? row.scope ?? null;
-    row.scope = row.scope ?? row.scopeSummary ?? null;
-    row.links = buildLinks('package', row);
+    let row;
+    if (!minimalMode && Array.isArray(pkg?.budgetItems)) {
+      row = normalizePackageRow(pkg, pkg.projectId);
+      if (pkg.project) row.project = safeJson(pkg.project);
+    } else {
+      row = safeJson(pkg);
+      row.scopeSummary = row.scopeSummary ?? row.scope ?? null;
+      row.scope = row.scope ?? row.scopeSummary ?? null;
+      try {
+        const items = await prisma.packageItem.findMany({
+          where: { packageId },
+          select: {
+            budgetLine: {
+              select: {
+                id: true,
+                description: true,
+                amount: true,
+                total: true,
+                qty: true,
+                rate: true,
+                unit: true,
+                costCode: { select: { id: true, code: true, description: true } },
+              },
+            },
+          },
+          orderBy: { id: 'asc' },
+        });
+        row.budgetLines = items
+          .map((it) => {
+            if (!it || !it.budgetLine) return null;
+            const bl = it.budgetLine;
+            const qty = bl.qty ?? null;
+            const rate = bl.rate ?? null;
+            const total = bl.total ?? bl.amount ?? (qty && rate ? Number(qty) * Number(rate) : null);
+            return {
+              id: bl.id,
+              description: bl.description,
+              amount: Number(total || bl.amount || 0),
+              total: total != null ? Number(total) : null,
+              qty: qty != null ? Number(qty) : null,
+              quantity: qty != null ? Number(qty) : null,
+              unit: bl.unit || 'ea',
+              rate: rate != null ? Number(rate) : null,
+              costCode: bl.costCode ? { id: bl.costCode.id, code: bl.costCode.code, description: bl.costCode.description || '' } : null,
+            };
+          })
+          .filter(Boolean);
+      } catch (e) {
+        console.error('[packages/:packageId] budgetLines error:', e.message);
+        row.budgetLines = [];
+      }
+      row.links = buildLinks('package', row);
+    }
+
     res.json(row);
   } catch (e) { next(e); }
 });

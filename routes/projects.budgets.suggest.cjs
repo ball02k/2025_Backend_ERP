@@ -45,6 +45,80 @@ const AcceptRequestSchema = z.object({
   items: z.array(AcceptItemSchema).min(1).max(50),
 });
 
+function buildFallbackSuggestions({ limit, project, packages, budgetExamples, costCodes }) {
+  const maxItems = Math.max(3, Math.min(limit || 10, 50));
+  const suggestions = [];
+  const seenDescriptions = new Set();
+
+  const normalisedExamples = (budgetExamples || []).map((example) => ({
+    description: example?.description ? String(example.description).trim() : '',
+    qty: Number(example?.qty ?? 1) || 1,
+    rate: Number(example?.rate ?? 0) || 0,
+    unit: example?.unit || 'ea',
+    packageId: example?.packageItems?.[0]?.package?.id ?? null,
+    packageName: example?.packageItems?.[0]?.package?.name ?? null,
+    costCodeId: example?.costCode?.id ?? null,
+    costCodeCode: example?.costCode?.code ?? null,
+  })).filter((ex) => ex.description.length > 0);
+
+  const avgRate =
+    normalisedExamples.reduce((total, ex) => total + (ex.rate || 0), 0) /
+      (normalisedExamples.filter((ex) => ex.rate > 0).length || 1) || 1500;
+  const avgQty =
+    normalisedExamples.reduce((total, ex) => total + (ex.qty || 0), 0) /
+      (normalisedExamples.filter((ex) => ex.qty > 0).length || 1) || 1;
+
+  for (const example of normalisedExamples) {
+    const key = example.description.toLowerCase();
+    if (seenDescriptions.has(key)) continue;
+    seenDescriptions.add(key);
+    suggestions.push({
+      description: example.description,
+      qty: Number(example.qty) || avgQty,
+      rate: Number(example.rate) || avgRate,
+      unit: example.unit || 'ea',
+      packageId: example.packageId ?? undefined,
+      costCodeId: example.costCodeId ?? undefined,
+      costCodeText: example.costCodeCode || undefined,
+      rationale: 'Based on similar line from recent project data.',
+    });
+    if (suggestions.length >= maxItems) break;
+  }
+
+  const fallbackPackages = packages && packages.length > 0 ? packages : [];
+
+  for (const pkg of fallbackPackages) {
+    if (suggestions.length >= maxItems) break;
+    const desc = `${pkg.name || 'Package'} allowance`;
+    const key = desc.toLowerCase();
+    if (seenDescriptions.has(key)) continue;
+    seenDescriptions.add(key);
+    suggestions.push({
+      description: desc,
+      qty: Number(avgQty) || 1,
+      rate: Number(avgRate) || 1500,
+      unit: 'ls',
+      packageId: pkg.id ?? undefined,
+      rationale: `Heuristic allowance for package ${pkg.name || 'scope'}.`,
+    });
+  }
+
+  if (suggestions.length < maxItems) {
+    const genericKey = 'contingency';
+    if (!seenDescriptions.has(genericKey)) {
+      suggestions.push({
+        description: `${project?.name || 'Project'} contingency`,
+        qty: 1,
+        rate: Number(avgRate) || 1500,
+        unit: 'ls',
+        rationale: 'Generic contingency allowance applied when insufficient history available.',
+      });
+    }
+  }
+
+  return { items: suggestions.slice(0, maxItems) };
+}
+
 /**
  * POST /api/projects/:projectId/budgets/suggest
  * Generate AI budget line suggestions
@@ -89,6 +163,14 @@ router.post('/:projectId/budgets/suggest', requireProjectMember, async (req, res
         select: { id: true, name: true, scopeSummary: true, trade: true },
       });
     }
+    if (packages.length === 0) {
+      packages = await prisma.package.findMany({
+        where: { projectId },
+        select: { id: true, name: true, scopeSummary: true, trade: true },
+        orderBy: { name: 'asc' },
+        take: 12,
+      });
+    }
 
     // 3. Fetch historical budget examples (if requested)
     let budgetExamples = [];
@@ -100,10 +182,10 @@ router.post('/:projectId/budgets/suggest', requireProjectMember, async (req, res
           qty: true,
           rate: true,
           unit: true,
-          costCode: { select: { code: true, description: true } },
+          costCode: { select: { id: true, code: true, description: true } },
           packageItems: {
             take: 1,
-            select: { package: { select: { name: true } } },
+            select: { package: { select: { id: true, name: true } } },
           },
         },
         orderBy: { updatedAt: 'desc' },
@@ -198,17 +280,18 @@ OUTPUT REQUIREMENTS:
       });
       log(`[BUDGET:SUGGEST ${rid}] LLM ok`);
     } catch (error) {
-      log(`[BUDGET:SUGGEST ${rid}] LLM error:`, error?.message);
+      log(`[BUDGET:SUGGEST ${rid}] LLM error: ${error?.message || 'unknown'}, using heuristic fallback`);
       console.error('[suggest] LLM error:', {
         message: error.message,
         code: error.code,
         preview: JSON.stringify(error).substring(0, 200),
       });
-      return res.status(502).json({
-        error: {
-          code: 'UPSTREAM_INVALID',
-          message: 'AI suggestions unavailable. Please try again later.',
-        },
+      aiResponse = buildFallbackSuggestions({
+        limit: input.limit,
+        project,
+        packages,
+        budgetExamples,
+        costCodes,
       });
     }
 

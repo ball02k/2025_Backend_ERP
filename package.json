@@ -46,7 +46,7 @@
     "@aws-sdk/s3-request-presigner": "^3.617.0",
     "@prisma/client": "6.14.0",
     "cors": "^2.8.5",
-    "express": "4.19.2",
+    "express": "^4.21.2",
     "jsonwebtoken": "9.0.2",
     "morgan": "^1.10.0",
     "node-fetch": "^2.7.0",

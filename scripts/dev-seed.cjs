@@ -515,13 +515,13 @@ const { cascadeDeleteProjects } = require('./dev-utils/cascade.cjs');
         },
       });
 
-      // Provisional award decision (seed)
-      if (s2) {
-        await prisma.awardDecision.create({
-          data: { tenantId: TENANT, requestId: rfx.id, supplierId: s2.id, decision: 'awarded', reason: 'Best value', decidedBy: adminUser.id, decidedAt: new Date() },
-        });
-        await prisma.request.update({ where: { id: rfx.id }, data: { status: 'awarded' } });
-      }
+      // Provisional award decision (seed) - TODO: Update to use new schema (requires projectId, packageId, awardType)
+      // if (s2) {
+      //   await prisma.awardDecision.create({
+      //     data: { tenantId: TENANT, projectId: proj1.id, packageId: ??, awardType: 'direct', supplierId: s2.id, decision: 'awarded', reason: 'Best value', decidedAt: new Date() },
+      //   });
+      //   await prisma.request.update({ where: { id: rfx.id }, data: { status: 'awarded' } });
+      // }
     }
     console.log('✔ Seeded RFx demo');
   } catch (e) {
@@ -536,7 +536,7 @@ const { cascadeDeleteProjects } = require('./dev-utils/cascade.cjs');
       data: {
         projectId: proj1.id,
         name: 'Fit-Out Package',
-        scope: 'Office fit-out including partitions and MEP',
+        scopeSummary: 'Office fit-out including partitions and MEP',
         trade: 'Fit-Out',
         status: 'Tendering',
         deadline: new Date(Date.now() + 10 * 86400000),

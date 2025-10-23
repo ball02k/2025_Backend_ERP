@@ -430,10 +430,10 @@ async function seedRequestsRFQ(suppliers) {
   // QnA example
   await prisma.requestQna.create({ data: { tenantId: TENANT, requestId: req.id, supplierId: responders[0].id, question: 'Is weekend working required?', answer: 'No, standard hours only.', answeredAt: new Date() } });
 
-  // Award decision
-  if (best) {
-    await prisma.awardDecision.create({ data: { tenantId: TENANT, requestId: req.id, supplierId: best.supplier.id, decision: 'awarded', reason: 'Best compliant price', decidedAt: new Date() } });
-  }
+  // Award decision - TODO: Update to use new schema (requires projectId, packageId, awardType)
+  // if (best) {
+  //   await prisma.awardDecision.create({ data: { tenantId: TENANT, projectId: ??, packageId: ??, awardType: 'direct', supplierId: best.supplier.id, decision: 'awarded', reason: 'Best compliant price', decidedAt: new Date() } });
+  // }
 }
 
 async function main() {
