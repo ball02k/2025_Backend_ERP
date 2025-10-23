@@ -191,6 +191,7 @@ model Project {
   financialItems FinancialItem[]
   packages       Package[]
   contracts      Contract[]
+  awards         Award[]
   invoices       Invoice[]
   awardDecisions AwardDecision[]
 
@@ -795,9 +796,11 @@ model Supplier {
   tenderInvites         TenderSupplierInvite[]
   tenderResponses       TenderResponse[]
   contracts             Contract[]
+  awards                Award[]
   awardDecisions        AwardDecision[]
   complianceOverrides   ComplianceOverride[]
   awardedPackages       Package[]                 @relation("PackageAwardSupplier")
+  awardedToPackages     Package[]                 @relation("PackageAwardedToSupplier")
   invoices              Invoice[]
   onboardingTokens      SupplierOnboardingToken[]
   ApplicationForPayment ApplicationForPayment[]
@@ -1468,6 +1471,10 @@ model Package {
   awardValue      Decimal?
   awardSupplierId Int?
   awardSupplier   Supplier? @relation("PackageAwardSupplier", fields: [awardSupplierId], references: [id])
+  awardedToSupplierId Int?
+  awardedToSupplier   Supplier? @relation("PackageAwardedToSupplier", fields: [awardedToSupplierId], references: [id])
+  awardedValue        Decimal? @db.Decimal(18, 2)
+  awardedAt           DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   costCodeId      Int?
@@ -1492,6 +1499,7 @@ model Package {
   lineItems   PackageLineItem[]
   awardDecisions AwardDecision[]
   complianceOverrides ComplianceOverride[]
+  awards     Award[]
 
   @@index([projectId])
   @@index([projectId, costCodeId])
@@ -1649,6 +1657,25 @@ model Submission {
   @@index([supplierId])
 }
 
+model Award {
+  id             Int      @id @default(autoincrement())
+  tenantId       String
+  projectId      Int
+  packageId      Int
+  supplierId     Int
+  awardValue     Decimal  @db.Decimal(18, 2)
+  awardDate      DateTime @default(now())
+  overrideUsed   Boolean  @default(false)
+  overrideReason String?
+
+  project  Project  @relation(fields: [projectId], references: [id])
+  package  Package  @relation(fields: [packageId], references: [id])
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+  contract Contract? @relation("ContractAward")
+
+  @@index([tenantId, packageId])
+}
+
 model Contract {
   id              Int      @id @default(autoincrement())
   projectId       Int
@@ -1672,11 +1699,13 @@ model Contract {
   managedByUserId Int?
   pdfUrl          String?
   tenantId        String?
+  awardId         Int?    @unique
 
   // relations
   project        Project                 @relation(fields: [projectId], references: [id])
   package        Package?                @relation(fields: [packageId], references: [id])
   supplier       Supplier                @relation(fields: [supplierId], references: [id])
+  award          Award?                  @relation("ContractAward", fields: [awardId], references: [id])
   lineItems      ContractLineItem[]
   applications   ApplicationForPayment[]
   invoices       Invoice[]
