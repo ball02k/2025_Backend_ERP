@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { Prisma } = require('@prisma/client');
 const { prisma } = require('../utils/prisma.cjs');
 const { requireTenant } = require('../middleware/tenant.cjs');
+const { requireAuth, requirePermission } = require('../lib/auth.cjs');
 const { writeAudit } = require('../lib/audit.cjs');
 const { makeStorageKey, localPath } = require('../utils/storage.cjs');
 
@@ -757,5 +758,25 @@ async function updateContractStatus(req, res, status) {
 router.post('/contracts/:id/issue', (req, res) => updateContractStatus(req, res, 'issued'));
 router.post('/contracts/:id/send-for-signature', (req, res) => updateContractStatus(req, res, 'sent_for_signature'));
 router.post('/contracts/:id/mark-signed', (req, res) => updateContractStatus(req, res, 'signed'));
+
+// DELETE /contracts/:id
+router.delete('/contracts/:id', requireAuth, requirePermission('contracts:delete'), async (req, res) => {
+  const tenantId  = req.tenant.id;
+  const userId    = req.user.id;
+  const contractId = Number(req.params.id);
+
+  const ctr = await prisma.contract.findFirst({ where: { id: contractId, tenantId } });
+  if (!ctr) return res.status(404).json({ code: 'NOT_FOUND', message: 'Contract not found' });
+
+  if (ctr.status === 'Signed') {
+    return res.status(409).json({ code: 'NOT_ALLOWED', message: 'Cannot delete a signed contract' });
+  }
+
+  // If you have POs/invoices linked, check here and block if references exist
+
+  await prisma.contract.delete({ where: { id: contractId } });
+  await writeAudit(tenantId, userId, 'ContractDeleted', 'Contract', contractId, {});
+  res.json({ ok: true });
+});
 
 module.exports = router;
