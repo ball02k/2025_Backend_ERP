@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "e7b7ccf"
+    "version": "ab4512f"
   },
   "paths": {
     "*": {
@@ -1361,9 +1361,9 @@
         }
       }
     },
-    "//api/projects/{projectId}/info": {
+    "//api/projects/projects/{projectId}/info": {
       "get": {
-        "summary": "GET //api/projects/:projectId/info",
+        "summary": "GET //api/projects/projects/:projectId/info",
         "parameters": [
           {
             "name": "projectId",
@@ -1385,8 +1385,36 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Forbidden"
+                  }
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "//api/projects/{id}/overview": {
@@ -1959,6 +1987,62 @@
         }
       }
     },
+    "//api/projects/{projectId}/budgets/suggest": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/budgets/suggest",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/budgets/suggest/accept": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/budgets/suggest/accept",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/projects/{projectId}/packages/{packageId}": {
       "get": {
         "summary": "GET //api/projects/:projectId/packages/:packageId",
@@ -2199,7 +2283,106 @@
         }
       }
     },
+    "//api/packages/{packageId}/add-budget-lines": {
+      "post": {
+        "summary": "POST //api/packages/:packageId/add-budget-lines",
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/contracts/{id}": {
+      "get": {
+        "summary": "GET //api/contracts/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "PUT //api/contracts/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/contracts": {
+      "post": {
+        "summary": "POST //api/contracts",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "summary": "GET //api/contracts",
         "parameters": [],
@@ -2221,10 +2404,21 @@
             }
           }
         }
-      },
+      }
+    },
+    "//api/contracts/{id}/line-items": {
       "post": {
-        "summary": "POST //api/contracts",
-        "parameters": [],
+        "summary": "POST //api/contracts/:id/line-items",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -2240,12 +2434,12 @@
         }
       }
     },
-    "//api/contracts/{contractId}": {
-      "get": {
-        "summary": "GET //api/contracts/:contractId",
+    "//api/contract-line-items/{id}": {
+      "put": {
+        "summary": "PUT //api/contract-line-items/:id",
         "parameters": [
           {
-            "name": "contractId",
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {
@@ -2260,7 +2454,32 @@
               "application/json": {
                 "example": {
                   "id": 1,
-                  "_example": true
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "DELETE //api/contract-line-items/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true
                 }
               }
             }
@@ -2268,12 +2487,179 @@
         }
       }
     },
-    "//api/contracts/{contractId}/approve": {
+    "//api/contracts/{id}/documents{generate}": {
       "post": {
-        "summary": "POST //api/contracts/:contractId/approve",
+        "summary": "POST //api/contracts/:id/documents:generate",
         "parameters": [
           {
-            "name": "contractId",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "generate",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/contracts/{id}/issue": {
+      "post": {
+        "summary": "POST //api/contracts/:id/issue",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/contracts/{id}/send-for-signature": {
+      "post": {
+        "summary": "POST //api/contracts/:id/send-for-signature",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/contracts/{id}/mark-signed": {
+      "post": {
+        "summary": "POST //api/contracts/:id/mark-signed",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/awards": {
+      "post": {
+        "summary": "POST //api/awards",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Forbidden"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "//api/packages/{packageId}/award": {
+      "post": {
+        "summary": "POST //api/packages/:packageId/award",
+        "parameters": [
+          {
+            "name": "packageId",
             "in": "path",
             "required": true,
             "schema": {
@@ -2360,6 +2746,42 @@
         }
       }
     },
+    "//api/projects/{projectId}/scope/runs/{runId}/suggest": {
+      "post": {
+        "summary": "POST //api/projects/:projectId/scope/runs/:runId/suggest",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/projects/{projectId}/scope/runs/{runId}/suggestions": {
       "get": {
         "summary": "GET //api/projects/:projectId/scope/runs/:runId/suggestions",
@@ -2389,6 +2811,42 @@
                 "example": {
                   "id": 1,
                   "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/{projectId}/scope/runs/{runId}/accept": {
+      "patch": {
+        "summary": "PATCH //api/projects/:projectId/scope/runs/:runId/accept",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
                 }
               }
             }
@@ -5542,6 +6000,30 @@
         }
       }
     },
+    "//api/variations": {
+      "get": {
+        "summary": "GET //api/variations",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "total": 1,
+                  "items": [
+                    {
+                      "id": 1,
+                      "_example": true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/variations/{id}/approve": {
       "patch": {
         "summary": "PATCH //api/variations/:id/approve",
@@ -5591,6 +6073,30 @@
                 "example": {
                   "id": 1,
                   "updated": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/variations/variations": {
+      "get": {
+        "summary": "GET //api/variations/variations",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "total": 1,
+                  "items": [
+                    {
+                      "id": 1,
+                      "_example": true
+                    }
+                  ]
                 }
               }
             }
@@ -6563,34 +7069,6 @@
         "parameters": [
           {
             "name": "submissionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/packages/{packageId}/award": {
-      "post": {
-        "summary": "POST //api/packages/:packageId/award",
-        "parameters": [
-          {
-            "name": "packageId",
             "in": "path",
             "required": true,
             "schema": {
@@ -8167,6 +8645,34 @@
         }
       }
     },
+    "//api/suppliers/{id}/compliance": {
+      "get": {
+        "summary": "GET //api/suppliers/:id/compliance",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/suppliers/onboarding-links": {
       "post": {
         "summary": "POST //api/suppliers/onboarding-links",
@@ -9736,6 +10242,47 @@
         }
       }
     },
+    "//api/trades": {
+      "get": {
+        "summary": "GET //api/trades",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "total": 1,
+                  "items": [
+                    {
+                      "id": 1,
+                      "_example": true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //api/trades",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/integrations/companies-house/{companyNumber}/profile": {
       "get": {
         "summary": "GET //api/integrations/companies-house/:companyNumber/profile",
@@ -9944,9 +10491,9 @@
         }
       }
     },
-    "//api/{projectId}/info": {
+    "//api/projects/{projectId}/info": {
       "get": {
-        "summary": "GET //api/:projectId/info",
+        "summary": "GET //api/projects/:projectId/info",
         "parameters": [
           {
             "name": "projectId",
@@ -9968,8 +10515,36 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Forbidden"
+                  }
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "//api/mvp//?/i/diag/projects/{projectId}": {
@@ -12480,6 +13055,245 @@
         }
       }
     },
+    "//api/v1/settings/taxonomies": {
+      "get": {
+        "summary": "GET //api/v1/settings/taxonomies",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "total": 1,
+                  "items": [
+                    {
+                      "id": 1,
+                      "_example": true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //api/v1/settings/taxonomies",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/v1/settings/taxonomies/{key}": {
+      "get": {
+        "summary": "GET //api/v1/settings/taxonomies/:key",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "PATCH //api/v1/settings/taxonomies/:key",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/v1/settings/taxonomies/{key}/terms": {
+      "post": {
+        "summary": "POST //api/v1/settings/taxonomies/:key/terms",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/v1/settings/taxonomies/{key}/import": {
+      "post": {
+        "summary": "POST //api/v1/settings/taxonomies/:key/import",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/v1/settings/taxonomies/{key}/export": {
+      "get": {
+        "summary": "GET //api/v1/settings/taxonomies/:key/export",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/v1/settings/tenant": {
+      "get": {
+        "summary": "GET //api/v1/settings/tenant",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "total": 1,
+                  "items": [
+                    {
+                      "id": 1,
+                      "_example": true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "PATCH //api/v1/settings/tenant",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/v1/settings/tenant/self-supplier": {
+      "patch": {
+        "summary": "PATCH //api/v1/settings/tenant/self-supplier",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tenants/modules": {
       "get": {
         "summary": "GET /api/v1/tenants/modules",
@@ -12532,9 +13346,65 @@
         ]
       }
     },
-    "/api/trades": {
+    "//api/packages/{id}/direct-award": {
+      "post": {
+        "summary": "POST //api/packages/:id/direct-award",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/contracts/{contractId}": {
       "get": {
-        "summary": "GET /api/trades",
+        "summary": "GET //api/contracts/:contractId",
+        "parameters": [
+          {
+            "name": "contractId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/contract-templates": {
+      "get": {
+        "summary": "GET //api/contract-templates",
         "parameters": [],
         "responses": {
           "200": {
@@ -12552,36 +13422,104 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Unauthorized",
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //api/contract-templates",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
             "content": {
               "application/json": {
                 "example": {
-                  "error": "Unauthorized"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "example": {
-                  "error": {
-                    "code": "FORBIDDEN",
-                    "message": "Forbidden"
-                  }
+                  "id": 101,
+                  "created": true
                 }
               }
             }
           }
-        },
-        "security": [
+        }
+      }
+    },
+    "//api/contract-templates/{id}": {
+      "get": {
+        "summary": "GET //api/contract-templates/:id",
+        "parameters": [
           {
-            "bearerAuth": []
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
           }
-        ]
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "PATCH //api/contract-templates/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "DELETE //api/contract-templates/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true
+                }
+              }
+            }
+          }
+        }
       }
     },
     "//public/onboard/{token}": {
@@ -13290,6 +14228,25 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/dev/ai/echo": {
+      "post": {
+        "summary": "POST //api/dev/ai/echo",
+        "parameters": [],
         "responses": {
           "200": {
             "description": "OK",
