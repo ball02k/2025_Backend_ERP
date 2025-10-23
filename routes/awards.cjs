@@ -3,7 +3,7 @@ const router = express.Router();
 const { prisma } = require('../lib/prisma');
 const { requireAuth, requirePermission } = require('../lib/auth.cjs');
 const { checkSupplierCompliance } = require('../lib/compliance.cjs');
-const { writeAudit } = require('../lib/audit');
+const { writeAudit } = require('../lib/audit.cjs');
 
 router.post(
   '/packages/:id/award',
