@@ -1,17 +1,22 @@
 #!/bin/bash
 set -e
 
-echo "🔧 Checking for failed migrations..."
+echo "============================================"
+echo "🔧 MIGRATION FIX SCRIPT STARTING"
+echo "============================================"
 
 # Try to mark the known failed migration as applied
+echo "📝 Attempting to resolve failed migration..."
 npx prisma migrate resolve --applied "20251016143916_add_contract_tenantid_and_budget_qty_rate" 2>&1 || {
-  echo "⚠️  Migration already resolved or doesn't exist, continuing..."
+  echo "⚠️  Migration already resolved or doesn't exist - continuing..."
 }
 
 echo "✅ Migration state resolved"
-echo "📦 Running pending migrations..."
-
-# Now deploy any pending migrations
+echo ""
+echo "📦 Deploying pending migrations..."
 npx prisma migrate deploy
 
-echo "✅ All migrations applied successfully"
+echo ""
+echo "============================================"
+echo "✅ ALL MIGRATIONS APPLIED SUCCESSFULLY"
+echo "============================================"

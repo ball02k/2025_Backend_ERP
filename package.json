@@ -18,7 +18,7 @@
     "postinstall": "prisma generate",
     "start": "node index.cjs",
     "start:prod": "NODE_ENV=production node index.cjs",
-    "render-build": "npm ci && npx prisma generate",
+    "render-build": "npm ci && npx prisma generate && bash scripts/fix-migrations.sh",
     "render-start": "node index.cjs",
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",
