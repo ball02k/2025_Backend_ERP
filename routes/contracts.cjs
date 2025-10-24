@@ -102,7 +102,7 @@ function mapContract(contract) {
     mapped.applications = contract.applications.map(app => ({
       id: app.id,
       applicationNo: app.applicationNo,
-      periodEnding: app.periodEnding,
+      periodEnd: app.periodEnd,
       amountDue: app.amountDue instanceof Prisma.Decimal ? Number(app.amountDue) : app.amountDue,
       status: app.status,
       createdAt: app.createdAt,
@@ -147,17 +147,18 @@ const contractInclude = {
 const contractWithLinesInclude = {
   ...contractInclude,
   lineItems: { orderBy: { id: 'asc' } },
-  applications: {
-    select: {
-      id: true,
-      applicationNo: true,
-      periodEnding: true,
-      amountDue: true,
-      status: true,
-      createdAt: true,
-    },
-    orderBy: { id: 'desc' },
-  },
+  // applications: {
+  //   select: {
+  //     id: true,
+  //     applicationNo: true,
+  //     periodEnd: true,
+  //     netClaimed: true,
+  //     certifiedAmount: true,
+  //     status: true,
+  //     createdAt: true,
+  //   },
+  //   orderBy: { id: 'desc' },
+  // },
   invoices: {
     where: { contractId: { not: null } },
     select: {
