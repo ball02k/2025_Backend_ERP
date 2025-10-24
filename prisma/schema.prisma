@@ -1710,6 +1710,10 @@ model Contract {
   applications   ApplicationForPayment[]
   invoices       Invoice[]
   purchaseOrders PurchaseOrder[]
+  documents      ContractDocument[]
+  approvalSteps  ContractApprovalStep[]
+  approvals      ContractApproval[]
+  files          ContractFile[]
 
   @@index([projectId])
   @@index([supplierId])
@@ -1740,6 +1744,86 @@ model ContractLineItem {
   @@index([tenantId, costCode])
   @@index([tenantId, budgetLineId])
   @@index([tenantId, packageLineItemId])
+}
+
+/// Contract document system: editable docs with versioning
+model ContractDocument {
+  id           Int       @id @default(autoincrement())
+  tenantId     String
+  contractId   Int
+  title        String    @default("Subcontract Agreement")
+  editorType   String    @default("prosemirror") // prosemirror|onlyoffice|collabora
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+
+  contract     Contract  @relation(fields: [contractId], references: [id])
+  versions     ContractVersion[]
+
+  @@index([tenantId, contractId])
+}
+
+/// Immutable version snapshots with redline diffs
+model ContractVersion {
+  id             Int       @id @default(autoincrement())
+  tenantId       String
+  contractDocId  Int
+  versionNo      Int
+  contentJson    Json      // ProseMirror JSON or docx key
+  baseVersionId  Int?      // for diffing/redlines
+  redlinePatch   Json?     // stringified diff or JSON patch
+  createdBy      Int?      // userId
+  createdAt      DateTime  @default(now())
+
+  document ContractDocument @relation(fields: [contractDocId], references: [id])
+  @@index([tenantId, contractDocId, versionNo])
+}
+
+/// Approval workflow steps
+model ContractApprovalStep {
+  id            Int      @id @default(autoincrement())
+  tenantId      String
+  contractId    Int
+  seq           Int
+  role          String       // e.g., "QS", "Commercial Manager"
+  required      Boolean @default(true)
+  createdAt     DateTime @default(now())
+
+  contract Contract @relation(fields: [contractId], references: [id])
+  approvals ContractApproval[]
+  @@index([tenantId, contractId, seq])
+}
+
+/// Individual approval decisions
+model ContractApproval {
+  id            Int      @id @default(autoincrement())
+  tenantId      String
+  contractId    Int
+  stepId        Int
+  userId        Int
+  decision      String?    // "Approved"|"Rejected"|null
+  comment       String?
+  decidedAt     DateTime?
+  createdAt     DateTime @default(now())
+
+  contract Contract @relation(fields: [contractId], references: [id])
+  step     ContractApprovalStep @relation(fields: [stepId], references: [id])
+
+  @@index([tenantId, contractId, stepId])
+}
+
+model ContractFile {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  contractId  Int
+  versionId   Int?
+  path        String
+  mime        String   @default("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+  size        Int
+  createdAt   DateTime @default(now())
+
+  contract    Contract @relation(fields: [contractId], references: [id])
+
+  @@index([tenantId, contractId])
 }
 
 model ContractTemplate {

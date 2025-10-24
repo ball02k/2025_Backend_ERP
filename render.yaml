@@ -1,30 +1,32 @@
 services:
   - type: web
     name: erp-backend
-    runtime: node
-    region: frankfurt
-    repo: https://github.com/ball02k/2025_Backend_ERP
-    branch: main
-    buildCommand: npm ci && npx prisma generate
-    startCommand: node index.cjs
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install && npx prisma generate
+    startCommand: npm start
     envVars:
       - key: NODE_VERSION
-        value: 20.16.0
-      - key: NODE_ENV
-        value: production
+        value: 18
       - key: DATABASE_URL
-        fromDatabase:
-          name: erp-db
-          property: connectionString
-      - key: JWT_SECRET
-        generateValue: true
-      - key: X_TENANT_ID_DEFAULT
-        value: "demo-tenant"
-      - key: TZ
-        value: Europe/London
-    plan: starter
-
-databases:
-  - name: erp-db
-    region: frankfurt
-    plan: starter
+        sync: false
+      - key: SHADOW_DATABASE_URL
+        sync: false
+      - key: MODEL_PROVIDER
+        value: ollama
+      - key: OLLAMA_BASE_URL
+        sync: false
+      - key: OLLAMA_MODEL
+        value: llama3.1:8b
+      - key: ONLYOFFICE_DS_URL
+        sync: false
+      - key: ONLYOFFICE_JWT_SECRET
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: FILE_STORAGE_DIR
+        value: ./uploads/contracts
+      - key: PORT
+        value: 3001
+    autoDeploy: true

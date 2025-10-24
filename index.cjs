@@ -79,6 +79,9 @@ const taxonomyRouter = require('./routes/taxonomy.cjs');
 const budgetsSuggestRouter = require('./routes/projects.budgets.suggest.cjs');
 const directAwardRouter = require('./routes/packages.directAward.cjs');
 const contractsReadRouter = require('./routes/contracts.read.cjs');
+const contractsGenerateDocRouter = require('./routes/contracts.generateDoc.cjs');
+const contractsStatusRouter = require('./routes/contracts.status.cjs');
+const contractsOnlyOfficeRouter = require('./routes/contracts.onlyoffice.cjs');
 const settingsV1Router = require('./routes/settings.v1.cjs');
 const contractTemplatesRouter = require('./routes/contract.templates.cjs');
 const tradesRouter = require('./routes/trades.cjs');
@@ -141,6 +144,10 @@ app.use(require('./middleware/devFeatures.cjs'));
 app.use(devRbac);
 // Demo guard rails (block destructive or protected operations)
 app.use(demoGuard);
+
+// Static file serving for contract uploads
+const FILE_STORAGE_DIR = process.env.FILE_STORAGE_DIR || './uploads/contracts';
+app.use('/static/contracts', express.static(path.resolve(FILE_STORAGE_DIR)));
 
 // Rewrite common malformed URLs where the frontend missed the '?' before query params
 // Example: /api/projectslimit=10&offset=0 -> /api/projects?limit=10&offset=0
@@ -304,6 +311,9 @@ app.get('/api/v1/tenants/modules', requireAuth, (req, res) => {
 
 app.use('/api', directAwardRouter);
 app.use('/api', contractsReadRouter);
+app.use('/api', contractsGenerateDocRouter);
+app.use('/api', contractsStatusRouter);
+app.use('/api', contractsOnlyOfficeRouter);
 app.use('/api', contractsRouter);
 app.use('/api', contractTemplatesRouter);
 
