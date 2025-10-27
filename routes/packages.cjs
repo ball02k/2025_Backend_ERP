@@ -444,4 +444,36 @@ router.patch('/packages/:packageId', async (req, res, next) => {
   }
 });
 
+// GET /packages/:id/contracts — helper to get contracts for a package
+router.get('/packages/:id/contracts', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const packageId = Number(req.params.id);
+    if (!Number.isFinite(packageId)) {
+      return res.status(400).json({ error: 'Invalid package id' });
+    }
+
+    // Verify package exists
+    const pkg = await prisma.package.findFirst({
+      where: { id: packageId, project: { tenantId } },
+      select: { id: true },
+    });
+    if (!pkg) return res.status(404).json({ error: 'Package not found' });
+
+    // Fetch contracts for this package
+    const contracts = await prisma.contract.findMany({
+      where: { packageId, tenantId },
+      orderBy: [{ createdAt: 'desc' }],
+      include: {
+        supplier: { select: { id: true, name: true } },
+        project: { select: { id: true, name: true, code: true } },
+      },
+    });
+
+    res.json({ items: contracts, total: contracts.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

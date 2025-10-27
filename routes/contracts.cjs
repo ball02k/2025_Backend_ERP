@@ -6,7 +6,7 @@ const { Prisma } = require('@prisma/client');
 const { prisma } = require('../utils/prisma.cjs');
 const { requireTenant } = require('../middleware/tenant.cjs');
 const { requireAuth, requirePermission } = require('../lib/auth.cjs');
-const { writeAudit } = require('../lib/audit.cjs');
+const { writeAudit, auditReject } = require('../lib/audit.cjs');
 const { makeStorageKey, localPath } = require('../utils/storage.cjs');
 
 const router = express.Router();
@@ -91,6 +91,9 @@ function mapContract(contract) {
     tenantId: contract.tenantId,
     createdAt: contract.createdAt,
     updatedAt: contract.updatedAt,
+    draftCreatedAt: contract.draftCreatedAt,
+    lockedAt: contract.lockedAt,
+    sourceMode: contract.sourceMode,
     supplier: contract.supplier || null,
     package: contract.package || null,
     project: contract.project || null,
@@ -140,7 +143,7 @@ function mapContract(contract) {
 
 const contractInclude = {
   supplier: { select: { id: true, name: true } },
-  package: { select: { id: true, name: true } },
+  package: { select: { id: true, code: true, name: true } },
   project: { select: { id: true, name: true, code: true } },
 };
 
@@ -283,81 +286,91 @@ router.post('/contracts', async (req, res) => {
     return res.status(err.status || 400).json({ error: err.message || 'Tenant context required' });
   }
   const body = req.body || {};
-  const projectId = Number(body.projectId);
-  if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'projectId is required' });
+  const sourceMode = body.sourceMode || null;
   const packageId = body.packageId != null ? Number(body.packageId) : null;
-  const supplierIdRaw = body.supplierId != null ? Number(body.supplierId) : null;
-  const type = String(body.type || (supplierIdRaw ? 'supplier' : 'internal')).toLowerCase();
+  const supplierId = body.supplierId != null ? Number(body.supplierId) : null;
+
+  // Validation: if sourceMode === "fromPackage" require packageId
+  if (sourceMode === 'fromPackage' && !Number.isFinite(packageId)) {
+    return res.status(400).json({ error: 'packageId is required when sourceMode is fromPackage' });
+  }
+
+  // Require supplierId
+  if (!Number.isFinite(supplierId)) {
+    return res.status(400).json({ error: 'supplierId is required' });
+  }
 
   try {
-    await ensureProject(tenantId, projectId);
-    await ensurePackage(tenantId, projectId, packageId);
+    // Fetch project and package to auto-generate reference and title
+    let project = null;
+    let pkg = null;
 
-    let supplierId = null;
-    let internalTeam = null;
-    if (type === 'supplier') {
-      if (!Number.isFinite(supplierIdRaw)) {
-        return res.status(400).json({ error: 'supplierId is required for supplier contracts' });
-      }
-      await ensureSupplier(tenantId, supplierIdRaw);
-      supplierId = supplierIdRaw;
+    if (packageId) {
+      pkg = await prisma.package.findFirst({
+        where: { id: packageId, project: { tenantId } },
+        include: { project: { select: { id: true, code: true, name: true } } },
+      });
+      if (!pkg) return res.status(404).json({ error: 'Package not found' });
+      project = pkg.project;
+    } else if (body.projectId) {
+      const projectId = Number(body.projectId);
+      if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'Invalid projectId' });
+      project = await prisma.project.findFirst({
+        where: { id: projectId, tenantId },
+        select: { id: true, code: true, name: true },
+      });
+      if (!project) return res.status(404).json({ error: 'Project not found' });
     } else {
-      internalTeam = body.internalTeam ? String(body.internalTeam) : null;
-      if (!internalTeam) {
-        return res.status(400).json({ error: 'internalTeam is required for internal contracts' });
-      }
+      return res.status(400).json({ error: 'Either packageId or projectId is required' });
     }
 
-    const retention = body.retentionPct != null ? toDecimal(body.retentionPct, { allowNull: true }) : null;
+    // Validate supplier
+    const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, tenantId } });
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+
+    // Auto-generate contractRef using project/package codes
+    const projectCode = project.code || `P${project.id}`;
+    const packageCode = pkg?.code || (pkg ? `PKG${pkg.id}` : '');
+    const timestamp = Date.now().toString().slice(-6);
+    const contractRef = body.contractRef || (pkg
+      ? `${projectCode}-${packageCode}-C${timestamp}`
+      : `${projectCode}-C${timestamp}`);
+
+    // Auto-generate fallback title if not provided
+    const title = body.title || (pkg
+      ? `${project.name} - ${pkg.name} Contract`
+      : `${project.name} Contract`);
+
     const valueDecimal = body.value != null ? toDecimal(body.value, { allowNull: true }) : null;
+    const retention = body.retentionPct != null ? toDecimal(body.retentionPct, { allowNull: true }) : null;
+    const now = new Date();
 
     const contractData = {
       tenantId,
-      projectId,
+      projectId: project.id,
       packageId,
       supplierId,
-      internalTeam,
-      contractRef: body.contractRef || null,
-      title: body.title || null,
-      value: valueDecimal,
+      contractRef,
+      title,
+      value: valueDecimal || new Prisma.Decimal(0),
       currency: body.currency || 'GBP',
-      status: body.status || 'draft',
+      status: 'draft',
       startDate: body.startDate ? new Date(body.startDate) : null,
       endDate: body.endDate ? new Date(body.endDate) : null,
       retentionPct: retention,
       paymentTerms: body.paymentTerms || null,
       notes: body.notes || null,
+      sourceMode,
+      draftCreatedAt: now,
+      lockedAt: now,
     };
 
-    const lineItems = Array.isArray(body.lineItems) ? body.lineItems : [];
-
-    const created = await prisma.$transaction(async (tx) => {
-      const contract = await tx.contract.create({ data: contractData, include: contractWithLinesInclude });
-
-      if (lineItems.length) {
-        for (const item of lineItems) {
-          await tx.contractLineItem.create({
-            data: {
-              tenantId,
-              contractId: contract.id,
-              description: String(item.description || 'Line'),
-              qty: toDecimal(item.qty, { allowNull: true }),
-              rate: toDecimal(item.rate, { allowNull: true }),
-              total: toDecimal(item.total, { allowNull: true }),
-              costCode: item.costCode || null,
-              budgetLineId: item.budgetLineId != null ? Number(item.budgetLineId) : null,
-              packageLineItemId: item.packageLineItemId != null ? Number(item.packageLineItemId) : null,
-            },
-          });
-        }
-      }
-
-      if (lineItems.length) {
-        const withLines = await tx.contract.findUnique({ where: { id: contract.id }, include: contractWithLinesInclude });
-        return withLines;
-      }
-
-      return contract;
+    const created = await prisma.contract.create({
+      data: contractData,
+      include: {
+        ...contractInclude,
+        package: { select: { id: true, code: true, name: true } },
+      },
     });
 
     await writeAudit({
@@ -366,11 +379,10 @@ router.post('/contracts', async (req, res) => {
       entity: 'Contract',
       entityId: created.id,
       action: 'create',
-      changes: { projectId, packageId, supplierId: created.supplierId, status: created.status },
+      changes: { projectId: project.id, packageId, supplierId, sourceMode, status: 'draft' },
     });
 
-    const hydrated = await fetchContract(tenantId, created.id, true);
-    res.status(201).json(mapContract(hydrated));
+    res.status(201).json(mapContract(created));
   } catch (err) {
     if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error('[contracts.create] failed', err);
@@ -394,6 +406,24 @@ router.put('/contracts/:id', async (req, res) => {
     const existing = await fetchContract(tenantId, id, false);
     if (!existing) return res.status(404).json({ error: 'Contract not found' });
 
+    // Lock validation: if draftCreatedAt exists, block packageId mutations
+    if (existing.draftCreatedAt && body.packageId !== undefined) {
+      const reason = 'Package is locked after draft creation. Raise a variation instead.';
+      await auditReject(
+        req.user?.id,
+        tenantId,
+        'Contract',
+        id,
+        'UPDATE',
+        reason,
+        { attemptedPackageId: body.packageId }
+      );
+      return res.status(409).json({
+        code: 'CONTRACT_LOCKED_AFTER_DRAFT',
+        message: reason,
+      });
+    }
+
     const patch = {};
     if (body.title !== undefined) patch.title = body.title == null ? null : String(body.title);
     if (body.contractRef !== undefined) patch.contractRef = body.contractRef == null ? null : String(body.contractRef);
@@ -406,6 +436,12 @@ router.put('/contracts/:id', async (req, res) => {
     if (body.endDate !== undefined) patch.endDate = body.endDate ? new Date(body.endDate) : null;
     if (body.value !== undefined) patch.value = toDecimal(body.value, { allowNull: true });
     if (body.retentionPct !== undefined) patch.retentionPct = toDecimal(body.retentionPct, { allowNull: true });
+
+    // Only allow packageId update if not locked
+    if (body.packageId !== undefined && !existing.draftCreatedAt) {
+      patch.packageId = body.packageId != null ? Number(body.packageId) : null;
+    }
+
     if (body.supplierId !== undefined) {
       if (body.supplierId == null) {
         patch.supplierId = null;
@@ -455,6 +491,24 @@ router.post('/contracts/:id/line-items', async (req, res) => {
   try {
     const contract = await fetchContract(tenantId, id, false);
     if (!contract) return res.status(404).json({ error: 'Contract not found' });
+
+    // Lock validation: reject bulk line items writes when draftCreatedAt exists
+    if (contract.draftCreatedAt) {
+      const reason = 'Package and line items are locked after draft creation. Raise a variation instead.';
+      await auditReject(
+        req.user?.id,
+        tenantId,
+        'Contract',
+        id,
+        'LINE_ITEMS_BULK_UPDATE',
+        reason,
+        { itemsCount: items.length }
+      );
+      return res.status(409).json({
+        code: 'CONTRACT_LOCKED_AFTER_DRAFT',
+        message: reason,
+      });
+    }
 
     const prepared = items.map((item) => ({
       description: String(item.description || 'Line'),

@@ -1685,7 +1685,7 @@ model Contract {
   contractRef     String?
   value           Decimal  @db.Decimal(65, 30)
   currency        String?  @default("GBP")
-  status          String   @default("Pending")
+  status          String   @default("draft")
   signedAt        DateTime?
   startDate       DateTime?
   endDate         DateTime?
@@ -1700,6 +1700,9 @@ model Contract {
   pdfUrl          String?
   tenantId        String?
   awardId         Int?    @unique
+  draftCreatedAt  DateTime?
+  lockedAt        DateTime?
+  sourceMode      String?
 
   // relations
   project        Project                 @relation(fields: [projectId], references: [id])
@@ -1718,6 +1721,8 @@ model Contract {
   @@index([projectId])
   @@index([supplierId])
   @@index([tenantId])
+  @@index([packageId])
+  @@index([tenantId, packageId])
 }
 
 /// Line items copied initially from PackageLineItem snapshot (or entered manually).
