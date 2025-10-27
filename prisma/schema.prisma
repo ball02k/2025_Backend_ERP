@@ -9,17 +9,93 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Currency { GBP EUR USD }
-enum ProjectStatus { Planned Active OnHold Completed Cancelled }
-enum RiskStatus { Open Mitigated Closed Accepted }
-enum RiskCategory { Program Cost Quality HSE Contract Design SupplyChain Environmental Other }
-enum Severity { Low Medium High Critical }
-enum TenderStatus { Draft Open Closed Awarded Cancelled }
-enum HseType { Incident NearMiss Observation Inspection }
-enum ScopeType { SCOPE1 SCOPE2 SCOPE3 }
-enum DocStatus { Draft Submitted Approved Rejected Superseded }
-enum ContractType { NEC3 NEC4 JCT FIDIC PPC Other }
-enum WorkStage { Concept Feasibility Design Tender Construction Handover Closeout }
+enum Currency {
+  GBP
+  EUR
+  USD
+}
+
+enum ProjectStatus {
+  Planned
+  Active
+  OnHold
+  Completed
+  Cancelled
+}
+
+enum RiskStatus {
+  Open
+  Mitigated
+  Closed
+  Accepted
+}
+
+enum RiskCategory {
+  Program
+  Cost
+  Quality
+  HSE
+  Contract
+  Design
+  SupplyChain
+  Environmental
+  Other
+}
+
+enum Severity {
+  Low
+  Medium
+  High
+  Critical
+}
+
+enum TenderStatus {
+  Draft
+  Open
+  Closed
+  Awarded
+  Cancelled
+}
+
+enum HseType {
+  Incident
+  NearMiss
+  Observation
+  Inspection
+}
+
+enum ScopeType {
+  SCOPE1
+  SCOPE2
+  SCOPE3
+}
+
+enum DocStatus {
+  Draft
+  Submitted
+  Approved
+  Rejected
+  Superseded
+}
+
+enum ContractType {
+  NEC3
+  NEC4
+  JCT
+  FIDIC
+  PPC
+  Other
+}
+
+enum WorkStage {
+  Concept
+  Feasibility
+  Design
+  Tender
+  Construction
+  Handover
+  Closeout
+}
 
 // -------- Tenancy / Users --------
 model Company {
@@ -110,10 +186,10 @@ model Project {
   work_stage                WorkStage?
   project_manager           String?
   project_manager_id        Int?
-  pm_user                   User?          @relation(fields: [project_manager_id], references: [id])
+  pm_user                   User?          @relation("ProjectPM", fields: [project_manager_id], references: [id])
   quantity_surveyor         String?
   qs_user_id                Int?
-  qs_user                   User?          @relation(fields: [qs_user_id], references:[id])
+  qs_user                   User?          @relation("ProjectQS", fields: [qs_user_id], references:[id])
   location                  String?
   lat                       Float?
   lng                       Float?
@@ -541,4 +617,100 @@ model AIAlert {
   severity          String?
   resolved          Boolean  @default(false)
   created_at        DateTime @default(now())
+}
+
+model Document {
+  id          BigInt                  @id @default(autoincrement())
+  tenantId    String
+  fileName    String
+  storagePath String
+  mimeType    String?
+  metadata    Json?
+  createdAt   DateTime                @default(now())
+  createdBy   String?
+
+  contractLinks ContractDocumentLink[]
+
+  @@index([tenantId])
+}
+
+model Package {
+  id          Int        @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  project     Project    @relation(fields: [projectId], references: [id])
+  name        String
+  description String?
+  status      String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  contracts   Contract[]
+
+  @@index([tenantId, projectId])
+}
+
+model Contract {
+  id           Int                    @id @default(autoincrement())
+  tenantId     String
+  projectId    Int
+  project      Project                @relation(fields: [projectId], references: [id])
+  packageId    Int
+  package      Package                @relation(fields: [packageId], references: [id])
+  supplierId   Int
+  supplier     Supplier               @relation(fields: [supplierId], references: [id])
+  reference    String
+  title        String
+  status       String
+  value        Decimal                @db.Decimal(18, 2)
+  startDate    DateTime?
+  endDate      DateTime?
+  contractType String
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  createdBy    String
+  updatedBy    String
+  issuedAt     DateTime?
+  issuedBy     String?
+  signedAt     DateTime?
+  signedBy     String?
+  packageLocked Boolean               @default(false)
+
+  lineItems   ContractLineItem[]
+  documents   ContractDocumentLink[]
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, packageId])
+  @@index([tenantId, supplierId])
+}
+
+model ContractLineItem {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  contractId  Int
+  contract    Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Decimal?  @db.Decimal(18, 3)
+  rate        Decimal?  @db.Decimal(18, 2)
+  total       Decimal?  @db.Decimal(18, 2)
+  sortOrder   Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([tenantId, contractId])
+}
+
+model ContractDocumentLink {
+  id         Int       @id @default(autoincrement())
+  tenantId   String
+  contractId Int
+  contract   Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  documentId BigInt
+  document   Document  @relation(fields: [documentId], references: [id])
+  documentType String?
+  metadata   Json?
+  createdAt  DateTime  @default(now())
+
+  @@index([tenantId, contractId])
+  @@index([tenantId, documentId])
 }

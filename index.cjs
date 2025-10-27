@@ -1,9 +1,10 @@
 const express = require("express");
-const { PrismaClient } = require("@prisma/client");
 const cors = require("cors");
 const multer = require("multer");
 const fs = require("fs");
 const csv = require("csv-parser");
+const prisma = require("./lib/prisma.cjs");
+const contractsRouter = require("./routes/contracts.cjs");
 
 /*
  * Construction ERP backend
@@ -18,7 +19,6 @@ const csv = require("csv-parser");
  */
 
 const app = express();
-const prisma = new PrismaClient();
 const upload = multer({ dest: "uploads/" });
 
 // Allow the Vite dev server on port 5174 to call this API【904191108398894†L11-L15】.
@@ -28,6 +28,7 @@ app.use(cors({
   allowedHeaders: ["Content-Type"]
 }));
 app.use(express.json());
+app.use("/contracts", contractsRouter);
 
 // Mapping of Prisma model keys to API route names.  Adding a model
 // here automatically wires up generic CRUD endpoints for it.  The
