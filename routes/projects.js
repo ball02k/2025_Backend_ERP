@@ -379,10 +379,29 @@ module.exports = (prisma) => {
           awardSupplier: { select: { id: true, name: true } },
           costCode: { select: { id: true, code: true, description: true } },
           _count: { select: { budgetItems: true, submissions: true, invites: true } },
+          budgetItems: {
+            include: { budgetLine: true },
+          },
         },
       });
 
-      return res.json({ data: packages });
+      // Calculate budgetTotal for each package from budgetItems
+      const packagesWithBudget = packages.map((pkg) => {
+        const budgetTotal = Array.isArray(pkg.budgetItems)
+          ? pkg.budgetItems.reduce((sum, item) => {
+              const line = item?.budgetLine;
+              if (!line) return sum;
+              const total = line.total != null ? Number(line.total) : Number(line.amount || 0);
+              return sum + total;
+            }, 0)
+          : 0;
+
+        // Remove budgetItems from response to keep it clean
+        const { budgetItems, ...rest } = pkg;
+        return { ...rest, budgetTotal };
+      });
+
+      return res.json({ data: packagesWithBudget });
     } catch (err) {
       console.error('GET /projects/:projectId/packages failed:', err);
       return res.status(500).json({ error: { code: 'INTERNAL', message: 'Failed to fetch packages' } });
