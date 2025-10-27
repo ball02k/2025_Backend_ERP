@@ -29,6 +29,9 @@ app.use(cors({
 }));
 app.use(express.json());
 
+app.use('/tenders-portal', require('./routes/tenders.portal.cjs'));
+app.use('/tenders-scoring', require('./routes/tenders.scoring.cjs'));
+
 // Mapping of Prisma model keys to API route names.  Adding a model
 // here automatically wires up generic CRUD endpoints for it.  The
 // keys correspond to the lower‑camel–cased Prisma model names (e.g.
@@ -59,7 +62,12 @@ const routeMap = {
   timelineEvent: 'timeline-events',
   healthSafetyRecord: 'health-safety-records',
   tender: 'tenders',
-  subcontractor: 'subcontractors'
+  subcontractor: 'subcontractors',
+  tenderCriteria: 'tender-criteria',
+  tenderSubmission: 'tender-submissions',
+  tenderSubmissionItem: 'tender-submission-items',
+  tenderQnA: 'tender-qna',
+  tenderScore: 'tender-scores'
 };
 
 // Generic CRUD route registration.  For every entry in routeMap we
