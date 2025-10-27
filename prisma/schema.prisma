@@ -334,6 +334,7 @@ model Supplier {
   cs_cs_expiry        DateTime?
   created_at          DateTime  @default(now())
   updated_at          DateTime  @updatedAt
+  tenderSubmissions   TenderSubmission[]
   @@index([company_id])
 }
 
@@ -498,6 +499,9 @@ model Tender {
   award_to_subcontractor_id Int?
   award_rationale String?
   subcontractors Subcontractor[]
+  criteria   TenderCriteria[]
+  submissions TenderSubmission[]
+  qna        TenderQnA[]
   @@index([project_id])
 }
 
@@ -512,6 +516,89 @@ model Subcontractor {
   bid_amount  Decimal? @db.Decimal(18,2)
   awarded     Boolean  @default(false)
   documents   Json?
+}
+
+model TenderCriteria {
+  id         Int      @id @default(autoincrement())
+  tender_id  Int
+  tender     Tender   @relation(fields: [tender_id], references: [id])
+  name       String
+  weight     Decimal  @db.Decimal(5,2)
+  type       String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  scores     TenderScore[]
+
+  @@index([tender_id])
+}
+
+model TenderSubmission {
+  id           Int       @id @default(autoincrement())
+  tender_id    Int
+  supplier_id  Int
+  tender       Tender    @relation(fields: [tender_id], references: [id])
+  supplier     Supplier  @relation(fields: [supplier_id], references: [id])
+  access_token String    @unique
+  status       String    @default("draft")
+  submitted_at DateTime?
+  form_data    Json?
+  total_price  Decimal?  @db.Decimal(18,2)
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  items        TenderSubmissionItem[]
+  scores       TenderScore[]
+  questions    TenderQnA[]
+
+  @@index([tender_id])
+  @@index([supplier_id])
+  @@unique([tender_id, supplier_id])
+}
+
+model TenderSubmissionItem {
+  id             Int      @id @default(autoincrement())
+  submission_id  Int
+  submission     TenderSubmission @relation(fields: [submission_id], references: [id], onDelete: Cascade)
+  description    String
+  quantity       Decimal? @db.Decimal(18,3)
+  unit_price     Decimal? @db.Decimal(18,2)
+  total          Decimal? @db.Decimal(18,2)
+
+  @@index([submission_id])
+}
+
+model TenderQnA {
+  id                Int      @id @default(autoincrement())
+  tender_id         Int
+  submission_id     Int?
+  tender            Tender   @relation(fields: [tender_id], references: [id])
+  submission        TenderSubmission? @relation(fields: [submission_id], references: [id])
+  question          String
+  answer            String?
+  supplierVisible   Boolean  @default(false)
+  asked_at          DateTime @default(now())
+  answered_at       DateTime?
+
+  @@index([tender_id])
+  @@index([submission_id])
+}
+
+model TenderScore {
+  id            Int      @id @default(autoincrement())
+  criteria_id   Int
+  submission_id Int
+  criteria      TenderCriteria @relation(fields: [criteria_id], references: [id])
+  submission    TenderSubmission @relation(fields: [submission_id], references: [id])
+  autoScore     Decimal? @db.Decimal(10,2)
+  manualScore   Decimal? @db.Decimal(10,2)
+  overrideReason String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@unique([criteria_id, submission_id])
+  @@index([submission_id])
+  @@index([criteria_id])
 }
 
 // -------- Teams / Audit / Alerts --------
