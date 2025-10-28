@@ -2194,19 +2194,14 @@ model RfxInvite {
 }
 
 model RfxQna {
-  id         Int      @id @default(autoincrement())
-  tenantId   String
-  rfxId      Int
-  parentId   Int?
-  content    String
-  authorRole String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  rfx     Rfx     @relation(fields: [rfxId], references: [id])
-  parent  RfxQna? @relation("RfxQnaThread", fields: [parentId], references: [id])
-  replies RfxQna[] @relation("RfxQnaThread")
-
-  @@index([tenantId, rfxId])
-  @@index([tenantId, parentId])
+  id        Int       @id @default(autoincrement())
+  tenantId  String
+  rfxId     Int
+  content   String
+  authorRole String   // 'supplier' or 'internal'
+  parentId  Int?
+  createdAt DateTime  @default(now())
+  rfx       Rfx       @relation(fields: [rfxId], references: [id])
+  parent    RfxQna?   @relation("QnaParent", fields: [parentId], references: [id])
+  children  RfxQna[]  @relation("QnaParent")
 }
