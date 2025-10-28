@@ -18,3 +18,8 @@ uploads/
 scripts/local/
 migration.sql
 !prisma/migrations/**/migration.sql
+
+# SSH keys
+ssh_key
+ssh_key.pub
+*.pem

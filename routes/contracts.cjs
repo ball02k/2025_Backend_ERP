@@ -143,7 +143,7 @@ function mapContract(contract) {
 
 const contractInclude = {
   supplier: { select: { id: true, name: true } },
-  package: { select: { id: true, code: true, name: true } },
+  package: { select: { id: true, name: true } },
   project: { select: { id: true, name: true, code: true } },
 };
 
@@ -367,10 +367,7 @@ router.post('/contracts', async (req, res) => {
 
     const created = await prisma.contract.create({
       data: contractData,
-      include: {
-        ...contractInclude,
-        package: { select: { id: true, code: true, name: true } },
-      },
+      include: contractInclude,
     });
 
     await writeAudit({

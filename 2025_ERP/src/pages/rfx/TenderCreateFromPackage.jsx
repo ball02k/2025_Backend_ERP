@@ -24,9 +24,11 @@ export default function TenderCreateFromPackage(){
     e?.preventDefault?.();
     try {
       const body = { title: form.title, issueDate: form.issueDate || undefined, dueDate: form.dueDate || undefined, scoringWeights: form.scoringWeights || {}, questions: form.questions || [] };
-      await apiPost(`/api/projects/${projectId}/packages/${packageId}/create-tender`, body);
+      const res = await apiPost(`/api/projects/${projectId}/packages/${packageId}/create-tender`, body);
+      const requestId = res?.requestId || res?.data?.id || res?.id;
       toastOk('RFx draft created');
-      nav(`/rfx`);
+      if (requestId) nav(`/rfx/${requestId}/builder`);
+      else nav(`/rfx`);
     } catch(e){ toastErr(e, 'Failed to create tender'); }
   }
 
@@ -71,4 +73,3 @@ export default function TenderCreateFromPackage(){
     </div>
   );
 }
-
