@@ -795,6 +795,7 @@ model Supplier {
   // Additive relations for tendering module
   tenderInvites         TenderSupplierInvite[]
   tenderResponses       TenderResponse[]
+  tenderSubmissions     TenderSubmission[]        @relation("TenderSubmissionSupplier")
   contracts             Contract[]
   awards                Award[]
   awardDecisions        AwardDecision[]
@@ -907,8 +908,9 @@ model Request {
   tenantId    String
   title       String
   type        String    @default("RFP")
-  status      String    @default("draft")
+  status      String    @default("draft") // "draft" | "live" | "closed" | "awarded"
   deadline    DateTime?
+  issuedAt    DateTime?
   stage       Int       @default(1)
   totalStages Int       @default(1)
   weighting   Json?
@@ -1618,6 +1620,105 @@ model TenderBid {
   @@index([tenantId, tenderId])
 }
 
+// --- Tender Portal & Scoring Models (for tenders.portal.cjs and tenders.scoring.cjs) ---
+
+/// Evaluation criteria for tender scoring (price, technical, programme, h&s, esg, past performance, risk)
+model TenderCriteria {
+  id       Int     @id @default(autoincrement())
+  tenantId String  @default("demo")
+  tenderId Int     @map("tender_id")
+  name     String
+  weight   Decimal @db.Decimal(5, 2)
+  type     String  // 'price'|'technical'|'programme'|'h&s'|'esg'|'past'|'risk'
+
+  scores TenderScore[]
+
+  @@index([tenantId, tenderId])
+  @@map("TenderCriteria")
+}
+
+/// Supplier submissions via token-based portal
+model TenderSubmission {
+  id           Int       @id @default(autoincrement())
+  tenantId     String    @default("demo")
+  tenderId     Int       @map("tender_id")
+  supplierId   Int       @map("supplier_id")
+  accessToken  String    @unique @map("access_token")
+  status       String    @default("draft") // 'draft'|'submitted'
+  formData     Json?     @map("form_data")
+  totalPrice   Decimal   @default(0) @db.Decimal(18, 2) @map("total_price")
+  submittedAt  DateTime? @map("submitted_at")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  supplier Supplier?              @relation("TenderSubmissionSupplier", fields: [supplierId], references: [id])
+  items    TenderSubmissionItem[]
+  qnas     TenderQnA[]
+  scores   TenderScore[]
+
+  @@index([tenantId, tenderId])
+  @@index([tenantId, supplierId])
+  @@index([tenantId, status])
+  @@map("TenderSubmission")
+}
+
+/// Line-level pricing items in supplier submissions
+model TenderSubmissionItem {
+  id           Int     @id @default(autoincrement())
+  tenantId     String  @default("demo")
+  submissionId Int     @map("submission_id")
+  description  String
+  quantity     Decimal @db.Decimal(18, 4)
+  unitPrice    Decimal @db.Decimal(18, 4) @map("unit_price")
+  total        Decimal @db.Decimal(18, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  submission TenderSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, submissionId])
+  @@map("TenderSubmissionItem")
+}
+
+/// Q&A between suppliers and buyers during tender process
+model TenderQnA {
+  id               Int       @id @default(autoincrement())
+  tenantId         String    @default("demo")
+  tenderId         Int       @map("tender_id")
+  submissionId     Int?      @map("submission_id")
+  question         String
+  answer           String?
+  answeredAt       DateTime? @map("answered_at")
+  supplierVisible  Boolean   @default(false) @map("supplier_visible")
+  createdAt        DateTime  @default(now())
+
+  submission TenderSubmission? @relation(fields: [submissionId], references: [id])
+
+  @@index([tenantId, tenderId])
+  @@index([tenantId, submissionId])
+  @@map("TenderQnA")
+}
+
+/// Auto and manual scores for tender evaluation
+model TenderScore {
+  id             Int      @id @default(autoincrement())
+  tenantId       String   @default("demo")
+  criteriaId     Int      @map("criteria_id")
+  submissionId   Int      @map("submission_id")
+  autoScore      Decimal? @db.Decimal(8, 2) @map("auto_score")
+  manualScore    Decimal? @db.Decimal(8, 2) @map("manual_score")
+  overrideReason String?  @map("override_reason")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  criteria   TenderCriteria   @relation(fields: [criteriaId], references: [id])
+  submission TenderSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@unique([criteriaId, submissionId])
+  @@index([tenantId, submissionId])
+  @@map("TenderScore")
+}
+
 model TenderInvite {
   id          Int       @id @default(autoincrement())
   packageId   Int
@@ -1985,4 +2086,55 @@ model ImportJob {
   project Project @relation(fields: [projectId], references: [id])
 
   @@index([tenantId, projectId])
+}
+
+model RfxSection {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  rfxId     Int
+  title     String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RfxQuestion {
+  id           Int      @id @default(autoincrement())
+  tenantId     String
+  rfxId        Int
+  sectionId    Int?
+  prompt       String
+  guidance     String?
+  responseType String   // "text" | "number" | "file" | "multi" | "single" (store as string)
+  options      String?  // JSON string for options/allowed types
+  required     Boolean  @default(true)
+  weight       Decimal? // optional, per-question weight if needed
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model RfxCriterion {
+  id        Int      @id @default(autoincrement())
+  tenantId  String
+  rfxId     Int
+  name      String
+  type      String   // "price" | "technical" | "programme" | "h&s" | "esg" | "past" | "risk"
+  weight    Decimal
+  config    String?  // JSON string (e.g., price normalisation method)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RfxInvite {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  rfxId       Int
+  supplierId  Int
+  status      String    // "draft" | "sent" | "responded" | "withdrawn"
+  token       String    // for magic-link supplier portal
+  sentAt      DateTime?
+  respondedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }

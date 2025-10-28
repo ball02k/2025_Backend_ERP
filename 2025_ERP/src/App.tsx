@@ -46,6 +46,7 @@ const PackagesPage = lazy(() => import('./pages/projects/PackagesPage.jsx'));
 const PackageDetail = lazy(() => import('./pages/projects/PackageDetail.jsx'));
 const TenderCreateFromPackage = lazy(() => import('./pages/rfx/TenderCreateFromPackage.jsx'));
 const TenderResponses = lazy(() => import('./pages/rfx/TenderResponses.jsx'));
+const TenderBuilder = lazy(() => import('./pages/rfx/TenderBuilder.jsx'));
 const PublicRFx = lazy(() => import('./pages/public/PublicRFx.jsx'));
 
 export default function App() {
@@ -77,6 +78,7 @@ export default function App() {
           {/* Delivery */}
           <Route path="/rfx" element={<RequireAuth><RfxList /></RequireAuth>} />
           <Route path="/rfx/:id" element={<RequireAuth><RfxDetail /></RequireAuth>} />
+          <Route path="/rfx/:rfxId/builder" element={<RequireAuth><TenderBuilder /></RequireAuth>} />
           <Route path="/carbon" element={<RequireAuth><CarbonList /></RequireAuth>} />
           <Route path="/approvals" element={<RequireAuth><ApprovalList /></RequireAuth>} />
           <Route path="/meetings" element={<RequireAuth><MeetingList /></RequireAuth>} />

@@ -173,6 +173,7 @@ function normalizePackageRow(pkg, projectId) {
 router.get('/projects/:projectId/packages', async (req, res, next) => {
   try {
     const projectId = Number(req.params.projectId);
+    const tenantId = req.user?.tenantId || req.tenantId || 'demo';
     let rows = [];
     try {
       rows = await prisma.package.findMany({
@@ -218,7 +219,24 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
       // Fallback minimal selection if schema migrations not applied yet
       rows = await prisma.package.findMany({ where: { projectId }, orderBy: [{ name: 'asc' }, { id: 'asc' }], select: packageSelect });
     }
-    const data = rows.map((pkg) => normalizePackageRow(pkg, projectId));
+
+    // Check for existing RFx for each package
+    const packageIds = rows.map(pkg => pkg.id);
+    const existingRfx = await prisma.request.findMany({
+      where: { tenantId, packageId: { in: packageIds } },
+      select: { id: true, packageId: true }
+    }).catch(() => []);
+    const rfxMap = new Map(existingRfx.map(r => [r.packageId, r.id]));
+
+    const data = rows.map((pkg) => {
+      const normalized = normalizePackageRow(pkg, projectId);
+      const requestId = rfxMap.get(pkg.id);
+      if (requestId) {
+        normalized.requestId = requestId;
+        normalized.hasRfx = true;
+      }
+      return normalized;
+    });
     res.json({ items: data, total: data.length });
   } catch (e) { next(e); }
 });
