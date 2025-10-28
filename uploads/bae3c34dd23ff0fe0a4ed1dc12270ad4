@@ -1,0 +1,6 @@
+project_code,project_name,description,start_date,end_date,client_id,status,location,budget
+321,Warehouse Upgrade,Refurbish internal floors,01/06/2025,01/12/2025,,Planned,Manchester,200000
+123,Office Block Refurb,Upgrade lighting and cabling,15/07/2025,30/11/2025,,In Progress,Bristol,500000
+312,Residential Complex,New build housing scheme,01/05/2025,31/03/2026,,Planned,London,1200000
+132,Fit-Out Project,Commercial interiors fit-out,10/06/2025,15/10/2025,,Planned,Leeds,300000
+231,Carbon Reduction Works,Insulation and solar install,01/08/2025,20/12/2025,,Planned,Birmingham,250000
