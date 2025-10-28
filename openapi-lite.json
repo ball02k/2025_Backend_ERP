@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "28bad68"
+    "version": "a257995"
   },
   "paths": {
     "*": {
@@ -2252,6 +2252,60 @@
                 "example": {
                   "id": 1,
                   "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/{id}/tenders": {
+      "get": {
+        "summary": "GET //api/:id/tenders",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //api/:id/tenders",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
                 }
               }
             }
