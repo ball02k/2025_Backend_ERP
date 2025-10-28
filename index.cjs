@@ -53,6 +53,7 @@ const analyticsRouter = require('./routes/analytics.cjs');
 const rfxRouter = require('./routes/rfx.cjs');
 const tendersRouter = require('./routes/tenders.cjs');
 const tendersCombinedRouter = require('./routes/tenders.combined.cjs');
+const tendersQnaRouter = require('./routes/tenders.qna.cjs');
 const rfxBuilderRouter = require('./routes/rfx.builder.cjs');
 const rfxStateRouter = require('./routes/rfx.state.cjs');
 const projectInvoicesRouter = require('./routes/project_invoices.cjs');
@@ -238,6 +239,7 @@ app.use('/api/tenders', tendersRouter(prisma, { requireAuth }));
 // Public RFx submission
 app.use('/', tendersRouter(prisma, { requireAuth }));
 app.use('/tenders-combined', tendersCombinedRouter);
+app.use('/tenders-qna', tendersQnaRouter);
 app.use('/api/projects', requireAuth, cvrRouter(prisma));
 app.use('/api/projects', requireAuth, diaryRouter(prisma));
 // Budgets CSV import preview/commit
