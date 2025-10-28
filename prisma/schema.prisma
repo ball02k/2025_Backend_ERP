@@ -194,6 +194,7 @@ model Project {
   awards         Award[]
   invoices       Invoice[]
   awardDecisions AwardDecision[]
+  rfx            Rfx[]
 
   // Back-relation for ImportJob → Project
   importJobs ImportJob[]
@@ -926,8 +927,36 @@ model Request {
   @@index([tenantId, packageId, status])
 }
 
+model Rfx {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  packageId   Int?
+  title       String
+  description String?
+  deadline    DateTime?
+  budget      Decimal?  @db.Decimal(18, 2)
+  status      String    @default("draft") // draft, live, evaluating, awarded, closed
+  reviewers   String?   // JSON string of user IDs or names
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project     Project   @relation(fields: [projectId], references: [id])
+  package     Package?  @relation(fields: [packageId], references: [id])
+  rfxSection  RfxSection[]
+  rfxQuestion RfxQuestion[]
+  rfxCriterion RfxCriterion[]
+  rfxInvite   RfxInvite[]
+  rfxResponse RfxResponse[]
+  rfxQna      RfxQna[]
+  contract    Contract? @relation("ContractRfx")
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, packageId])
+}
+
 // Additive: RFx submission payloads for XML flows (Spreadsheet import)
-model RFxSubmission {
+model RfxResponse {
   id         Int      @id @default(autoincrement())
   tenantId   String
   rfxId      Int
@@ -940,9 +969,12 @@ model RFxSubmission {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  rfx Rfx @relation(fields: [rfxId], references: [id])
+
   @@unique([tenantId, rfxId, supplierId], name: "tenantId_rfxId_supplierId")
   @@index([tenantId, rfxId])
   @@index([tenantId, supplierId])
+  @@map("RFxSubmission")
 }
 
 model RequestSection {
@@ -1495,6 +1527,7 @@ model Package {
   contracts   Contract[]
   requests    Request[]
   tenders     Tender[]
+  rfx         Rfx[]
   costCode    CostCode?      @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
   // Link to selected budget lines
   budgetItems PackageItem[]
@@ -1800,6 +1833,7 @@ model Contract {
   managedByUserId Int?
   pdfUrl          String?
   tenantId        String?
+  rfxId           Int?     @unique
   awardId         Int?    @unique
   draftCreatedAt  DateTime?
   lockedAt        DateTime?
@@ -1809,6 +1843,7 @@ model Contract {
   project        Project                 @relation(fields: [projectId], references: [id])
   package        Package?                @relation(fields: [packageId], references: [id])
   supplier       Supplier                @relation(fields: [supplierId], references: [id])
+  rfx            Rfx?                    @relation("ContractRfx", fields: [rfxId], references: [id])
   award          Award?                  @relation("ContractAward", fields: [awardId], references: [id])
   lineItems      ContractLineItem[]
   applications   ApplicationForPayment[]
@@ -2096,6 +2131,11 @@ model RfxSection {
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  rfx       Rfx         @relation(fields: [rfxId], references: [id])
+  questions RfxQuestion[]
+
+  @@index([tenantId, rfxId])
 }
 
 model RfxQuestion {
@@ -2112,6 +2152,12 @@ model RfxQuestion {
   sortOrder    Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  rfx     Rfx         @relation(fields: [rfxId], references: [id])
+  section RfxSection? @relation(fields: [sectionId], references: [id])
+
+  @@index([tenantId, rfxId])
+  @@index([tenantId, sectionId])
 }
 
 model RfxCriterion {
@@ -2124,6 +2170,10 @@ model RfxCriterion {
   config    String?  // JSON string (e.g., price normalisation method)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  rfx Rfx @relation(fields: [rfxId], references: [id])
+
+  @@index([tenantId, rfxId])
 }
 
 model RfxInvite {
@@ -2137,4 +2187,26 @@ model RfxInvite {
   respondedAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  rfx Rfx @relation(fields: [rfxId], references: [id])
+
+  @@index([tenantId, rfxId])
+}
+
+model RfxQna {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  rfxId      Int
+  parentId   Int?
+  content    String
+  authorRole String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  rfx     Rfx     @relation(fields: [rfxId], references: [id])
+  parent  RfxQna? @relation("RfxQnaThread", fields: [parentId], references: [id])
+  replies RfxQna[] @relation("RfxQnaThread")
+
+  @@index([tenantId, rfxId])
+  @@index([tenantId, parentId])
 }
