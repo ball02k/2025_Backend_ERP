@@ -3,6 +3,7 @@ const router  = express.Router();
 const { prisma } = require('../lib/prisma');
 const { requireAuth } = require('../lib/auth');
 const { getTenantId } = require('../lib/tenant');
+const { buildTenderQuestionSuggestions } = require('../services/tenderQuestionSuggestions.stub.cjs');
 
 router.use(requireAuth);
 const t = (req) => getTenantId(req);
@@ -95,17 +96,40 @@ router.post('/:tenderId/qna', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Suggest questions (stub – call external AI service)
+// Suggest questions (local heuristic stub – swap for AI later)
 router.post('/:tenderId/suggest-questions', async (req, res, next) => {
   try {
     const id = Number(req.params.tenderId);
-    // Example: call ChatGPT using package description and return an array of question objects
-    const suggestions = [
-      { prompt:'Please provide your method statement for this work.', responseType:'text', required:true },
-      { prompt:'Upload your health & safety documents.', responseType:'file', required:true },
-      { prompt:'Do you agree to our contract terms?', responseType:'single', options:'Yes,No', required:true },
-    ];
-    res.json({ suggestions });
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ message: 'Invalid tender id' });
+    }
+
+    const tender = await prisma.rfx.findFirst({
+      where: { id, tenantId: t(req) },
+      include: {
+        package: true,
+        rfxSection: {
+          include: { rfxQuestion: true },
+          orderBy: { sortOrder: 'asc' },
+        },
+      },
+    });
+
+    if (!tender) return res.status(404).json({ message: 'Not found' });
+
+    const { focus, focusAreas, categories, limit, maxSuggestions } = req.body || {};
+    const focusInput = focus ?? focusAreas ?? categories;
+    const suggestions = buildTenderQuestionSuggestions({
+      tender,
+      focus: focusInput,
+      limit: limit ?? maxSuggestions ?? undefined,
+    });
+
+    res.json({
+      tenderId: id,
+      count: suggestions.length,
+      suggestions,
+    });
   } catch (e) { next(e); }
 });
 
