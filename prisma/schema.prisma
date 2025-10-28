@@ -2194,14 +2194,31 @@ model RfxInvite {
 }
 
 model RfxQna {
-  id        Int       @id @default(autoincrement())
-  tenantId  String
-  rfxId     Int
-  content   String
-  authorRole String   // 'supplier' or 'internal'
-  parentId  Int?
-  createdAt DateTime  @default(now())
-  rfx       Rfx       @relation(fields: [rfxId], references: [id])
-  parent    RfxQna?   @relation("QnaParent", fields: [parentId], references: [id])
-  children  RfxQna[]  @relation("QnaParent")
+  id             Int       @id @default(autoincrement())
+  tenantId       String
+  rfxId          Int
+  parentId       Int?
+  visibility     String    @default("public") // "public" | "internal"
+  status         String    @default("open")   // "open" | "locked" (string, not enum)
+  authorRole     String    // "supplier" | "internal"
+  authorUserId   String?   // internal user ID (if internal)
+  authorSupplierId Int?    // supplierId (if supplier)
+  content        String
+  attachments    String?   // JSON array of docIds or files metadata
+  createdAt      DateTime  @default(now())
+  editedAt       DateTime?
+  editedBy       String?   // user id
+  rfx            Rfx       @relation(fields: [rfxId], references: [id])
+  parent         RfxQna?   @relation("QnaParent", fields: [parentId], references: [id])
+  children       RfxQna[]  @relation("QnaParent")
 }
+
+model RfxQnaRead {
+  id         Int      @id @default(autoincrement())
+  tenantId   String
+  qnaId      Int
+  userId     String?  // internal
+  supplierId Int?     // supplier
+  readAt     DateTime @default(now())
+}
+
