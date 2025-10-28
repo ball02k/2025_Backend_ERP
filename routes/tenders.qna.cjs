@@ -3,7 +3,7 @@ const router = express.Router();
 const { prisma } = require('../lib/prisma');
 const { requireAuth } = require('../lib/auth');
 const { getTenantId } = require('../lib/tenant');
-const { writeAudit } = require('./audit.writer');
+const { writeAudit } = require('./audit.writer.cjs');
 
 router.use(requireAuth);
 const t = (req) => getTenantId(req);
