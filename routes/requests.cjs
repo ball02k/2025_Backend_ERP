@@ -95,15 +95,17 @@ router.get('/', async (req, res, next) => {
       } catch (_) {}
 
       let projectByPackage = new Map();
+      let packageMap = new Map();
       try {
-        const packageIds = Array.from(new Set(rows.map((r) => r.packageId).filter((v) => Number.isFinite(Number(v)))));
+        const packageIds = Array.from(new Set(rows.map((r) => r.packageId).filter((v) => v != null && Number.isFinite(Number(v)))));
         const packages = packageIds.length
           ? await prisma.package.findMany({
               where: { id: { in: packageIds }, project: { tenantId } },
-              select: { id: true, project: { select: { id: true, name: true } } },
+              select: { id: true, name: true, projectId: true, project: { select: { id: true, name: true } } },
             })
           : [];
         projectByPackage = new Map(packages.map((p) => [p.id, p.project]));
+        packageMap = new Map(packages.map((p) => [p.id, { id: p.id, name: p.name, projectId: p.projectId }]));
       } catch (_) {}
 
       let subsByRequest = new Map();
@@ -119,9 +121,10 @@ router.get('/', async (req, res, next) => {
       items = rows.map((r) => {
         const d = bestByRequest.get(r.id);
         const supplier = d ? (supplierMap.get(d.supplierId) || { id: d.supplierId, name: null }) : null;
+        const pkg = r.packageId ? packageMap.get(r.packageId) || null : null;
         const project = r.packageId ? projectByPackage.get(r.packageId) || null : null;
         const submissionsCount = subsByRequest.get(r.id) || 0;
-        return { ...r, supplier, project, submissionsCount };
+        return { ...r, supplier, package: pkg, project, submissionsCount };
       });
     }
     res.json({ total, rows: items });

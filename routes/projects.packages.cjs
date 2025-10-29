@@ -224,17 +224,46 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
     const packageIds = rows.map(pkg => pkg.id);
     const existingRfx = await prisma.request.findMany({
       where: { tenantId, packageId: { in: packageIds } },
-      select: { id: true, packageId: true }
+      select: { id: true, packageId: true, status: true }
     }).catch(() => []);
-    const rfxMap = new Map(existingRfx.map(r => [r.packageId, r.id]));
+    const rfxMap = new Map(existingRfx.map(r => [r.packageId, { id: r.id, status: r.status }]));
 
     const data = rows.map((pkg) => {
       const normalized = normalizePackageRow(pkg, projectId);
-      const requestId = rfxMap.get(pkg.id);
-      if (requestId) {
-        normalized.requestId = requestId;
+
+      // Determine sourcing status and related info
+      let sourcingStatus = null;
+      let tenderId = null;
+      let contractId = null;
+
+      // Check for active tender (Request table)
+      const rfxInfo = rfxMap.get(pkg.id);
+      if (rfxInfo && ['draft', 'open', 'issued', 'evaluating'].includes(rfxInfo.status)) {
+        sourcingStatus = 'tender';
+        tenderId = rfxInfo.id;
+      }
+
+      // Check for contract (takes precedence if exists)
+      const primaryContract = normalized.contracts && normalized.contracts[0];
+      if (primaryContract) {
+        contractId = primaryContract.id;
+        // If there's a contract without an active tender, it's likely a direct award
+        if (!sourcingStatus) {
+          sourcingStatus = 'direct_award';
+        }
+      }
+
+      // Legacy fields for compatibility
+      if (rfxInfo) {
+        normalized.requestId = rfxInfo.id;
         normalized.hasRfx = true;
       }
+
+      // Add sourcing fields
+      normalized.sourcingStatus = sourcingStatus;
+      normalized.tenderId = tenderId;
+      normalized.contractId = contractId;
+
       return normalized;
     });
     res.json({ items: data, total: data.length });

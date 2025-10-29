@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { prisma } = require('../lib/prisma');
+const { prisma } = require('../utils/prisma.cjs');
 const { requireAuth } = require('../lib/auth');
 const { getTenantId } = require('../lib/tenant');
 const { writeAudit } = require('./audit.writer.cjs');

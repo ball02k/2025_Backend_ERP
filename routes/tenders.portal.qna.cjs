@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { prisma } = require('../lib/prisma');
+const { prisma } = require('../utils/prisma.cjs');
 
 // Assume prior middleware decoded token -> sets req.tenantId, req.rfxId, req.supplierId
 function assert(condition, status = 400, message = 'Bad request') {

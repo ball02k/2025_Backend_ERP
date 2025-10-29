@@ -429,13 +429,24 @@ module.exports = (prisma) => {
       const tenantId = req.user && req.user.tenantId;
       const projectId = Number(req.params.projectId);
       const { search = '', status, packageId, before, after, page = 1, pageSize = 25 } = req.query;
+
+      // Get all packages for this project to filter requests
+      const packages = await prisma.package.findMany({
+        where: {
+          projectId,
+          project: { tenantId }
+        },
+        select: { id: true }
+      });
+      const packageIds = packages.map(p => p.id);
+
       const where = {
-        projectId,
-        project: { tenantId },
+        tenantId,
+        ...(packageIds.length > 0 ? { packageId: { in: packageIds } } : { packageId: null }),
         ...(status ? { status: { in: String(status).split(',') } } : {}),
         ...(packageId ? { packageId: Number(packageId) } : {}),
         ...(after || before
-          ? { deadlineAt: { ...(after ? { gte: new Date(String(after)) } : {}), ...(before ? { lte: new Date(String(before)) } : {}) } }
+          ? { deadline: { ...(after ? { gte: new Date(String(after)) } : {}), ...(before ? { lte: new Date(String(before)) } : {}) } }
           : {}),
         ...(search ? { title: { contains: String(search), mode: 'insensitive' } } : {}),
       };
@@ -444,12 +455,11 @@ module.exports = (prisma) => {
       const [rows, total] = await Promise.all([
         prisma.request.findMany({
           where,
-          orderBy: [{ deadlineAt: 'asc' }, { id: 'desc' }],
+          orderBy: [{ deadline: 'asc' }, { id: 'desc' }],
           skip,
           take,
           include: {
-            package: { select: { id: true, name: true } },
-            _count: { select: { invites: true, responses: true } },
+            package: { select: { id: true, name: true, projectId: true } }
           },
         }),
         prisma.request.count({ where }),
@@ -470,8 +480,9 @@ module.exports = (prisma) => {
       // Map counts and contract info onto fields expected by FE without persisting
       const items = rows.map((t) => {
         const enriched = { ...t };
-        enriched.invitedCount = t._count?.invites ?? t.invitedCount ?? 0;
-        enriched.submissionCount = t._count?.responses ?? t.submissionCount ?? 0;
+        // Request model doesn't have invites/responses relations, so set to 0
+        enriched.invitedCount = 0;
+        enriched.submissionCount = 0;
         const con = t.packageId ? contractsByPkg.get(t.packageId) : null;
         if (con) {
           enriched.contractId = con.id;
@@ -481,6 +492,7 @@ module.exports = (prisma) => {
       });
       res.json({ items, page: Number(page), total });
     } catch (e) {
+      console.error('GET /projects/:projectId/tenders error:', e);
       res.status(500).json({ error: 'Failed to list tenders' });
     }
   });

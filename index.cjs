@@ -53,6 +53,7 @@ const analyticsRouter = require('./routes/analytics.cjs');
 const rfxRouter = require('./routes/rfx.cjs');
 const tendersRouter = require('./routes/tenders.cjs');
 const tendersCombinedRouter = require('./routes/tenders.combined.cjs');
+const tendersCreateRouter = require('./routes/tenders.create.cjs');
 const tendersQnaRouter = require('./routes/tenders.qna.cjs');
 const tendersPortalQnaRouter = require('./routes/tenders.portal.qna.cjs');
 const rfxBuilderRouter = require('./routes/rfx.builder.cjs');
@@ -241,9 +242,10 @@ app.use('/api/rfx-state', rfxStateRouter);
 app.use('/api/tenders', tendersRouter(prisma, { requireAuth }));
 // Public RFx submission
 app.use('/', tendersRouter(prisma, { requireAuth }));
-app.use('/tenders-combined', tendersCombinedRouter);
-app.use('/tenders-qna', tendersQnaRouter);
-app.use('/tenders-portal-qna', tendersPortalQnaRouter);
+app.use('/api/tenders-combined', tendersCombinedRouter);
+app.use('/api/tenders-create', tendersCreateRouter);
+app.use('/api/tenders-qna', tendersQnaRouter);
+app.use('/api/tenders-portal-qna', tendersPortalQnaRouter);
 app.use('/api/projects', requireAuth, cvrRouter(prisma));
 app.use('/api/projects', requireAuth, diaryRouter(prisma));
 // Budgets CSV import preview/commit

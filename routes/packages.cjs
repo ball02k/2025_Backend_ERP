@@ -175,14 +175,49 @@ router.get('/packages', async (req, res, next) => {
         lineItems: {
           select: { id: true, budgetLineItemId: true },
         },
+        requests: {
+          where: { tenantId },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { id: true, status: true, title: true },
+        },
       },
     });
 
     const payload = packages.map((pkg) => {
       const base = serializePackage(pkg);
+
+      // Determine sourcing status and related info
+      let sourcingStatus = null;
+      let tenderId = null;
+      let contractId = null;
+
+      // Check for active tender (Request table)
+      const latestRequest = pkg.requests && pkg.requests[0];
+      if (latestRequest && ['draft', 'open', 'issued', 'evaluating'].includes(latestRequest.status)) {
+        sourcingStatus = 'tender';
+        tenderId = latestRequest.id;
+      }
+
+      // Check for contract (takes precedence if exists)
+      const primaryContract = pkg.contracts && pkg.contracts[0];
+      if (primaryContract) {
+        contractId = primaryContract.id;
+        // If there's a contract without an active tender, it's likely a direct award
+        if (!sourcingStatus) {
+          sourcingStatus = 'direct_award';
+        }
+      }
+
+      // Future: could check for 'internal_resource' flag on package
+      // if (pkg.isInternal) sourcingStatus = 'internal_resource';
+
       return {
         ...base,
         awardSupplier: pkg.awardSupplier ? { id: pkg.awardSupplier.id, name: pkg.awardSupplier.name } : null,
+        sourcingStatus,
+        tenderId,
+        contractId,
       };
     });
 

@@ -1,6 +1,6 @@
 const express = require('express');
 const router  = express.Router();
-const { prisma } = require('../lib/prisma');
+const { prisma } = require('../utils/prisma.cjs');
 const { requireAuth } = require('../lib/auth');
 const { getTenantId } = require('../lib/tenant');
 const { buildTenderQuestionSuggestions } = require('../services/tenderQuestionSuggestions.stub.cjs');
@@ -9,22 +9,28 @@ router.use(requireAuth);
 const t = (req) => getTenantId(req);
 
 // GET full tender (settings + questions + invites + criteria + responses + qna)
+// NOTE: Using Request table (existing tender system) not Rfx table
 router.get('/:tenderId/full', async (req, res, next) => {
   try {
     const id = Number(req.params.tenderId);
-    const data = await prisma.rfx.findFirst({
+    const data = await prisma.request.findFirst({
       where: { id, tenantId: t(req) },
       include: {
         package: true,
-        rfxSection: { include: { rfxQuestion: true }, orderBy: { sortOrder: 'asc' } },
-        rfxCriterion: { orderBy: { id: 'asc' } },
-        rfxInvite: true,
-        rfxResponse: true,
-        rfxQna: { orderBy: { createdAt: 'asc' } },
       },
     });
     if (!data) return res.status(404).json({ message: 'Not found' });
-    res.json(data);
+
+    // Transform to expected format
+    const result = {
+      ...data,
+      deadline: data.deadline || data.issueDate,
+      budget: data.budget || null,
+      reviewers: data.reviewers || null,
+      description: data.description || data.notes || null,
+    };
+
+    res.json(result);
   } catch (e) { next(e); }
 });
 
@@ -32,42 +38,43 @@ router.get('/:tenderId/full', async (req, res, next) => {
 router.patch('/:tenderId', async (req, res, next) => {
   try {
     const id = Number(req.params.tenderId);
-    const tender = await prisma.rfx.findFirst({ where: { id, tenantId: t(req) }});
+    const tender = await prisma.request.findFirst({ where: { id, tenantId: t(req) }});
     if (!tender) return res.status(404).json({ message: 'Not found' });
-    if (tender.status !== 'draft') return res.status(409).json({ message: 'Cannot edit – not draft' });
+    if (tender.status !== 'draft' && tender.status !== 'open') return res.status(409).json({ message: 'Cannot edit – not draft/open' });
     const { title, description, deadline, budget, reviewers } = req.body;
-    const updated = await prisma.rfx.update({
+
+    const updateData = {};
+    if (title !== undefined) updateData.title = title;
+    if (description !== undefined) updateData.description = description;
+    if (deadline !== undefined) updateData.deadline = deadline ? new Date(deadline) : null;
+
+    const updated = await prisma.request.update({
       where: { id },
-      data: {
-        title, description,
-        deadline: deadline ? new Date(deadline) : null,
-        budget: budget ? Number(budget) : null,
-        reviewers: reviewers ? JSON.stringify(reviewers) : null,
-      },
+      data: updateData,
     });
     res.json(updated);
   } catch (e) { next(e); }
 });
 
-// Publish tender (draft -> live)
+// Publish tender (draft -> live/issued)
 router.post('/:tenderId/publish', async (req, res, next) => {
   try {
     const id = Number(req.params.tenderId);
-    const tender = await prisma.rfx.findFirst({ where: { id, tenantId: t(req) }});
-    if (!tender || tender.status !== 'draft') return res.status(409).json({ message: 'Not draft' });
-    const updated = await prisma.rfx.update({ where: { id }, data: { status: 'live' }});
+    const tender = await prisma.request.findFirst({ where: { id, tenantId: t(req) }});
+    if (!tender || (tender.status !== 'draft' && tender.status !== 'open')) return res.status(409).json({ message: 'Not draft/open' });
+    const updated = await prisma.request.update({ where: { id }, data: { status: 'issued', issuedAt: new Date() }});
     res.json(updated);
   } catch (e) { next(e); }
 });
 
-// Extend deadline (live only)
+// Extend deadline (issued/live only)
 router.post('/:tenderId/extend', async (req, res, next) => {
   try {
     const id = Number(req.params.tenderId);
     const { deadline } = req.body;
-    const tender = await prisma.rfx.findFirst({ where: { id, tenantId: t(req) }});
-    if (!tender || tender.status !== 'live') return res.status(409).json({ message: 'Not live' });
-    const updated = await prisma.rfx.update({
+    const tender = await prisma.request.findFirst({ where: { id, tenantId: t(req) }});
+    if (!tender || tender.status !== 'issued') return res.status(409).json({ message: 'Not issued' });
+    const updated = await prisma.request.update({
       where: { id },
       data: { deadline: new Date(deadline) },
     });
