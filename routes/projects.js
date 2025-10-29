@@ -413,7 +413,13 @@ module.exports = (prisma) => {
     const tenantId = req.user && req.user.tenantId;
     const projectId = Number(req.params.projectId);
     const { packageId, title, description, status } = req.body || {};
-    const tender = await prisma.tender.create({ data: { tenantId, projectId, packageId: packageId ? Number(packageId) : null, title, description: description || null, status: status || 'draft' } });
+
+    // Validate required field
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Title is required' });
+    }
+
+    const tender = await prisma.request.create({ data: { tenantId, projectId, packageId: packageId ? Number(packageId) : null, title: title.trim(), description: description || null, status: status || 'draft' } });
     res.status(201).json(tender);
   });
 
@@ -436,7 +442,7 @@ module.exports = (prisma) => {
       const take = Number(pageSize);
       const skip = (Number(page) - 1) * take;
       const [rows, total] = await Promise.all([
-        prisma.tender.findMany({
+        prisma.request.findMany({
           where,
           orderBy: [{ deadlineAt: 'asc' }, { id: 'desc' }],
           skip,
@@ -446,7 +452,7 @@ module.exports = (prisma) => {
             _count: { select: { invites: true, responses: true } },
           },
         }),
-        prisma.tender.count({ where }),
+        prisma.request.count({ where }),
       ]);
       // Optionally enrich with contract + awarded supplier by looking up contracts per package
       const pkgIds = Array.from(new Set(rows.map(r => r.packageId).filter(Boolean)));
@@ -483,7 +489,7 @@ module.exports = (prisma) => {
   router.get('/tenders/:tenderId', requireProjectMember, async (req, res) => {
     const tenantId = req.user && req.user.tenantId;
     const tenderId = Number(req.params.tenderId);
-    const tender = await prisma.tender.findFirst({ where: { id: tenderId, tenantId }, include: { bids: true, package: true, project: true } });
+    const tender = await prisma.request.findFirst({ where: { id: tenderId, tenantId }, include: { bids: true, package: true, project: true } });
     if (!tender) return res.status(404).json({ error: 'Tender not found' });
     res.json(tender);
   });
@@ -493,10 +499,10 @@ module.exports = (prisma) => {
     try {
       const tenantId = req.user && req.user.tenantId;
       const tenderId = Number(req.params.tenderId);
-      const existing = await prisma.tender.findFirst({ where: { id: tenderId, tenantId } });
+      const existing = await prisma.request.findFirst({ where: { id: tenderId, tenantId } });
       if (!existing) return res.status(404).json({ error: 'Tender not found' });
       const { title, description, status, openDate, closeDate } = req.body || {};
-      const updated = await prisma.tender.update({
+      const updated = await prisma.request.update({
         where: { id: tenderId },
         data: {
           ...(title != null ? { title: String(title) } : {}),
@@ -561,7 +567,7 @@ module.exports = (prisma) => {
     const { supplierId, price, notes } = req.body || {};
     try {
       // ensure tender belongs to project + tenant
-      const t = await prisma.tender.findFirst({ where: { id: tenderId, tenantId, projectId }, select: { id: true } });
+      const t = await prisma.request.findFirst({ where: { id: tenderId, tenantId, projectId }, select: { id: true } });
       if (!t) return res.status(404).json({ error: 'Tender not found' });
       const bid = await prisma.tenderBid.create({ data: { tenantId, tenderId, supplierId: Number(supplierId), price: price ?? 0, notes: notes || null } });
       res.status(201).json(bid);
