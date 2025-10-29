@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "a257995"
+    "version": "9253437"
   },
   "paths": {
     "*": {
@@ -5195,9 +5195,9 @@
         ]
       }
     },
-    "//tenders-combined/{tenderId}/full": {
+    "//api/tenders-combined/{tenderId}/full": {
       "get": {
-        "summary": "GET //tenders-combined/:tenderId/full",
+        "summary": "GET //api/tenders-combined/:tenderId/full",
         "parameters": [
           {
             "name": "tenderId",
@@ -5223,9 +5223,9 @@
         }
       }
     },
-    "//tenders-combined/{tenderId}": {
+    "//api/tenders-combined/{tenderId}": {
       "patch": {
-        "summary": "PATCH //tenders-combined/:tenderId",
+        "summary": "PATCH //api/tenders-combined/:tenderId",
         "parameters": [
           {
             "name": "tenderId",
@@ -5251,9 +5251,9 @@
         }
       }
     },
-    "//tenders-combined/{tenderId}/publish": {
+    "//api/tenders-combined/{tenderId}/publish": {
       "post": {
-        "summary": "POST //tenders-combined/:tenderId/publish",
+        "summary": "POST //api/tenders-combined/:tenderId/publish",
         "parameters": [
           {
             "name": "tenderId",
@@ -5279,9 +5279,9 @@
         }
       }
     },
-    "//tenders-combined/{tenderId}/extend": {
+    "//api/tenders-combined/{tenderId}/extend": {
       "post": {
-        "summary": "POST //tenders-combined/:tenderId/extend",
+        "summary": "POST //api/tenders-combined/:tenderId/extend",
         "parameters": [
           {
             "name": "tenderId",
@@ -5307,9 +5307,9 @@
         }
       }
     },
-    "//tenders-combined/{tenderId}/qna": {
+    "//api/tenders-combined/{tenderId}/qna": {
       "post": {
-        "summary": "POST //tenders-combined/:tenderId/qna",
+        "summary": "POST //api/tenders-combined/:tenderId/qna",
         "parameters": [
           {
             "name": "tenderId",
@@ -5335,9 +5335,9 @@
         }
       }
     },
-    "//tenders-combined/{tenderId}/suggest-questions": {
+    "//api/tenders-combined/{tenderId}/suggest-questions": {
       "post": {
-        "summary": "POST //tenders-combined/:tenderId/suggest-questions",
+        "summary": "POST //api/tenders-combined/:tenderId/suggest-questions",
         "parameters": [
           {
             "name": "tenderId",
@@ -5363,9 +5363,37 @@
         }
       }
     },
-    "//tenders-qna/{rfxId}/qna": {
+    "//api/tenders-create/{projectId}/from-package": {
+      "post": {
+        "summary": "POST //api/tenders-create/:projectId/from-package",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/tenders-qna/{rfxId}/qna": {
       "get": {
-        "summary": "GET //tenders-qna/:rfxId/qna",
+        "summary": "GET //api/tenders-qna/:rfxId/qna",
         "parameters": [
           {
             "name": "rfxId",
@@ -5391,7 +5419,7 @@
         }
       },
       "post": {
-        "summary": "POST //tenders-qna/:rfxId/qna",
+        "summary": "POST //api/tenders-qna/:rfxId/qna",
         "parameters": [
           {
             "name": "rfxId",
@@ -5417,9 +5445,9 @@
         }
       }
     },
-    "//tenders-qna/{rfxId}/qna/{id}": {
+    "//api/tenders-qna/{rfxId}/qna/{id}": {
       "patch": {
-        "summary": "PATCH //tenders-qna/:rfxId/qna/:id",
+        "summary": "PATCH //api/tenders-qna/:rfxId/qna/:id",
         "parameters": [
           {
             "name": "rfxId",
@@ -5453,9 +5481,9 @@
         }
       }
     },
-    "//tenders-qna/{rfxId}/qna/{id}/publish": {
+    "//api/tenders-qna/{rfxId}/qna/{id}/publish": {
       "post": {
-        "summary": "POST //tenders-qna/:rfxId/qna/:id/publish",
+        "summary": "POST //api/tenders-qna/:rfxId/qna/:id/publish",
         "parameters": [
           {
             "name": "rfxId",
@@ -5489,9 +5517,9 @@
         }
       }
     },
-    "//tenders-qna/{rfxId}/qna/{id}/lock": {
+    "//api/tenders-qna/{rfxId}/qna/{id}/lock": {
       "post": {
-        "summary": "POST //tenders-qna/:rfxId/qna/:id/lock",
+        "summary": "POST //api/tenders-qna/:rfxId/qna/:id/lock",
         "parameters": [
           {
             "name": "rfxId",
@@ -5525,9 +5553,9 @@
         }
       }
     },
-    "//tenders-qna/{rfxId}/qna/close-all": {
+    "//api/tenders-qna/{rfxId}/qna/close-all": {
       "post": {
-        "summary": "POST //tenders-qna/:rfxId/qna/close-all",
+        "summary": "POST //api/tenders-qna/:rfxId/qna/close-all",
         "parameters": [
           {
             "name": "rfxId",
@@ -5553,9 +5581,9 @@
         }
       }
     },
-    "//tenders-portal-qna/{token}/qna": {
+    "//api/tenders-portal-qna/{token}/qna": {
       "get": {
-        "summary": "GET //tenders-portal-qna/:token/qna",
+        "summary": "GET //api/tenders-portal-qna/:token/qna",
         "parameters": [
           {
             "name": "token",
@@ -5581,7 +5609,7 @@
         }
       },
       "post": {
-        "summary": "POST //tenders-portal-qna/:token/qna",
+        "summary": "POST //api/tenders-portal-qna/:token/qna",
         "parameters": [
           {
             "name": "token",
