@@ -2,11 +2,247 @@ const express = require('express');
 const crypto = require('crypto');
 
 const { requirePerm } = require('../middleware/checkPermission.cjs');
+const { isPackageSourced } = require('../lib/sourcing.cjs');
 
 module.exports = (prisma, { requireAuth }) => {
   const router = express.Router();
 
   function getTenantId(req) { return req.user && req.user.tenantId; }
+
+  function getTraceId(req) {
+    return (
+      req._rid ||
+      req.headers['x-request-id'] ||
+      req.headers['x-trace-id'] ||
+      req.headers['traceparent'] ||
+      req.headers['x-correlation-id'] ||
+      null
+    );
+  }
+
+  function parseLimit(raw) {
+    const numeric = Number(raw);
+    if (!Number.isFinite(numeric)) return 50;
+    if (numeric <= 0) return 50;
+    return Math.min(200, Math.max(1, Math.floor(numeric)));
+  }
+
+  function parseCursor(raw) {
+    const numeric = Number(raw);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    return Math.floor(numeric);
+  }
+
+  function buildCursorOptions(cursor) {
+    if (!cursor) return {};
+    return { skip: 1, cursor: { id: cursor } };
+  }
+
+  function isUnknownFieldError(err) {
+    const message = String(err?.message || '').toLowerCase();
+    if (!message) return false;
+    if (message.includes('unknown') && (message.includes('field') || message.includes('argument'))) {
+      return true;
+    }
+    return message.includes('relation') && message.includes('not found');
+  }
+
+  async function loadPackageForTenant(trx, tenantId, packageId) {
+    try {
+      const pkg = await trx.package.findFirst({
+        where: { id: packageId, project: { tenantId } },
+        select: { id: true, projectId: true, name: true },
+      });
+      if (pkg) return pkg;
+    } catch (err) {
+      if (!isUnknownFieldError(err)) throw err;
+    }
+
+    try {
+      const pkg = await trx.package.findFirst({
+        where: { id: packageId },
+        select: {
+          id: true,
+          projectId: true,
+          name: true,
+          project: { select: { tenantId: true } },
+        },
+      });
+      if (!pkg) return null;
+      if (pkg.project?.tenantId != null && String(pkg.project.tenantId) !== String(tenantId)) {
+        return null;
+      }
+      return {
+        id: pkg.id,
+        projectId: pkg.projectId,
+        name: pkg.name,
+      };
+    } catch (err) {
+      if (isUnknownFieldError(err)) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  async function listTendersPage(tenantId, { take, cursor }) {
+    const includeAttempts = [
+      {
+        package: {
+          select: {
+            id: true,
+            name: true,
+            awardSupplier: { select: { id: true, name: true } },
+            awardedToSupplier: { select: { id: true, name: true } },
+          },
+        },
+      },
+      {
+        package: {
+          select: {
+            id: true,
+            name: true,
+            awardSupplier: { select: { id: true, name: true } },
+          },
+        },
+      },
+      {
+        package: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    ];
+
+    for (const include of includeAttempts) {
+      try {
+        return await prisma.tender.findMany({
+          where: { tenantId },
+          orderBy: { createdAt: 'desc' },
+          take,
+          ...buildCursorOptions(cursor),
+          include,
+        });
+      } catch (err) {
+        if (!isUnknownFieldError(err)) throw err;
+      }
+    }
+
+    return prisma.tender.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      take,
+      ...buildCursorOptions(cursor),
+    });
+  }
+
+  function serializeTender(row) {
+    if (!row) return null;
+    const pkg = row.package || null;
+    const awardedSupplier = pkg?.awardedToSupplier || pkg?.awardSupplier || null;
+    return {
+      id: row.id,
+      status: row.status,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      package: pkg
+        ? {
+            id: pkg.id,
+            name: pkg.name || null,
+          }
+        : null,
+      awardedTo: awardedSupplier
+        ? {
+            id: awardedSupplier.id,
+            name: awardedSupplier.name || null,
+          }
+        : null,
+    };
+  }
+
+  // POST /api/tenders/create — create draft tender when package unsourced.
+  router.post('/create', requireAuth, async (req, res) => {
+    const tenantId = getTenantId(req);
+    if (!tenantId) return res.status(401).json({ error: 'UNAUTHENTICATED' });
+
+    const packageId = Number(req.body?.packageId);
+    if (!Number.isFinite(packageId)) return res.status(400).json({ error: 'INVALID_PACKAGE_ID' });
+
+    const traceId = getTraceId(req);
+
+    try {
+      const alreadySourced = await isPackageSourced(prisma, tenantId, packageId);
+      if (alreadySourced) {
+        console.warn(`[REQ ${traceId}] tender.create package already sourced`, { tenantId, packageId });
+        return res.status(409).json({ error: 'PACKAGE_ALREADY_HAS_SOURCING' });
+      }
+
+      const created = await prisma.$transaction(async (trx) => {
+        const pkg = await loadPackageForTenant(trx, tenantId, packageId);
+        if (!pkg) {
+          const err = new Error('Package not found');
+          err.status = 404;
+          throw err;
+        }
+
+        const label = pkg.name ? String(pkg.name) : `Package ${pkg.id}`;
+        return trx.tender.create({
+          data: {
+            tenantId,
+            projectId: pkg.projectId,
+            packageId: pkg.id,
+            status: 'draft',
+            title: `Tender - ${label}`,
+          },
+          select: { id: true },
+        });
+      });
+
+      console.info(`[REQ ${traceId}] tender.create success`, { tenantId, packageId, tenderId: created.id });
+      return res.status(201).json({ id: created.id });
+    } catch (err) {
+      if (err?.status === 404) {
+        console.warn(`[REQ ${traceId}] tender.create package not found`, { tenantId, packageId });
+        return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
+      }
+      console.error(`[REQ ${traceId}] tender.create unexpected error`, err);
+      return res.status(500).json({ error: 'FAILED_TO_CREATE_TENDER' });
+    }
+  });
+
+  // GET /api/tenders/list — paginated tenders overview for list view.
+  router.get('/list', requireAuth, async (req, res) => {
+    const tenantId = getTenantId(req);
+    if (!tenantId) return res.status(401).json({ error: 'UNAUTHENTICATED' });
+
+    const limit = parseLimit(req.query?.limit);
+    const cursor = parseCursor(req.query?.cursor);
+    const take = limit + 1;
+    const traceId = getTraceId(req);
+
+    try {
+      const rows = await listTendersPage(tenantId, { take, cursor });
+      const hasMore = rows.length > limit;
+      const sliced = hasMore ? rows.slice(0, limit) : rows;
+      const items = sliced.map(serializeTender).filter(Boolean);
+      const nextCursor = hasMore ? String(sliced[sliced.length - 1].id) : null;
+
+      console.info(`[REQ ${traceId}] tenders.list`, {
+        tenantId,
+        limit,
+        cursor,
+        returned: items.length,
+        nextCursor,
+      });
+
+      return res.json({ items, nextCursor });
+    } catch (err) {
+      console.error(`[REQ ${traceId}] tenders.list error`, err);
+      return res.status(500).json({ error: 'FAILED_TO_LIST_TENDERS' });
+    }
+  });
 
   // GET /api/tenders?projectId=&packageId=&status=
   // List tenders for current tenant with optional filters. Useful when project-scoped route is unavailable.

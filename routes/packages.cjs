@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { prisma, Prisma, toDecimal } = require('../lib/prisma.js');
 const { writeAudit } = require('../lib/audit.cjs');
+const { isPackageSourced } = require('../lib/sourcing.cjs');
 
 function getTenantId(req) {
   return req.user?.tenantId || req.tenantId || 'demo';
@@ -132,6 +133,209 @@ function serializePackage(pkg) {
     budgetLines,
   };
 }
+
+const ACTIVE_CONTRACT_STATUSES = ['draft', 'active', 'executed', 'live'];
+const INACTIVE_STATUSES = ['cancelled', 'canceled', 'closed', 'terminated', 'withdrawn', 'void', 'archived'];
+
+function parseLimit(raw, { fallback = 100, max = 200 } = {}) {
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return fallback;
+  if (numeric <= 0) return fallback;
+  return Math.min(max, Math.max(1, Math.floor(numeric)));
+}
+
+function parseCursor(raw) {
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return Math.floor(numeric);
+}
+
+function buildCursorOptions(cursor) {
+  if (!cursor) return {};
+  return { skip: 1, cursor: { id: cursor } };
+}
+
+function isUnknownFieldError(err) {
+  const message = String(err?.message || '').toLowerCase();
+  if (!message) return false;
+  if (message.includes('unknown') && (message.includes('field') || message.includes('argument'))) {
+    return true;
+  }
+  return message.includes('relation') && message.includes('not found');
+}
+
+async function findPackageForTenant(packageId, tenantId) {
+  try {
+    const pkg = await prisma.package.findFirst({
+      where: { id: packageId, project: { tenantId } },
+      select: { id: true, projectId: true },
+    });
+    if (pkg) return pkg;
+  } catch (err) {
+    if (!isUnknownFieldError(err)) throw err;
+  }
+
+  try {
+    const pkg = await prisma.package.findFirst({
+      where: { id: packageId },
+      select: {
+        id: true,
+        projectId: true,
+        project: { select: { tenantId: true } },
+      },
+    });
+    if (!pkg) return null;
+    if (pkg.project?.tenantId != null && String(pkg.project.tenantId) !== String(tenantId)) {
+      return null;
+    }
+    return { id: pkg.id, projectId: pkg.projectId };
+  } catch (err) {
+    if (isUnknownFieldError(err)) return null;
+    throw err;
+  }
+}
+
+async function fetchUnsourcedWithRelations({ tenantId, take, cursor }) {
+  const baseWhere = {
+    project: { tenantId },
+    tenders: { none: { tenantId, status: { not: 'cancelled' } } },
+    contracts: { none: { tenantId, status: { in: ACTIVE_CONTRACT_STATUSES } } },
+  };
+
+  const attempts = [
+    {
+      where: {
+        ...baseWhere,
+        directAwards: { none: { tenantId, status: { notIn: INACTIVE_STATUSES } } },
+        internalResourceAssignments: { none: { tenantId, status: { notIn: INACTIVE_STATUSES } } },
+      },
+    },
+    {
+      where: {
+        ...baseWhere,
+        directAwards: { none: { tenantId, status: { notIn: INACTIVE_STATUSES } } },
+      },
+    },
+    { where: baseWhere },
+  ];
+
+  const select = { id: true, name: true, updatedAt: true };
+
+  for (const attempt of attempts) {
+    try {
+      return await prisma.package.findMany({
+        where: attempt.where,
+        orderBy: { updatedAt: 'desc' },
+        take,
+        ...buildCursorOptions(cursor),
+        select,
+      });
+    } catch (err) {
+      if (!isUnknownFieldError(err)) throw err;
+    }
+  }
+
+  return null;
+}
+
+function mapUnsourced(pkg) {
+  if (!pkg) return null;
+  const label = pkg.name || `Package ${pkg.id}`;
+  return {
+    id: pkg.id,
+    name: pkg.name || null,
+    label,
+    updatedAt: pkg.updatedAt,
+  };
+}
+
+// GET /api/packages/:id/check-sourcing — read-only guard for package actions.
+router.get('/packages/:id/check-sourcing', async (req, res) => {
+  const tenantId = getTenantId(req);
+  if (!tenantId) return res.status(401).json({ error: 'UNAUTHENTICATED' });
+
+  const packageId = Number(req.params.id);
+  if (!Number.isFinite(packageId)) return res.status(400).json({ error: 'INVALID_PACKAGE_ID' });
+
+  const traceId = req._rid || req.headers['x-request-id'] || null;
+
+  try {
+    const pkg = await findPackageForTenant(packageId, tenantId);
+    if (!pkg) {
+      console.warn(`[REQ ${traceId}] packages.check-sourcing not found`, { tenantId, packageId });
+      return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
+    }
+
+    const sourced = await isPackageSourced(prisma, tenantId, packageId);
+    console.info(`[REQ ${traceId}] packages.check-sourcing`, { tenantId, packageId, sourced });
+    return res.json({ sourced });
+  } catch (err) {
+    console.error(`[REQ ${traceId}] packages.check-sourcing error`, err);
+    return res.status(500).json({ error: 'FAILED_TO_CHECK_SOURCING' });
+  }
+});
+
+// GET /api/packages/unsourced — list packages without active sourcing.
+router.get('/packages/unsourced', async (req, res) => {
+  const tenantId = getTenantId(req);
+  if (!tenantId) return res.status(401).json({ error: 'UNAUTHENTICATED' });
+
+  const limit = parseLimit(req.query?.limit, { fallback: 100, max: 200 });
+  const cursor = parseCursor(req.query?.cursor);
+  const take = limit + 1;
+  const traceId = req._rid || req.headers['x-request-id'] || null;
+
+  let rows = null;
+  let usedFallback = false;
+
+  try {
+    rows = await fetchUnsourcedWithRelations({ tenantId, take, cursor });
+  } catch (err) {
+    console.warn(`[REQ ${traceId}] packages.unsourced relation filter error`, err);
+  }
+
+  if (!rows) {
+    usedFallback = true;
+    const batch = await prisma.package.findMany({
+      where: { project: { tenantId } },
+      orderBy: { updatedAt: 'desc' },
+      take: Math.min(500, take),
+      ...buildCursorOptions(cursor),
+      select: { id: true, name: true, updatedAt: true },
+    });
+
+    const filtered = [];
+    for (const pkg of batch) {
+      // Sequential checks are acceptable for the capped fallback batch.
+      // eslint-disable-next-line no-await-in-loop
+      const sourced = await isPackageSourced(prisma, tenantId, pkg.id);
+      if (!sourced) {
+        filtered.push(pkg);
+      }
+      if (filtered.length >= take) {
+        break;
+      }
+    }
+    rows = filtered;
+  }
+
+  rows = rows || [];
+  const hasMore = rows.length > limit;
+  const sliced = hasMore ? rows.slice(0, limit) : rows;
+  const items = sliced.map(mapUnsourced).filter(Boolean);
+  const nextCursor = hasMore ? String(sliced[sliced.length - 1].id) : null;
+
+  console.info(`[REQ ${traceId}] packages.unsourced`, {
+    tenantId,
+    limit,
+    cursor,
+    returned: items.length,
+    nextCursor,
+    usedFallback,
+  });
+
+  res.json({ items, nextCursor });
+});
 
 router.get('/packages', async (req, res, next) => {
   try {

@@ -9,6 +9,22 @@ datasource db {
   shadowDatabaseUrl = env("PRISMA_MIGRATE_SHADOW_DATABASE_URL")
 }
 
+// ==========================================
+// FLEXIBLE PRICING SYSTEM - ENUMS
+// ==========================================
+
+enum PricingMode {
+  LUMP_SUM    // Single price, no breakdown
+  MEASURED    // Full BOQ with unit rates required
+  HYBRID      // Package total + optional breakdown (recommended)
+}
+
+enum ResponsePricingType {
+  LUMP_SUM_ONLY         // Supplier provided package total only
+  ITEMIZED_ONLY         // Supplier provided full breakdown only
+  HYBRID_WITH_BREAKDOWN // Supplier provided both total and breakdown
+}
+
 // Supplier Onboarding
 model OnboardingProject {
   id        Int      @id @default(autoincrement())
@@ -705,7 +721,6 @@ model User {
   updatedAt   DateTime            @updatedAt
   memberships ProjectMembership[]
   userRoles   UserRole[]
-  auditLogs   AuditLog[]
 
   // Back-relations to projects for role assignments
   projectsManaged        Project[] @relation("Project_ProjectManager")
@@ -714,6 +729,9 @@ model User {
   // Back-relations for Package relations
   ownedPackages  Package[] @relation("PackageOwnerUser")
   buyingPackages Package[] @relation("PackageBuyerUser")
+
+  // Back-relation for TenderInvitation
+  sentTenderInvitations TenderInvitation[] @relation("TenderInvitationInvitedBy")
 
   @@index([tenantId, email])
 }
@@ -806,6 +824,8 @@ model Supplier {
   invoices              Invoice[]
   onboardingTokens      SupplierOnboardingToken[]
   ApplicationForPayment ApplicationForPayment[]
+  packageResponses      PackageResponse[]
+  tenderInvitations     TenderInvitation[]  @relation("TenderInvitationSupplier")
 
   @@index([tenantId, name])
   @@index([tenantId, status])
@@ -989,17 +1009,21 @@ model RequestSection {
 }
 
 model RequestQuestion {
-  id        Int      @id @default(autoincrement())
-  tenantId  String
-  requestId Int
-  sectionId Int
-  qType     String
-  prompt    String
-  required  Boolean  @default(false)
-  options   Json?
-  weight    Decimal?
-  calc      Json?
-  order     Int
+  id                Int      @id @default(autoincrement())
+  tenantId          String
+  requestId         Int
+  sectionId         Int?
+  qType             String
+  prompt            String
+  required          Boolean  @default(false)
+  options           Json?
+  weight            Decimal?
+  calc              Json?
+  order             Int
+  helpText          String?  @db.Text
+  referenceDocUrl   String?
+  referenceDocName  String?
+  scoringCriteria   String?  @db.Text
 }
 
 model RequestInvite {
@@ -1062,22 +1086,52 @@ model PackageLineItem {
   id               Int      @id @default(autoincrement())
   packageId        Int
   budgetLineItemId Int?
-  description      String
+
+  // Line item identification (NEW for BOQ)
+  itemNumber       String?  // e.g., "1.1", "2.3.4"
+  section          String?  // e.g., "Excavation", "Concrete Work"
+
+  description      String   @db.Text
+  specification    String?  @db.Text  // NEW: Detailed spec
+
+  // Quantities (keeping existing fields + adding unit)
   qty              Decimal  @db.Decimal(18, 4)
+  quantity         Decimal? @db.Decimal(18, 4) // Alias for qty (for BOQ compatibility)
+  unit             String?  // NEW: m³, m², m, nr, t, kg, item, sum
+
+  // Rates and totals
   rate             Decimal  @db.Decimal(18, 4)
   total            Decimal  @db.Decimal(18, 2)
+
+  // Buyer's estimate (NEW - optional, not visible to suppliers)
+  estimatedRate    Decimal? @db.Decimal(18, 4)
+  estimatedTotal   Decimal? @db.Decimal(18, 2)
+
+  // Display & validation (NEW for BOQ)
+  displayOrder     Int      @default(0)
+  isMandatory      Boolean  @default(true)  // Can supplier skip this?
+  allowAlternative Boolean  @default(false) // Can supplier propose alternative?
+
+  // Reference documents (NEW)
+  referenceDrawing String?  // Drawing number reference
+  referenceSpec    String?  // Spec section reference
+
   costCode         String?
   snapshotAt       DateTime @default(now())
   tenantId         String
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+  createdBy        Int?     // NEW: User who created
 
   // relations (safe assumptions: Package exists)
   package          Package  @relation(fields: [packageId], references: [id])
   contractLines    ContractLineItem[] @relation("PackageLineContractLines")
+  supplierPrices   SupplierLinePrice[]  // NEW: Supplier pricing for this line
 
   @@index([tenantId, packageId])
   @@index([tenantId, costCode])
+  @@index([itemNumber])
+  @@index([displayOrder])
 }
 
 /// An award decision created from Direct Award or Tender evaluation.
@@ -1522,6 +1576,13 @@ model Package {
   ownerUser       User?     @relation("PackageOwnerUser", fields: [ownerUserId], references: [id])
   buyerUser       User?     @relation("PackageBuyerUser", fields: [buyerUserId], references: [id])
 
+  // NEW PRICING FIELDS:
+  pricingMode           PricingMode @default(HYBRID)
+  breakdownMandatory    Boolean     @default(false)  // For HYBRID mode: require breakdown?
+  estimatedValue        Decimal?    // Internal budget estimate (can alias budgetEstimate)
+  budgetValue           Decimal?    // Approved budget for this package
+  createdBy             Int?        // User who created the package
+
   submissions Submission[]   @relation("PackageSubmissions")
   invites     TenderInvite[] @relation("PackageInvites")
   contracts   Contract[]
@@ -1535,6 +1596,7 @@ model Package {
   awardDecisions AwardDecision[]
   complianceOverrides ComplianceOverride[]
   awards     Award[]
+  packageResponses PackageResponse[]
 
   @@index([projectId])
   @@index([projectId, costCodeId])
@@ -1576,6 +1638,7 @@ model Tender {
   package   Package?               @relation(fields: [packageId], references: [id])
   bids      TenderBid[]
   // Additive relations for questions, responses, and invites
+  sections  TenderSection[]
   questions TenderQuestion[]
   responses TenderResponse[]
   invites   TenderSupplierInvite[]
@@ -1584,19 +1647,47 @@ model Tender {
   @@index([tenantId, projectId])
 }
 
-// Additive: questions for tender scoring
-model TenderQuestion {
-  id       Int    @id @default(autoincrement())
-  tenantId String @default("demo")
-  tenderId Int
-  text     String
-  type     String // 'text' | 'number' | 'single' | 'multi' | 'file'
-  weight   Float
-  options  Json?
+// Additive: sections organize questions into groups
+model TenderSection {
+  id          Int      @id @default(autoincrement())
+  tenantId    String   @default("demo")
+  tenderId    Int
+  name        String
+  description String?
+  orderIndex  Int      @default(0)
+  createdAt   DateTime @default(now())
 
-  tender Tender @relation(fields: [tenderId], references: [id])
+  tender      Tender           @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  questions   TenderQuestion[]
 
   @@index([tenantId, tenderId])
+}
+
+// Additive: questions for tender scoring
+model TenderQuestion {
+  id               Int      @id @default(autoincrement())
+  tenantId         String   @default("demo")
+  tenderId         Int
+  sectionId        Int?     // Link to section for grouping
+  text             String
+  type             String   // 'text' | 'textarea' | 'number' | 'single' | 'multi' | 'file' | 'yes_no' | 'dropdown' | 'checkboxes' | 'date' | 'currency' | 'rating'
+  weight           Float    // Can be used as maxScore for scoring
+  options          Json?    // For multiple choice/checkboxes/dropdown
+
+  // Enhanced fields for better questionnaire building
+  isRequired       Boolean  @default(false)
+  helpText         String?
+  orderIndex       Int      @default(0)
+  referenceDocUrl  String?  // URL to reference document (specs, drawings, etc.)
+  referenceDocName String?  // Display name for reference doc
+  scoringCriteria  String?  // How to score this question
+  createdAt        DateTime @default(now())
+
+  tender  Tender          @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  section TenderSection?  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, tenderId])
+  @@index([tenantId, sectionId])
 }
 
 // Additive: token-based invites per tender (distinct from legacy package invites)
@@ -1633,10 +1724,173 @@ model TenderResponse {
   source      String @default("supplier") // 'supplier' | 'buyer'
   attachments Json?
 
+  // NEW PRICING FIELDS:
+  totalBidValue Decimal? @db.Decimal(18, 2) // Overall bid value (sum of all packages)
+
   tender   Tender   @relation(fields: [tenderId], references: [id])
   supplier Supplier @relation(fields: [supplierId], references: [id])
 
+  // NEW RELATIONS:
+  packageResponses PackageResponse[]
+
   @@index([tenantId, tenderId, supplierId])
+}
+
+// ==========================================
+// NEW MODEL: PACKAGE RESPONSE (supplier pricing per package)
+// ==========================================
+
+model PackageResponse {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  packageId             Int
+  tenderResponseId      Int
+  supplierId            Int
+
+  // Pricing approach chosen by supplier
+  pricingType           ResponsePricingType
+
+  // PACKAGE-LEVEL PRICING (always required)
+  packageTotal          Decimal   @db.Decimal(18, 2)
+
+  // COMMERCIAL TERMS
+  preliminaries         Decimal?  @db.Decimal(18, 2)
+  prelimsPercentage     Decimal?  @db.Decimal(5, 2)
+  contingency           Decimal?  @db.Decimal(18, 2)
+  contingencyPercentage Decimal?  @db.Decimal(5, 2)
+  overheadsProfit       Decimal?  @db.Decimal(18, 2)
+  overheadsProfitPerc   Decimal?  @db.Decimal(5, 2)
+
+  // PROGRAMME
+  programmeDuration     Int?      // Days to complete
+  startDate             DateTime?
+  completionDate        DateTime?
+  keyMilestones         Json?     // Array of milestone objects
+
+  // COMMERCIAL DETAILS
+  paymentTerms          String?   @db.Text
+  retentionPercentage   Decimal?  @db.Decimal(5, 2)
+  retentionAmount       Decimal?  @db.Decimal(18, 2)
+  defectsLiability      Int?      // Months
+  warranties            String?   @db.Text
+  bondRequired          Boolean   @default(false)
+  bondPercentage        Decimal?  @db.Decimal(5, 2)
+  insuranceDetails      String?   @db.Text
+
+  // SUPPLIER QUALIFICATIONS & NOTES
+  assumptions           Json?     // Array of assumption strings
+  exclusions            Json?     // Array of exclusion strings
+  clarifications        Json?     // Array of clarification strings
+  alternatives          Json?     // Alternative proposals/VE options
+
+  // TECHNICAL COMPLIANCE
+  technicalCompliance   Boolean?
+  complianceNotes       String?   @db.Text
+  deviations            Json?     // Array of deviation objects
+
+  // RESOURCE ALLOCATION
+  keyPersonnel          Json?     // Array of personnel objects
+  subcontractors        Json?     // Array of proposed subcontractors
+  plantEquipment        Json?     // Major plant/equipment list
+
+  // QUALITY & SAFETY
+  qualityPlan           String?   @db.Text
+  safetyPlan            String?   @db.Text
+  methodStatement       String?   @db.Text
+
+  // ATTACHMENTS
+  attachments           Json?     // Array of document references
+
+  // SUBMISSION TRACKING
+  status                String    @default("draft") // draft, submitted, under_review, accepted, rejected, withdrawn
+  lastSavedAt           DateTime  @default(now())
+  submittedAt           DateTime?
+  reviewedAt            DateTime?
+  reviewedBy            Int?
+
+  // EVALUATION
+  technicalScore        Decimal?  @db.Decimal(5, 2)
+  commercialScore       Decimal?  @db.Decimal(5, 2)
+  programmeScore        Decimal?  @db.Decimal(5, 2)
+  totalScore            Decimal?  @db.Decimal(5, 2)
+  evaluationNotes       String?   @db.Text
+
+  // Metadata
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  package               Package         @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  tenderResponse        TenderResponse  @relation(fields: [tenderResponseId], references: [id], onDelete: Cascade)
+  supplier              Supplier        @relation(fields: [supplierId], references: [id])
+  lineItemPrices        SupplierLinePrice[]
+
+  @@unique([packageId, tenderResponseId])
+  @@index([tenantId, packageId])
+  @@index([tenantId, tenderResponseId])
+  @@index([supplierId])
+  @@index([status])
+}
+
+// ==========================================
+// NEW MODEL: SUPPLIER LINE ITEM PRICING (optional breakdown)
+// ==========================================
+
+model SupplierLinePrice {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  packageResponseId     Int
+  lineItemId            Int
+
+  // Pricing
+  rate                  Decimal?  @db.Decimal(18, 4) // Unit rate (null if lump sum item)
+  total                 Decimal   @db.Decimal(18, 2) // Line total (always required)
+
+  // Supplier notes per line
+  notes                 String?   @db.Text
+  alternative           String?   @db.Text  // Alternative proposal for this specific item
+  specification         String?   @db.Text  // Proposed spec/product for this item
+
+  // Build-up (for transparency)
+  labourCost            Decimal?  @db.Decimal(18, 2)
+  materialCost          Decimal?  @db.Decimal(18, 2)
+  plantCost             Decimal?  @db.Decimal(18, 2)
+  subcontractCost       Decimal?  @db.Decimal(18, 2)
+
+  // Metadata
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  packageResponse       PackageResponse  @relation(fields: [packageResponseId], references: [id], onDelete: Cascade)
+  lineItem              PackageLineItem  @relation(fields: [lineItemId], references: [id], onDelete: Cascade)
+
+  @@unique([packageResponseId, lineItemId])
+  @@index([tenantId, packageResponseId])
+  @@index([lineItemId])
+}
+
+// ==========================================
+// AUDIT LOG FOR PRICING CHANGES
+// ==========================================
+
+model PackagePricingAuditLog {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  packageResponseId     Int
+
+  action                String    // created, updated, submitted, withdrawn, evaluated
+  changes               Json?     // What changed
+  previousValue         Json?     // Before state
+  newValue              Json?     // After state
+
+  performedBy           Int?      // User ID
+  performedByType       String?   // user, system, supplier
+  performedAt           DateTime  @default(now())
+  ipAddress             String?
+
+  @@index([tenantId, packageResponseId])
+  @@index([performedAt])
 }
 
 model TenderBid {
@@ -2045,19 +2299,7 @@ model DiaryEntry {
   @@index([tenantId, projectId, date])
 }
 
-model AuditLog {
-  id        Int      @id @default(autoincrement())
-  timestamp DateTime @default(now())
-  userId    Int?
-  user      User?    @relation(fields: [userId], references: [id])
-  entity    String
-  entityId  String
-  action    String
-  changes   Json?
-  ipAddress String?
-
-  @@index([entity, entityId])
-}
+// AuditLog moved to line 2720 (more comprehensive version with tenantId)
 
 model CVRSnapshot {
   id        Int      @id @default(autoincrement())
@@ -2220,5 +2462,484 @@ model RfxQnaRead {
   userId     String?  // internal
   supplierId Int?     // supplier
   readAt     DateTime @default(now())
+}
+
+
+// ==========================================
+// TENDER MANAGEMENT SYSTEM - TASK 3C
+// ==========================================
+
+// Supplier Pre-qualification
+model SupplierPrequalification {
+  id                          Int       @id @default(autoincrement())
+  tenantId                    String
+  supplierId                  Int       @unique
+  
+  // Company details
+  companySize                 String?   // small, medium, large
+  annualTurnover              Float?
+  employeeCount               Int?
+  
+  // Accreditations
+  iso9001                     Boolean   @default(false)
+  iso9001Expiry               DateTime?
+  iso14001                    Boolean   @default(false)
+  iso14001Expiry              DateTime?
+  iso45001                    Boolean   @default(false)
+  iso45001Expiry              DateTime?
+  chas                        Boolean   @default(false)
+  chasExpiry                  DateTime?
+  constructionline            Boolean   @default(false)
+  constructionlineExpiry      DateTime?
+  
+  // Insurance
+  publicLiabilityAmount       Float?
+  publicLiabilityExpiry       DateTime?
+  employersLiabilityAmount    Float?
+  employersLiabilityExpiry    DateTime?
+  
+  // Performance
+  averagePerformanceScore     Float?    // 0-5 stars
+  onTimeDeliveryRate          Float?    // Percentage
+  currentWorkload             Float?    // Percentage
+  availableCapacity           Float?    // £ value
+  
+  updatedAt                   DateTime  @updatedAt
+  
+  @@index([tenantId])
+}
+
+// Tender Invitations
+model TenderInvitation {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  requestId             Int
+  supplierId            Int
+  
+  // Tracking
+  invitedAt             DateTime  @default(now())
+  invitedBy             Int?
+  viewedAt              DateTime?
+  viewCount             Int       @default(0)
+  documentsDownloaded   Json?     // Array of {docId, timestamp}
+  
+  // Status
+  status                String    @default("invited") // invited, viewed, declined, submitted
+  declinedAt            DateTime?
+  declineReason         String?   @db.Text
+  
+  // Site visit
+  siteVisitBooked       Boolean   @default(false)
+  siteVisitSlot         DateTime?
+  
+  // Unique access token
+  accessToken           String    @unique @default(uuid())
+
+  // Relations
+  supplier              Supplier  @relation("TenderInvitationSupplier", fields: [supplierId], references: [id])
+  invitedByUser         User?     @relation("TenderInvitationInvitedBy", fields: [invitedBy], references: [id])
+
+  @@unique([tenantId, requestId, supplierId])
+  @@index([tenantId, requestId])
+  @@index([accessToken])
+}
+
+// Tender Documents
+model TenderDocument {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  requestId             Int
+  
+  name                  String
+  category              String    // drawings, specifications, commercial, site_info, legal
+  fileUrl               String
+  fileSize              Int       // Bytes
+  fileType              String    // pdf, dwg, xlsx
+  version               String    @default("1.0")
+  
+  description           String?   @db.Text
+  isAddendum            Boolean   @default(false)
+  supersedes            Int?      // Previous document ID
+  isMandatory           Boolean   @default(true)
+  
+  uploadedAt            DateTime  @default(now())
+  uploadedBy            Int?
+  downloadCount         Int       @default(0)
+  
+  downloads             TenderDocumentDownload[]
+  
+  @@index([tenantId, requestId])
+}
+
+model TenderDocumentDownload {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  documentId            Int
+  supplierId            Int
+  downloadedAt          DateTime  @default(now())
+  ipAddress             String?
+  
+  document              TenderDocument @relation(fields: [documentId], references: [id])
+  
+  @@index([tenantId, documentId])
+  @@index([tenantId, supplierId])
+}
+
+// Q&A System
+model TenderClarification {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  requestId             Int
+  
+  question              String    @db.Text
+  askedBy               Int?      // Supplier ID (nullable for anonymous)
+  askedAt               DateTime  @default(now())
+  
+  answer                String?   @db.Text
+  answeredBy            Int?      // User ID
+  answeredAt            DateTime?
+  
+  isPublic              Boolean   @default(true)
+  status                String    @default("pending") // pending, answered, withdrawn
+  
+  questionAttachments   Json?
+  answerAttachments     Json?
+  
+  notifiedSuppliers     Boolean   @default(false)
+  notifiedAt            DateTime?
+  
+  @@index([tenantId, requestId])
+  @@index([status])
+}
+
+// Timeline Events
+model TenderTimelineEvent {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  requestId             Int
+  
+  eventType             String    // issue, site_visit, clarification_deadline, submission_deadline
+  eventName             String
+  eventDate             DateTime
+  description           String?   @db.Text
+  location              String?
+  
+  reminderSent          Boolean   @default(false)
+  reminderDays          Json?     // [3, 1] days before
+  
+  status                String    @default("scheduled") // scheduled, completed, cancelled
+  completedAt           DateTime?
+  
+  maxAttendees          Int?
+  
+  createdAt             DateTime  @default(now())
+  
+  bookings              TenderSiteVisitBooking[]
+  
+  @@index([tenantId, requestId])
+  @@index([eventDate])
+}
+
+model TenderSiteVisitBooking {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  timelineEventId       Int
+  supplierId            Int
+  
+  bookedAt              DateTime  @default(now())
+  attendees             String?
+  attendeeCount         Int       @default(1)
+  
+  status                String    @default("confirmed") // confirmed, cancelled, no_show
+  cancelledAt           DateTime?
+  checkedInAt           DateTime?
+  
+  event                 TenderTimelineEvent @relation(fields: [timelineEventId], references: [id])
+  
+  @@index([tenantId, timelineEventId])
+}
+
+// Evaluation & Scoring
+model TenderEvaluation {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  requestId             Int
+  responseId            Int
+  evaluatorId           Int
+  
+  evaluationType        String    // individual, consensus
+  
+  technicalScore        Float?
+  commercialScore       Float?
+  programmeScore        Float?
+  complianceScore       Float?
+  sustainabilityScore   Float?
+  totalScore            Float?
+  
+  criteriaScores        Json?     // Detailed breakdown
+  
+  strengths             String?   @db.Text
+  weaknesses            String?   @db.Text
+  risks                 String?   @db.Text
+  recommendation        String?   // award, reserve, reject
+  recommendationNotes   String?   @db.Text
+  
+  status                String    @default("draft") // draft, submitted
+  submittedAt           DateTime?
+  
+  hasConflictOfInterest Boolean   @default(false)
+  conflictDetails       String?   @db.Text
+  
+  @@index([tenantId, requestId])
+  @@index([evaluatorId])
+}
+
+model TenderEvaluationCriteria {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  requestId             Int
+  
+  name                  String
+  description           String?   @db.Text
+  category              String    // price, technical, compliance
+  weight                Float     // Percentage (0-100)
+  maxScore              Float     @default(100)
+  
+  scoringGuide          String?   @db.Text
+  scoringExamples       Json?
+  orderIndex            Int       @default(0)
+  
+  @@index([tenantId, requestId])
+}
+
+// Notifications
+model TenderNotification {
+  id                    BigInt    @id @default(autoincrement())
+  tenantId              String
+  requestId             Int?
+  
+  recipientType         String    // user, supplier, role
+  recipientId           Int?
+  recipientRole         String?
+  
+  type                  String    // invitation, reminder, clarification, award
+  title                 String
+  message               String    @db.Text
+  priority              String    @default("normal") // low, normal, high, urgent
+  
+  sendEmail             Boolean   @default(true)
+  sendSms               Boolean   @default(false)
+  sendInApp             Boolean   @default(true)
+  
+  status                String    @default("pending") // pending, sent, failed, read
+  sentAt                DateTime?
+  readAt                DateTime?
+  failureReason         String?
+  
+  actionUrl             String?
+  actionLabel           String?
+  
+  createdAt             DateTime  @default(now())
+  
+  @@index([tenantId, recipientId])
+  @@index([status, createdAt])
+}
+
+model NotificationTemplate {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  
+  name                  String
+  code                  String    @unique
+  category              String
+  
+  emailSubject          String?
+  emailBody             String?   @db.Text
+  smsBody               String?
+  inAppTitle            String?
+  inAppBody             String?   @db.Text
+  
+  availableVariables    Json?
+  isActive              Boolean   @default(true)
+  defaultPriority       String    @default("normal")
+  
+  updatedAt             DateTime  @updatedAt
+  
+  @@index([tenantId])
+  @@index([code])
+}
+
+// AI & Analytics
+model TenderAIAnalysis {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  requestId             Int
+  responseId            Int?
+  
+  analysisType          String    // risk_assessment, score_suggestion, anomaly_detection
+  findings              Json
+  riskLevel             String?   // low, medium, high
+  confidence            Float?
+  
+  recommendations       Json?
+  modelVersion          String?
+  analysisDate          DateTime  @default(now())
+  
+  @@index([tenantId, requestId])
+  @@index([analysisType])
+}
+
+model TenderAnalytics {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  requestId             Int
+  
+  invitationsSent       Int       @default(0)
+  viewCount             Int       @default(0)
+  uniqueViewers         Int       @default(0)
+  documentDownloads     Int       @default(0)
+  clarificationCount    Int       @default(0)
+  submissionCount       Int       @default(0)
+  
+  daysToAward           Int?
+  daysInEvaluation      Int?
+  averageResponseTime   Int?      // Days from invitation to submission
+  
+  winningPrice          Float?
+  secondPrice           Float?
+  priceSavings          Float?
+  qualityScore          Float?
+  
+  updatedAt             DateTime  @updatedAt
+  
+  @@unique([tenantId, requestId])
+  @@index([tenantId])
+}
+
+model TenderBenchmark {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  
+  tradeCategory         String
+  projectType           String?
+  region                String?
+  valueRange            String?
+  
+  averagePrice          Float?
+  medianPrice           Float?
+  priceRange            Json?
+  averageProgramme      Int?
+  averageDaysToAward    Int?
+  
+  sampleSize            Int
+  dateFrom              DateTime
+  dateTo                DateTime
+  updatedAt             DateTime  @updatedAt
+  
+  @@index([tenantId, tradeCategory])
+}
+
+// Audit Trail
+model TenderAuditLog {
+  id                    BigInt    @id @default(autoincrement())
+  tenantId              String
+  requestId             Int
+  
+  action                String
+  entityType            String
+  entityId              Int?
+  
+  actorType             String    // user, supplier, system
+  actorId               Int?
+  actorName             String?
+  
+  changes               Json?
+  reason                String?   @db.Text
+  
+  ipAddress             String?
+  userAgent             String?
+  
+  createdAt             DateTime  @default(now())
+  
+  @@index([tenantId, requestId])
+  @@index([createdAt])
+  @@index([actorType, actorId])
+}
+
+// Response model (if not exists - for tender submissions)
+model Response {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  requestId             Int
+  supplierId            Int
+  
+  // Submission data
+  answers               Json?
+  boqData               Json?
+  priceTotal            Float?
+  leadTimeDays          Int?
+  
+  // Scoring
+  technicalScore        Float?
+  commercialScore       Float?
+  weightedScore         Float?
+  rank                  Int?
+  
+  // Status
+  status                String    @default("draft") // draft, submitted, withdrawn
+  submittedAt           DateTime?
+  lastSavedAt           DateTime?
+  saveCount             Int       @default(0)
+  
+  // Award
+  isAwarded             Boolean   @default(false)
+  awardedAt             DateTime?
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  
+  @@unique([tenantId, requestId, supplierId])
+  @@index([tenantId, requestId])
+  @@index([tenantId, supplierId])
+}
+
+// Approval workflow (generic, can be used for tender awards)
+model Approval {
+  id                    Int       @id @default(autoincrement())
+  tenantId              String
+  
+  entityType            String    // tender_award, contract_variation, etc.
+  entityId              Int
+  
+  approverId            String
+  requestedById         String
+  
+  status                String    @default("pending") // pending, approved, rejected
+  notes                 String?   @db.Text
+  comments              String?   @db.Text
+  metadata              Json?
+  
+  respondedAt           DateTime?
+  respondedById         String?
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  
+  @@index([tenantId, entityType, entityId])
+  @@index([approverId, status])
+}
+
+// Existing AuditLog - for backwards compatibility
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  timestamp DateTime @default(now())
+  userId    Int?
+  entity    String
+  entityId  String
+  action    String
+  changes   Json?
+  ipAddress String?
+
+  @@index([entity, entityId])
 }
 

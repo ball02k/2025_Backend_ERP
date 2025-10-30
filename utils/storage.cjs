@@ -34,4 +34,11 @@ async function writeLocalStream(req, storageKey){
   });
 }
 
-module.exports = { makeStorageKey, signKey, verifyKey, writeLocalStream, localPath };
+async function writeLocalFile(storageKey, buffer){
+  const dest = localPath(storageKey);
+  await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+  await fs.promises.writeFile(dest, buffer);
+  return { size: buffer.length, path: dest };
+}
+
+module.exports = { makeStorageKey, signKey, verifyKey, writeLocalStream, writeLocalFile, localPath };

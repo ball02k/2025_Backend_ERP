@@ -25,9 +25,9 @@ router.get('/:tenderId/full', async (req, res, next) => {
     const result = {
       ...data,
       deadline: data.deadline || data.issueDate,
-      budget: data.budget || null,
-      reviewers: data.reviewers || null,
-      description: data.description || data.notes || null,
+      budget: data.package?.budget || null,
+      reviewers: null, // Not stored on Request model
+      description: data.addenda || null, // Using addenda as description
     };
 
     res.json(result);
@@ -45,8 +45,10 @@ router.patch('/:tenderId', async (req, res, next) => {
 
     const updateData = {};
     if (title !== undefined) updateData.title = title;
-    if (description !== undefined) updateData.description = description;
+    // Store description in addenda field since Request model doesn't have description
+    if (description !== undefined) updateData.addenda = description;
     if (deadline !== undefined) updateData.deadline = deadline ? new Date(deadline) : null;
+    // Note: budget and reviewers don't exist on Request model either
 
     const updated = await prisma.request.update({
       where: { id },
