@@ -1,8 +1,10 @@
 const rolePerms = {
   admin: ['*'],
-  PM: ['project:view', 'project:edit', 'procurement:issue', 'procurement:award', 'programme:edit'],
-  QS: ['cvr:edit', 'cvr:close', 'financials:edit'],
-  HS: ['hs:edit', 'docs:edit'],
+  PM: ['project:view', 'project:edit', 'procurement:issue', 'procurement:award', 'programme:edit', 'jobs:view', 'jobs:create', 'jobs:update', 'jobs:delete'],
+  QS: ['cvr:edit', 'cvr:close', 'financials:edit', 'jobs:view'],
+  HS: ['hs:edit', 'docs:edit', 'jobs:view'],
+  'Site Manager': ['jobs:view', 'jobs:create', 'jobs:update'],
+  Foreman: ['jobs:view', 'jobs:update'],
 };
 
 function hasPerm(user, perm) {
