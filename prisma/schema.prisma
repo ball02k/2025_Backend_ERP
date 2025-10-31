@@ -2990,6 +2990,31 @@ enum TimeEntryStatus {
   PAID
 }
 
+enum ScheduleStatus {
+  PENDING // Created, awaiting confirmation
+  CONFIRMED // Worker confirmed
+  IN_PROGRESS // Job started
+  COMPLETED // Job finished
+  CANCELLED // Cancelled
+  NO_SHOW // Worker didn't show up
+}
+
+enum ConflictType {
+  WORKER_OVERLAP
+  WORKER_UNAVAILABLE
+  EQUIPMENT_OVERLAP
+  EQUIPMENT_UNAVAILABLE
+  SKILL_MISMATCH
+  CAPACITY_EXCEEDED
+}
+
+enum ConflictSeverity {
+  CRITICAL // Blocks schedule creation
+  HIGH // Warning, can proceed with override
+  MEDIUM // Informational
+  LOW // Suggestion
+}
+
 // ============================================================================
 // MAIN JOB MODEL
 // ============================================================================
@@ -3214,14 +3239,17 @@ model JobSchedule {
   jobId    String
 
   // Scheduling
-  startTime DateTime
-  endTime   DateTime
-  allDay    Boolean  @default(false)
+  startTime      DateTime
+  endTime        DateTime
+  estimatedHours Decimal  @default(0) @db.Decimal(10, 2)
+  allDay         Boolean  @default(false)
 
   // Assignments
   workerId    String?
   equipmentId String?
-  isCrewLead  Boolean @default(false)
+  isCrewLead  Boolean  @default(false)
+  assignedBy  String
+  assignedAt  DateTime @default(now())
 
   // Travel & Setup
   travelTimeMinutes    Int @default(0)
@@ -3229,8 +3257,8 @@ model JobSchedule {
   breakdownTimeMinutes Int @default(0)
 
   // Status
-  status               String    @default("scheduled") // scheduled, confirmed, in_progress, completed, cancelled
-  confirmationRequired Boolean   @default(true)
+  status               ScheduleStatus @default(PENDING)
+  confirmationRequired Boolean        @default(true)
   confirmedAt          DateTime?
   confirmedBy          String? // Worker ID who confirmed
 
@@ -3251,18 +3279,61 @@ model JobSchedule {
   // Soft Delete
   isDeleted Boolean   @default(false)
   deletedAt DateTime?
+  deletedBy String?
 
   // Relations
-  job       Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  worker    Worker?    @relation(fields: [workerId], references: [id])
-  equipment Equipment? @relation(fields: [equipmentId], references: [id])
+  job         Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  worker      Worker?            @relation(fields: [workerId], references: [id])
+  equipment   Equipment?         @relation(fields: [equipmentId], references: [id])
+  timeEntries TimeEntry[]
+  conflicts   ScheduleConflict[]
 
   // Validation
   @@index([tenantId, jobId])
   @@index([tenantId, workerId, startTime])
   @@index([tenantId, equipmentId, startTime])
   @@index([tenantId, startTime])
+  @@index([status])
   @@map("job_schedules")
+}
+
+// ============================================================================
+// SCHEDULE CONFLICT TRACKING MODEL
+// ============================================================================
+
+model ScheduleConflict {
+  id         String @id @default(uuid())
+  tenantId   String
+  scheduleId String
+
+  // Conflict Details
+  conflictType ConflictType
+  severity     ConflictSeverity
+  resourceId   String // workerId or equipmentId
+  resourceType String // 'worker' or 'equipment'
+
+  conflictingScheduleId     String?
+  conflictingAvailabilityId String? // WorkerAvailability ID for time off conflicts
+
+  message String
+  details Json?
+
+  // Resolution
+  resolvedAt DateTime?
+  resolvedBy String?
+  resolution String?   @db.Text
+
+  // Audit
+  createdAt DateTime @default(now())
+
+  // Relations
+  schedule JobSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@index([tenantId, scheduleId])
+  @@index([resourceId, resourceType])
+  @@index([conflictType, severity])
+  @@map("schedule_conflicts")
 }
 
 // ============================================================================
@@ -3323,10 +3394,11 @@ model JobMaterial {
 // ============================================================================
 
 model TimeEntry {
-  id       String @id @default(uuid())
-  tenantId String
-  jobId    String
-  workerId String
+  id         String  @id @default(uuid())
+  tenantId   String
+  jobId      String
+  workerId   String
+  scheduleId String?
 
   // Time Details
   clockIn       DateTime
@@ -3366,8 +3438,9 @@ model TimeEntry {
   isDeleted Boolean @default(false)
 
   // Relations
-  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  worker Worker @relation(fields: [workerId], references: [id])
+  job      Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  worker   Worker       @relation(fields: [workerId], references: [id])
+  schedule JobSchedule? @relation(fields: [scheduleId], references: [id])
 
   // Indexes
   @@index([tenantId, jobId])

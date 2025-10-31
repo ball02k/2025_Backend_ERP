@@ -1,10 +1,10 @@
 const rolePerms = {
   admin: ['*'],
-  PM: ['project:view', 'project:edit', 'procurement:issue', 'procurement:award', 'programme:edit', 'jobs:view', 'jobs:create', 'jobs:update', 'jobs:delete', 'workers:view', 'workers:create', 'workers:update', 'workers:delete', 'equipment:view', 'equipment:create', 'equipment:update', 'equipment:delete'],
-  QS: ['cvr:edit', 'cvr:close', 'financials:edit', 'jobs:view', 'workers:view', 'equipment:view'],
-  HS: ['hs:edit', 'docs:edit', 'jobs:view', 'workers:view', 'equipment:view'],
-  'Site Manager': ['jobs:view', 'jobs:create', 'jobs:update', 'workers:view', 'workers:update', 'equipment:view', 'equipment:update'],
-  Foreman: ['jobs:view', 'jobs:update', 'workers:view', 'equipment:view'],
+  PM: ['project:view', 'project:edit', 'procurement:issue', 'procurement:award', 'programme:edit', 'jobs:view', 'jobs:create', 'jobs:update', 'jobs:delete', 'workers:view', 'workers:create', 'workers:update', 'workers:delete', 'equipment:view', 'equipment:create', 'equipment:update', 'equipment:delete', 'schedules:view', 'schedules:create', 'schedules:update', 'schedules:delete'],
+  QS: ['cvr:edit', 'cvr:close', 'financials:edit', 'jobs:view', 'workers:view', 'equipment:view', 'schedules:view'],
+  HS: ['hs:edit', 'docs:edit', 'jobs:view', 'workers:view', 'equipment:view', 'schedules:view'],
+  'Site Manager': ['jobs:view', 'jobs:create', 'jobs:update', 'workers:view', 'workers:update', 'equipment:view', 'equipment:update', 'schedules:view', 'schedules:create', 'schedules:update'],
+  Foreman: ['jobs:view', 'jobs:update', 'workers:view', 'equipment:view', 'schedules:view', 'schedules:update'],
 };
 
 function hasPerm(user, perm) {

@@ -103,6 +103,7 @@ const tradesRouter = require('./routes/trades.cjs');
 const jobsRouter = require('./routes/jobs.cjs');
 const workersRouter = require('./routes/workers.cjs');
 const equipmentRouter = require('./routes/equipment.cjs');
+const jobSchedulesRouter = require('./routes/jobSchedules.cjs');
 // Also import handlers directly for top-level mounting
 const { previewHandler: budgetsPreview, commitHandler: budgetsCommit } = require('./routes/budgets.import.cjs');
 const { ensureFeature } = require('./middleware/featureGuard.js');
@@ -287,6 +288,7 @@ app.use('/api/tasks', requireAuth, require('./routes/tasks')(prisma));
 app.use('/api/jobs', requireAuth, jobsRouter(prisma));
 app.use('/api/workers', requireAuth, workersRouter(prisma));
 app.use('/api/equipment', requireAuth, equipmentRouter(prisma));
+app.use('/api/job-schedules', requireAuth, jobSchedulesRouter(prisma));
 // Variations routes: mount under both /api and /api/variations for compatibility
 app.use('/api', requireAuth, variationsRouter);
 app.use('/api/variations', requireAuth, variationsRouter);
