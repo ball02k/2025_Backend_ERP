@@ -3015,6 +3015,19 @@ enum ConflictSeverity {
   LOW // Suggestion
 }
 
+enum BreakType {
+  PAID
+  UNPAID
+  MEAL
+}
+
+enum AdjustmentType {
+  CLOCK_IN_TIME
+  CLOCK_OUT_TIME
+  BREAK_DURATION
+  HOURS_MANUAL
+}
+
 // ============================================================================
 // MAIN JOB MODEL
 // ============================================================================
@@ -3401,11 +3414,14 @@ model TimeEntry {
   scheduleId String?
 
   // Time Details
-  clockIn       DateTime
-  clockOut      DateTime?
-  breakStart    DateTime?
-  breakEnd      DateTime?
-  breakDuration Int       @default(0) // Minutes
+  clockIn           DateTime
+  clockOut          DateTime?
+  totalBreakMinutes Int       @default(0) // Total break time in minutes
+
+  // Calculated Hours
+  regularHours  Decimal @default(0) @db.Decimal(10, 2)
+  overtimeHours Decimal @default(0) @db.Decimal(10, 2)
+  totalHours    Decimal @default(0) @db.Decimal(10, 2)
 
   // Location Verification (GPS check-in)
   clockInLatitude   Decimal? @db.Decimal(10, 8)
@@ -3416,18 +3432,25 @@ model TimeEntry {
 
   // Status & Approval
   status          TimeEntryStatus @default(DRAFT)
+  submittedAt     DateTime?
   approvedBy      String? // Manager user ID
   approvedAt      DateTime?
+  rejectedAt      DateTime?
+  rejectedBy      String?
   rejectionReason String?         @db.Text
 
   // Work Details
-  notes         String? @db.Text
-  workPerformed String? @db.Text
+  notes           String? @db.Text
+  workDescription String? @db.Text
+
+  // Flags
+  isOvertime Boolean @default(false)
+  isHoliday  Boolean @default(false)
+  isWeekend  Boolean @default(false)
 
   // Financial
   hourlyRate   Decimal? @db.Decimal(8, 2)
   overtimeRate Decimal? @db.Decimal(8, 2)
-  totalHours   Decimal? @db.Decimal(5, 2)
   totalCost    Decimal? @db.Decimal(10, 2)
 
   // Audit
@@ -3435,12 +3458,16 @@ model TimeEntry {
   updatedAt DateTime @updatedAt
 
   // Soft Delete
-  isDeleted Boolean @default(false)
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
 
   // Relations
-  job      Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  worker   Worker       @relation(fields: [workerId], references: [id])
-  schedule JobSchedule? @relation(fields: [scheduleId], references: [id])
+  job         Job                   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  worker      Worker                @relation(fields: [workerId], references: [id])
+  schedule    JobSchedule?          @relation(fields: [scheduleId], references: [id])
+  breaks      TimeEntryBreak[]
+  adjustments TimeEntryAdjustment[]
 
   // Indexes
   @@index([tenantId, jobId])
@@ -3448,6 +3475,63 @@ model TimeEntry {
   @@index([tenantId, status])
   @@index([tenantId, clockIn])
   @@map("time_entries")
+}
+
+// ============================================================================
+// TIME ENTRY BREAK MODEL
+// ============================================================================
+
+model TimeEntryBreak {
+  id          String @id @default(uuid())
+  tenantId    String
+  timeEntryId String
+
+  // Break Details
+  breakStart   DateTime
+  breakEnd     DateTime?
+  breakMinutes Int       @default(0)
+  breakType    BreakType @default(UNPAID)
+  notes        String?   @db.Text
+
+  // Audit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  timeEntry TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@index([tenantId, timeEntryId])
+  @@index([breakStart])
+  @@map("time_entry_breaks")
+}
+
+// ============================================================================
+// TIME ENTRY ADJUSTMENT MODEL (Audit trail for manual adjustments)
+// ============================================================================
+
+model TimeEntryAdjustment {
+  id          String @id @default(uuid())
+  tenantId    String
+  timeEntryId String
+
+  // Adjustment Details
+  adjustmentType AdjustmentType
+  originalValue  Decimal        @db.Decimal(10, 2)
+  adjustedValue  Decimal        @db.Decimal(10, 2)
+
+  // Audit
+  reason     String
+  adjustedBy String
+  adjustedAt DateTime @default(now())
+
+  // Relations
+  timeEntry TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@index([tenantId, timeEntryId])
+  @@index([adjustedAt])
+  @@map("time_entry_adjustments")
 }
 
 // ============================================================================
