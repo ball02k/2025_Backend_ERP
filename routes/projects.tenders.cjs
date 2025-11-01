@@ -131,6 +131,21 @@ router.post('/:id/tenders', async (req, res, next) => {
       if (!pkg) {
         return res.status(400).json({ error: 'Package not found or does not belong to this project' });
       }
+
+      // ✅ FIX #7: Check if tender already exists for this package
+      const existingTender = await prisma.request.findFirst({
+        where: {
+          packageId: Number(packageId),
+          tenantId
+        }
+      });
+
+      if (existingTender) {
+        return res.status(400).json({
+          error: 'A tender already exists for this package',
+          existingTenderId: existingTender.id
+        });
+      }
     }
 
     // Create the tender (Request)
@@ -157,6 +172,61 @@ router.post('/:id/tenders', async (req, res, next) => {
     res.status(201).json(tender);
   } catch (err) {
     console.error('POST /projects/:id/tenders error:', err);
+    next(err);
+  }
+});
+
+// DELETE /api/projects/:projectId/tenders/:tenderId - Delete a draft tender
+router.delete('/:projectId/tenders/:tenderId', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const tenderId = Number(req.params.tenderId);
+    const projectId = Number(req.params.projectId);
+
+    if (!Number.isFinite(tenderId)) {
+      return res.status(400).json({ error: 'Invalid tender ID' });
+    }
+
+    // Find the tender
+    const tender = await prisma.request.findFirst({
+      where: {
+        id: tenderId,
+        tenantId
+      },
+      select: {
+        id: true,
+        status: true,
+        package: {
+          select: { projectId: true }
+        }
+      }
+    });
+
+    if (!tender) {
+      return res.status(404).json({ error: 'Tender not found' });
+    }
+
+    // Verify tender belongs to this project
+    if (tender.package?.projectId !== projectId) {
+      return res.status(403).json({ error: 'Tender does not belong to this project' });
+    }
+
+    // ✅ FIX #8: Only allow deleting draft tenders
+    if (tender.status !== 'draft') {
+      return res.status(400).json({
+        error: 'Only draft tenders can be deleted',
+        currentStatus: tender.status
+      });
+    }
+
+    // Delete the tender
+    await prisma.request.delete({
+      where: { id: tenderId }
+    });
+
+    res.json({ success: true, message: 'Tender deleted successfully' });
+  } catch (err) {
+    console.error('DELETE /projects/:projectId/tenders/:tenderId error:', err);
     next(err);
   }
 });

@@ -239,7 +239,7 @@ app.use('/api/projects', require('./routes/projects.budgets.cjs'));
 app.use('/api/projects', requireAuth, budgetsSuggestRouter);
 app.use('/api', requireAuth, projectPackagesRouter);
 app.use('/api', requireAuth, projectContractsRouter);
-app.use('/api', requireAuth, projectTendersRouter);
+app.use('/api/projects', requireAuth, projectTendersRouter);
 app.use('/api', requireAuth, packagesRouter);
 app.use('/api', packagesActionsRouter);
 app.use('/api', requireAuth, contractsRouter);
