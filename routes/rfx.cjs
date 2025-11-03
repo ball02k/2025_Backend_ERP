@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const { requireProjectMember } = require('../middleware/membership.cjs');
 const { linkOf } = require('../lib/links.cjs');
 const { prisma: prismaUtil } = require('../utils/prisma.cjs');
@@ -7,6 +8,29 @@ module.exports = (prisma) => {
   const router = express.Router();
 
   function getTenantId(req) { return req.user && req.user.tenantId; }
+
+  // Generate a unique response token for supplier invite portal access
+  async function generateUniqueResponseToken(tenantId, maxAttempts = 5) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // Generate 32 random bytes and encode as hex (64 characters)
+      const token = crypto.randomBytes(32).toString('hex');
+
+      // Check if token already exists for this tenant
+      const existing = await prisma.requestInvite.findFirst({
+        where: { tenantId, responseToken: token },
+        select: { id: true }
+      });
+
+      if (!existing) {
+        return token;
+      }
+
+      // Collision detected, retry
+      console.warn(`[generateUniqueResponseToken] Collision detected for tenant ${tenantId}, retrying...`);
+    }
+
+    throw new Error('Failed to generate unique response token after multiple attempts');
+  }
 
   // GET /api/projects/:projectId/rfx — list RFx (Requests) for a project
   router.get('/:projectId/rfx', requireProjectMember, async (req, res) => {
@@ -79,10 +103,24 @@ module.exports = (prisma) => {
           .map((i) => Number(i.supplierId))
           .filter((v) => Number.isFinite(v));
         if (supplierIds.length) {
-          await prisma.requestInvite.createMany({
-            data: supplierIds.map((sid) => ({ tenantId, requestId: rfx.id, supplierId: sid, email: '' })),
-            skipDuplicates: true,
-          }).catch(() => {});
+          // Create invites with unique response tokens
+          for (const sid of supplierIds) {
+            try {
+              const responseToken = await generateUniqueResponseToken(tenantId);
+              await prisma.requestInvite.create({
+                data: {
+                  tenantId,
+                  requestId: rfx.id,
+                  supplierId: sid,
+                  email: '',
+                  responseToken,
+                },
+              });
+            } catch (e) {
+              // Skip duplicates or errors (non-fatal for pre-seeding)
+              console.warn(`[push-to-rfx] Failed to pre-seed invite for supplier ${sid}:`, e.message);
+            }
+          }
         }
 
         // Optional: flip package status to indicate tendering in progress
@@ -214,16 +252,20 @@ module.exports = (prisma) => {
       }
 
       // Create invites (upsert to handle duplicates)
-      const inviteData = suppliers.map((s) => ({
-        tenantId,
-        requestId: rfxId,
-        supplierId: s.id,
-        email: s.email || '',
-        status: 'invited',
-      }));
-
       const created = [];
-      for (const data of inviteData) {
+      for (const supplier of suppliers) {
+        // Generate unique response token for new invites
+        const responseToken = await generateUniqueResponseToken(tenantId);
+
+        const data = {
+          tenantId,
+          requestId: rfxId,
+          supplierId: supplier.id,
+          email: supplier.email || '',
+          status: 'invited',
+          responseToken,
+        };
+
         const invite = await prisma.requestInvite.upsert({
           where: {
             // Composite unique constraint if exists, otherwise use findFirst + create pattern
@@ -240,7 +282,16 @@ module.exports = (prisma) => {
               supplierId: data.supplierId,
             },
           });
-          if (existing) return existing;
+          if (existing) {
+            // Update existing invite with new token if it doesn't have one
+            if (!existing.responseToken) {
+              return prisma.requestInvite.update({
+                where: { id: existing.id },
+                data: { status: 'invited', responseToken },
+              });
+            }
+            return existing;
+          }
           return prisma.requestInvite.create({ data });
         });
         created.push(invite);
@@ -305,6 +356,9 @@ module.exports = (prisma) => {
         });
       }
 
+      // Generate unique response token
+      const responseToken = await generateUniqueResponseToken(tenantId);
+
       // Create or update invite
       const invite = await prisma.requestInvite.upsert({
         where: {
@@ -317,6 +371,7 @@ module.exports = (prisma) => {
           supplierId: supplier.id,
           email: normalizedEmail,
           status: 'invited',
+          responseToken,
         },
       }).catch(async () => {
         // Fallback if unique constraint doesn't exist
@@ -324,9 +379,14 @@ module.exports = (prisma) => {
           where: { tenantId, requestId: rfxId, supplierId: supplier.id },
         });
         if (existing) {
+          // Update existing invite, add token if missing
+          const updateData = { status: 'invited', email: normalizedEmail };
+          if (!existing.responseToken) {
+            updateData.responseToken = responseToken;
+          }
           return prisma.requestInvite.update({
             where: { id: existing.id },
-            data: { status: 'invited', email: normalizedEmail },
+            data: updateData,
           });
         }
         return prisma.requestInvite.create({
@@ -336,6 +396,7 @@ module.exports = (prisma) => {
             supplierId: supplier.id,
             email: normalizedEmail,
             status: 'invited',
+            responseToken,
           },
         });
       });

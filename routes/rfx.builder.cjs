@@ -278,6 +278,105 @@ router.post('/invites/:id/send', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ---- Apply Template ----
+// POST /:rfxId/apply-template/:templateId
+// Apply a tender question template to this RFx, creating sections and questions
+router.post('/:rfxId/apply-template/:templateId', async (req, res, next) => {
+  try {
+    const tenantId = tenantIdOf(req);
+    const rfxId = Number(req.params.rfxId);
+    const templateId = Number(req.params.templateId);
+
+    if (!Number.isFinite(templateId)) {
+      return res.status(400).json({ error: 'Invalid template ID' });
+    }
+
+    // Verify RFx exists, is editable, and belongs to tenant
+    await ensureEditable(tenantId, rfxId);
+
+    // Load template with sections and questions
+    const template = await prisma.tenderTemplate.findFirst({
+      where: { id: templateId, tenantId },
+      include: {
+        sections: {
+          include: {
+            questions: {
+              orderBy: { orderIndex: 'asc' },
+            },
+          },
+          orderBy: { orderIndex: 'asc' },
+        },
+      },
+    });
+
+    if (!template) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    // Apply template in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      const createdSections = [];
+      const createdQuestions = [];
+
+      // Create sections and questions
+      for (const templateSection of template.sections) {
+        // Create RfxSection
+        const rfxSection = await tx.rfxSection.create({
+          data: {
+            tenantId,
+            rfxId,
+            title: templateSection.title,
+            sortOrder: templateSection.orderIndex,
+          },
+        });
+
+        createdSections.push(rfxSection);
+
+        // Create RfxQuestions for this section
+        for (const templateQuestion of templateSection.questions) {
+          const rfxQuestion = await tx.rfxQuestion.create({
+            data: {
+              tenantId,
+              rfxId,
+              sectionId: rfxSection.id,
+              prompt: templateQuestion.text,
+              guidance: templateQuestion.helpText || null,
+              responseType: templateQuestion.responseType,
+              options: null, // Templates don't store options yet
+              required: templateQuestion.isMandatory,
+              weight: templateQuestion.weighting,
+              sortOrder: templateQuestion.orderIndex,
+            },
+          });
+
+          createdQuestions.push(rfxQuestion);
+        }
+      }
+
+      // Update template usage stats
+      await tx.tenderTemplate.update({
+        where: { id: templateId },
+        data: {
+          lastUsedAt: new Date(),
+          timesUsed: { increment: 1 },
+        },
+      });
+
+      return { sections: createdSections, questions: createdQuestions };
+    });
+
+    res.json({
+      ok: true,
+      sectionsCreated: result.sections.length,
+      questionsCreated: result.questions.length,
+      sections: result.sections,
+      questions: result.questions,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ---- Issue RfX (freeze builder edits, move to live) ----
 router.post('/:rfxId/issue', async (req, res, next) => {
   try {

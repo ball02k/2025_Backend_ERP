@@ -1028,15 +1028,21 @@ model RequestQuestion {
 }
 
 model RequestInvite {
-  id          Int       @id @default(autoincrement())
-  tenantId    String
-  requestId   Int
-  supplierId  Int
-  email       String
-  status      String    @default("invited")
-  respondedAt DateTime?
+  id               Int       @id @default(autoincrement())
+  tenantId         String
+  requestId        Int
+  supplierId       Int? // Nullable for manual invites
+  email            String
+  supplierName     String? // For manual invites or override
+  contactFirstName String? // Optional contact metadata
+  contactLastName  String? // Optional contact metadata
+  status           String    @default("invited")
+  respondedAt      DateTime?
+  responseToken    String?   @unique
 
   @@index([tenantId, requestId, status])
+  @@index([tenantId, responseToken])
+  @@index([tenantId, requestId, email])
 }
 
 model RequestResponse {
@@ -1064,6 +1070,76 @@ model RequestQna {
   attachments Json?
   createdAt   DateTime  @default(now())
   answeredAt  DateTime?
+}
+
+/// ===============================
+/// Tender Question Templates (Settings)
+/// ===============================
+
+model TenderTemplate {
+  id              Int       @id @default(autoincrement())
+  tenantId        String
+  name            String
+  description     String?
+  createdByUserId Int?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastUsedAt      DateTime?
+  timesUsed       Int       @default(0)
+
+  sections TenderTemplateSection[]
+
+  @@index([tenantId])
+}
+
+model TenderTemplateSection {
+  id         Int    @id @default(autoincrement())
+  tenantId   String
+  templateId Int
+  title      String
+  orderIndex Int
+
+  template  TenderTemplate           @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  questions TenderTemplateQuestion[]
+
+  @@index([tenantId])
+  @@index([templateId])
+}
+
+model TenderTemplateQuestion {
+  id                Int     @id @default(autoincrement())
+  tenantId          String
+  templateSectionId Int
+  text              String
+  helpText          String?
+  responseType      String
+  weighting         Float?
+  isMandatory       Boolean @default(false)
+  orderIndex        Int
+
+  section TenderTemplateSection @relation(fields: [templateSectionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([templateSectionId])
+}
+
+// Email Templates for automated communications (e.g., tender invites)
+model EmailTemplate {
+  id              BigInt   @id @default(autoincrement())
+  tenantId        BigInt
+  name            String
+  type            String   // e.g. 'tender_invite'
+  subjectTemplate String
+  bodyTemplate    String   @db.Text
+  isDefault       Boolean  @default(false)
+  createdByUserId BigInt?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  lastUsedAt      DateTime?
+  timesUsed       Int      @default(0)
+
+  @@index([tenantId])
+  @@index([tenantId, type])
 }
 
 /// ===============================

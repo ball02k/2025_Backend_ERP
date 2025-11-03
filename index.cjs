@@ -66,6 +66,9 @@ const packagesPricingRouter = require('./routes/packages.pricing.cjs');
 const packagesResponsesRouter = require('./routes/packages.responses.cjs');
 const rfxBuilderRouter = require('./routes/rfx.builder.cjs');
 const rfxStateRouter = require('./routes/rfx.state.cjs');
+const rfxInvitesSendRouter = require('./routes/rfx.invitesSend.cjs');
+const tenderTemplatesRouter = require('./routes/settings.tenderTemplates.cjs');
+const emailTemplatesRouter = require('./routes/settings.emailTemplates.cjs');
 const projectInvoicesRouter = require('./routes/project_invoices.cjs');
 const projectBudgetRouter = require('./routes/projects.budget.cjs');
 const projectPackagesRouter = require('./routes/projects.packages.cjs');
@@ -221,6 +224,10 @@ app.use(devDeltaRoutes);
 
 app.use('/auth', authRouter);
 app.use('/me', meRouter);
+
+// Public RFx response API (NO auth required - uses magic link token)
+app.use('/api/public/rfx', require('./routes/rfx.public.cjs'));
+
 app.use('/api/users', usersRouter);
 app.use('/api/roles', rolesRouter);
 app.use('/api/reference', requireAuth, require('./routes/reference')(prisma));
@@ -251,6 +258,7 @@ app.use('/api', requireAuth, costCodesRouter);
   app.use('/api', requireAuth, rfxRouter(prisma));
 app.use('/api/rfx-builder', rfxBuilderRouter);
 app.use('/api/rfx-state', rfxStateRouter);
+app.use('/api/rfx', requireAuth, rfxInvitesSendRouter(prisma));
 // Tenders routes (additive)
 app.use('/api/tenders', tendersRouter(prisma, { requireAuth }));
 // Public RFx submission
@@ -344,6 +352,8 @@ app.use('/api', requireAuth, financeReceiptsRouter);
 app.use('/api', financeInboundRouter);
 
 app.use('/api/v1/settings', requireAuth, settingsV1Router);
+app.use('/api/settings/tender-templates', requireAuth, tenderTemplatesRouter);
+app.use('/api/settings/email-templates', requireAuth, emailTemplatesRouter);
 app.get('/api/v1/tenants/modules', requireAuth, (req, res) => {
   const tenantId = req.user?.tenantId || TENANT_DEFAULT;
   res.json({ tenantId, modules: ['scope_suggest'] });
