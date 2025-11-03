@@ -142,4 +142,14 @@ router.post('/:tenderId/suggest-questions', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+
+// ============================================================================
+// LEGACY: This is the OLD Tender module
+// ============================================================================
+// For NEW work, prefer the RFx/Request module:
+//   - Backend: routes/rfx*.cjs, routes/requests.cjs
+//   - Frontend: RequestInvite, RfxDetails, etc.
+// This legacy code is kept for backwards compatibility only.
+// ============================================================================
+
 module.exports = router;

@@ -1,4 +1,14 @@
 const express = require('express');
+
+// ============================================================================
+// LEGACY: This is the OLD Tender module
+// ============================================================================
+// For NEW work, prefer the RFx/Request module:
+//   - Backend: routes/rfx*.cjs, routes/requests.cjs
+//   - Frontend: RequestInvite, RfxDetails, etc.
+// This legacy code is kept for backwards compatibility only.
+// ============================================================================
+
 const router = express.Router();
 const { prisma } = require('../utils/prisma.cjs');
 

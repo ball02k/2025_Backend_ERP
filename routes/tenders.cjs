@@ -4,6 +4,15 @@ const crypto = require('crypto');
 const { requirePerm } = require('../middleware/checkPermission.cjs');
 const { isPackageSourced } = require('../lib/sourcing.cjs');
 
+// ============================================================================
+// LEGACY: This is the OLD Tender module
+// ============================================================================
+// For NEW work, prefer the RFx/Request module:
+//   - Backend: routes/rfx*.cjs, routes/requests.cjs
+//   - Frontend: RequestInvite, RfxDetails, etc.
+// This legacy code is kept for backwards compatibility only.
+// ============================================================================
+
 module.exports = (prisma, { requireAuth }) => {
   const router = express.Router();
 
