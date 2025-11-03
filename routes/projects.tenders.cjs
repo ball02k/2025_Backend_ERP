@@ -25,18 +25,10 @@ router.get('/:id/tenders', async (req, res, next) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    // Get all packages for this project
-    const packages = await prisma.package.findMany({
-      where: { projectId, tenantId },
-      select: { id: true }
-    });
-
-    const packageIds = packages.map(p => p.id);
-
-    // Build where clause for requests (tenders)
+    // Build where clause for tenders
     const where = {
       tenantId,
-      packageId: packageIds.length > 0 ? { in: packageIds } : undefined
+      projectId
     };
 
     // Add query filters
@@ -50,10 +42,10 @@ router.get('/:id/tenders', async (req, res, next) => {
       where.packageId = Number(req.query.packageId);
     }
     if (req.query.after) {
-      where.deadline = { ...where.deadline, gte: new Date(req.query.after) };
+      where.deadlineAt = { ...where.deadlineAt, gte: new Date(req.query.after) };
     }
     if (req.query.before) {
-      where.deadline = { ...where.deadline, lte: new Date(req.query.before) };
+      where.deadlineAt = { ...where.deadlineAt, lte: new Date(req.query.before) };
     }
 
     // Pagination
@@ -63,7 +55,7 @@ router.get('/:id/tenders', async (req, res, next) => {
 
     // Fetch tenders with package info
     const [items, total] = await Promise.all([
-      prisma.request.findMany({
+      prisma.tender.findMany({
         where,
         include: {
           package: {
@@ -78,7 +70,7 @@ router.get('/:id/tenders', async (req, res, next) => {
         skip,
         take: pageSize
       }),
-      prisma.request.count({ where })
+      prisma.tender.count({ where })
     ]);
 
     res.json({

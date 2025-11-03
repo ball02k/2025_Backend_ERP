@@ -809,6 +809,7 @@ model Supplier {
   updatedAt             DateTime  @updatedAt
 
   capabilities          SupplierCapability[]
+  prequalification      SupplierPrequalification?
   invites               TenderInvite[]            @relation("SupplierInvites")
   submissions           Submission[]              @relation("SupplierSubmissions")
   // Additive relations for tendering module
@@ -2471,9 +2472,10 @@ model RfxQnaRead {
 
 // Supplier Pre-qualification
 model SupplierPrequalification {
-  id         Int    @id @default(autoincrement())
+  id         Int      @id @default(autoincrement())
   tenantId   String
-  supplierId Int    @unique
+  supplierId Int      @unique
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
 
   // Company details
   companySize    String? // small, medium, large

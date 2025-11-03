@@ -39,7 +39,6 @@ router.get('/:tenderId/invitations', async (req, res, next) => {
             id: true,
             name: true,
             email: true,
-            contactName: true,
             phone: true
           }
         },
@@ -59,7 +58,7 @@ router.get('/:tenderId/invitations', async (req, res, next) => {
       supplierId: inv.supplierId,
       supplierName: inv.supplier?.name,
       supplierEmail: inv.supplier?.email,
-      supplierContact: inv.supplier?.contactName,
+      supplierPhone: inv.supplier?.phone,
       invitedAt: inv.invitedAt,
       invitedBy: inv.invitedByUser?.name,
       viewedAt: inv.viewedAt,
@@ -124,7 +123,7 @@ router.post('/:tenderId/invitations', async (req, res, next) => {
         id: true,
         name: true,
         email: true,
-        contactName: true
+        phone: true
       }
     });
 
@@ -325,6 +324,177 @@ router.put('/:tenderId/invitations/:invitationId/track-view', async (req, res, n
     res.json(updated);
   } catch (e) {
     console.error('Error tracking invitation view:', e);
+    next(e);
+  }
+});
+
+// ==========================================
+// QUICK INVITE - Add supplier by email on-the-fly
+// ==========================================
+
+// POST /api/tenders/:tenderId/quick-invite - Invite supplier by email (creates supplier if needed)
+router.post('/:tenderId/quick-invite', async (req, res, next) => {
+  try {
+    const tenantId = tenantIdOf(req);
+    const requestId = Number(req.params.tenderId);
+    const { email, name, phone, trade } = req.body;
+
+    // Validate inputs
+    if (!email || !name) {
+      return res.status(400).json({ error: 'Email and name are required' });
+    }
+
+    // Verify tender exists
+    const tender = await prisma.request.findFirst({
+      where: { id: requestId, tenantId },
+      include: {
+        package: {
+          select: {
+            id: true,
+            name: true,
+            project: {
+              select: {
+                id: true,
+                name: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!tender) {
+      return res.status(404).json({ error: 'Tender not found' });
+    }
+
+    // Check if supplier already exists by email
+    let supplier = await prisma.supplier.findFirst({
+      where: {
+        tenantId,
+        email: email.trim().toLowerCase()
+      }
+    });
+
+    // If supplier doesn't exist, create them
+    if (!supplier) {
+      supplier = await prisma.supplier.create({
+        data: {
+          tenantId,
+          name: name.trim(),
+          email: email.trim().toLowerCase(),
+          phone: phone?.trim() || null,
+          status: 'pending', // Mark as pending until they respond
+        }
+      });
+
+      // Add capability tag if trade provided
+      if (trade) {
+        await prisma.supplierCapability.create({
+          data: {
+            tenantId,
+            supplierId: supplier.id,
+            tag: `category:${trade.trim()}`
+          }
+        }).catch(() => {
+          // Capability is optional, don't fail
+        });
+      }
+
+      console.log(`✓ Created new supplier: ${supplier.name} (${supplier.email})`);
+    }
+
+    // Check if already invited
+    const existingInvitation = await prisma.tenderInvitation.findFirst({
+      where: {
+        tenantId,
+        requestId,
+        supplierId: supplier.id
+      }
+    });
+
+    if (existingInvitation) {
+      return res.status(400).json({
+        error: 'Supplier already invited to this tender',
+        supplier: {
+          id: supplier.id,
+          name: supplier.name,
+          email: supplier.email
+        },
+        invitation: {
+          id: existingInvitation.id,
+          status: existingInvitation.status,
+          invitedAt: existingInvitation.invitedAt
+        }
+      });
+    }
+
+    // Create invitation
+    const invitation = await prisma.tenderInvitation.create({
+      data: {
+        tenantId,
+        requestId,
+        supplierId: supplier.id,
+        invitedBy: req.user?.id || null,
+        status: 'invited'
+      }
+    });
+
+    // Send email notification
+    try {
+      await sendTenderInvitation({
+        supplier,
+        tender,
+        invitation,
+        projectName: tender.package?.project?.name || 'Project',
+        packageName: tender.package?.name || 'Package'
+      });
+      console.log(`✓ Email sent to ${supplier.email}`);
+    } catch (emailError) {
+      console.error(`Failed to send email to ${supplier.email}:`, emailError);
+      // Continue even if email fails
+    }
+
+    // Create timeline event
+    await prisma.tenderTimelineEvent.create({
+      data: {
+        tenantId,
+        requestId,
+        eventType: 'invitation_sent',
+        eventDate: new Date(),
+        description: `Quick invite sent to ${supplier.name} (${supplier.email})`,
+        actorId: req.user?.id || null,
+        metadata: {
+          supplierId: supplier.id,
+          supplierName: supplier.name,
+          quickInvite: true,
+          newSupplier: !existingInvitation
+        }
+      }
+    }).catch(() => {
+      // Timeline is optional, don't fail
+    });
+
+    res.status(201).json({
+      success: true,
+      message: supplier.id ? 'Supplier invited successfully' : 'Supplier created and invited',
+      supplier: {
+        id: supplier.id,
+        name: supplier.name,
+        email: supplier.email,
+        phone: supplier.phone,
+        status: supplier.status,
+        isNew: !existingInvitation
+      },
+      invitation: {
+        id: invitation.id,
+        supplierId: supplier.id,
+        invitedAt: invitation.invitedAt,
+        accessToken: invitation.accessToken,
+        status: invitation.status
+      }
+    });
+  } catch (e) {
+    console.error('Error with quick invite:', e);
     next(e);
   }
 });

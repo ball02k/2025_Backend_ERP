@@ -73,6 +73,149 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// GET /api/suppliers/qualified - Filter suppliers for tender invitations
+// IMPORTANT: This must be BEFORE /:id route to avoid "qualified" being treated as an ID
+router.get('/qualified', async (req, res, next) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const {
+      trade,
+      latitude,
+      longitude,
+      radiusMiles,
+      minTurnover,
+      accreditation,
+      performanceMin,
+      availableCapacity
+    } = req.query;
+
+    // Build base query
+    const where = { tenantId, status: 'approved' };
+
+    // Filter by trade/capability
+    if (trade) {
+      where.capabilities = {
+        some: {
+          tag: {
+            contains: String(trade),
+            mode: 'insensitive'
+          }
+        }
+      };
+    }
+
+    // Get suppliers with prequalification data
+    const suppliers = await prisma.supplier.findMany({
+      where,
+      include: {
+        capabilities: true,
+        prequalification: true
+      },
+      orderBy: { name: 'asc' }
+    });
+
+    // Apply filters
+    let filtered = suppliers;
+
+    // Filter by turnover
+    if (minTurnover) {
+      const minTurnoverNum = Number(minTurnover);
+      filtered = filtered.filter(s =>
+        s.prequalification?.annualTurnover && s.prequalification.annualTurnover >= minTurnoverNum
+      );
+    }
+
+    // Filter by accreditation
+    if (accreditation) {
+      const acc = String(accreditation).toLowerCase();
+      filtered = filtered.filter(s => {
+        if (!s.prequalification) return false;
+
+        const accMap = {
+          'iso9001': s.prequalification.iso9001,
+          'iso14001': s.prequalification.iso14001,
+          'iso45001': s.prequalification.iso45001,
+          'safecontractor': s.prequalification.safeContractor,
+          'chas': s.prequalification.chas,
+          'constructionline': s.prequalification.constructionLine
+        };
+
+        return accMap[acc] === true;
+      });
+    }
+
+    // Filter by performance score
+    if (performanceMin) {
+      const minScore = Number(performanceMin);
+      filtered = filtered.filter(s =>
+        s.prequalification?.averagePerformanceScore &&
+        s.prequalification.averagePerformanceScore >= minScore
+      );
+    }
+
+    // Filter by available capacity
+    if (availableCapacity === 'true') {
+      filtered = filtered.filter(s =>
+        s.prequalification?.availableCapacity &&
+        s.prequalification.availableCapacity > 0
+      );
+    }
+
+    // Calculate distance if location provided
+    if (latitude && longitude && radiusMiles) {
+      const lat = Number(latitude);
+      const lng = Number(longitude);
+      const radius = Number(radiusMiles);
+
+      filtered = filtered.map(s => {
+        // For now, return mock distance - in production would calculate from supplier address
+        const distance = Math.random() * radius * 2;
+        return { ...s, distance };
+      }).filter(s => s.distance <= radius);
+    }
+
+    // Format response
+    const data = filtered.map(s => {
+      const capabilityTags = s.capabilities?.map(c => c.tag) || [];
+      const preq = s.prequalification;
+
+      return {
+        id: s.id,
+        name: s.name,
+        status: s.status,
+        capabilityTags,
+        distance: s.distance || null,
+        prequalification: preq ? {
+          companySize: preq.companySize,
+          annualTurnover: Number(preq.annualTurnover || 0),
+          employeeCount: preq.employeeCount,
+          iso9001: preq.iso9001,
+          iso9001Expiry: preq.iso9001Expiry,
+          iso14001: preq.iso14001,
+          iso14001Expiry: preq.iso14001Expiry,
+          iso45001: preq.iso45001,
+          iso45001Expiry: preq.iso45001Expiry,
+          safeContractor: preq.safeContractor,
+          safeContractorExpiry: preq.safeContractorExpiry,
+          chas: preq.chas,
+          chasExpiry: preq.chasExpiry,
+          constructionLine: preq.constructionLine,
+          constructionLineExpiry: preq.constructionLineExpiry,
+          averagePerformanceScore: Number(preq.averagePerformanceScore || 0),
+          onTimeDeliveryRate: Number(preq.onTimeDeliveryRate || 0),
+          currentWorkload: Number(preq.currentWorkload || 0),
+          availableCapacity: Number(preq.availableCapacity || 0)
+        } : null
+      };
+    });
+
+    res.json({ items: data, total: data.length });
+  } catch (err) {
+    console.error('Error fetching qualified suppliers:', err);
+    next(err);
+  }
+});
+
 // GET /api/suppliers/:id
 router.get('/:id', async (req, res, next) => {
   try {
@@ -328,148 +471,6 @@ router.get('/:id/overview', async (req, res, next) => {
       tenders: (tenderBids || []).map((b) => ({ id: b.tender?.id, title: b.tender?.title, projectId: b.tender?.projectId, bidId: b.id, price: b.price })),
     });
   } catch (e) { next(e); }
-});
-
-// GET /api/suppliers/qualified - Filter suppliers for tender invitations
-router.get('/qualified', async (req, res, next) => {
-  try {
-    const tenantId = req.user.tenantId;
-    const {
-      trade,
-      latitude,
-      longitude,
-      radiusMiles,
-      minTurnover,
-      accreditation,
-      performanceMin,
-      availableCapacity
-    } = req.query;
-
-    // Build base query
-    const where = { tenantId, status: 'approved' };
-
-    // Filter by trade/capability
-    if (trade) {
-      where.capabilities = {
-        some: {
-          tag: {
-            contains: String(trade),
-            mode: 'insensitive'
-          }
-        }
-      };
-    }
-
-    // Get suppliers with prequalification data
-    const suppliers = await prisma.supplier.findMany({
-      where,
-      include: {
-        capabilities: true,
-        prequalification: true
-      },
-      orderBy: { name: 'asc' }
-    });
-
-    // Apply filters
-    let filtered = suppliers;
-
-    // Filter by turnover
-    if (minTurnover) {
-      const minTurnoverNum = Number(minTurnover);
-      filtered = filtered.filter(s =>
-        s.prequalification?.annualTurnover && s.prequalification.annualTurnover >= minTurnoverNum
-      );
-    }
-
-    // Filter by accreditation
-    if (accreditation) {
-      const acc = String(accreditation).toLowerCase();
-      filtered = filtered.filter(s => {
-        if (!s.prequalification) return false;
-
-        const accMap = {
-          'iso9001': s.prequalification.iso9001,
-          'iso14001': s.prequalification.iso14001,
-          'iso45001': s.prequalification.iso45001,
-          'safecontractor': s.prequalification.safeContractor,
-          'chas': s.prequalification.chas,
-          'constructionline': s.prequalification.constructionLine
-        };
-
-        return accMap[acc] === true;
-      });
-    }
-
-    // Filter by performance score
-    if (performanceMin) {
-      const minScore = Number(performanceMin);
-      filtered = filtered.filter(s =>
-        s.prequalification?.averagePerformanceScore &&
-        s.prequalification.averagePerformanceScore >= minScore
-      );
-    }
-
-    // Filter by available capacity
-    if (availableCapacity === 'true') {
-      filtered = filtered.filter(s =>
-        s.prequalification?.availableCapacity &&
-        s.prequalification.availableCapacity > 0
-      );
-    }
-
-    // Calculate distance if location provided
-    if (latitude && longitude && radiusMiles) {
-      const lat = Number(latitude);
-      const lng = Number(longitude);
-      const radius = Number(radiusMiles);
-
-      filtered = filtered.map(s => {
-        // For now, return mock distance - in production would calculate from supplier address
-        const distance = Math.random() * radius * 2;
-        return { ...s, distance };
-      }).filter(s => s.distance <= radius);
-    }
-
-    // Format response
-    const data = filtered.map(s => {
-      const capabilityTags = s.capabilities?.map(c => c.tag) || [];
-      const preq = s.prequalification;
-
-      return {
-        id: s.id,
-        name: s.name,
-        status: s.status,
-        capabilityTags,
-        distance: s.distance || null,
-        prequalification: preq ? {
-          companySize: preq.companySize,
-          annualTurnover: Number(preq.annualTurnover || 0),
-          employeeCount: preq.employeeCount,
-          iso9001: preq.iso9001,
-          iso9001Expiry: preq.iso9001Expiry,
-          iso14001: preq.iso14001,
-          iso14001Expiry: preq.iso14001Expiry,
-          iso45001: preq.iso45001,
-          iso45001Expiry: preq.iso45001Expiry,
-          safeContractor: preq.safeContractor,
-          safeContractorExpiry: preq.safeContractorExpiry,
-          chas: preq.chas,
-          chasExpiry: preq.chasExpiry,
-          constructionLine: preq.constructionLine,
-          constructionLineExpiry: preq.constructionLineExpiry,
-          averagePerformanceScore: Number(preq.averagePerformanceScore || 0),
-          onTimeDeliveryRate: Number(preq.onTimeDeliveryRate || 0),
-          currentWorkload: Number(preq.currentWorkload || 0),
-          availableCapacity: Number(preq.availableCapacity || 0)
-        } : null
-      };
-    });
-
-    res.json({ items: data, total: data.length });
-  } catch (err) {
-    console.error('Error fetching qualified suppliers:', err);
-    next(err);
-  }
 });
 
 module.exports = router;
