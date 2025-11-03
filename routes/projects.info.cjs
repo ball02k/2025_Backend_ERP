@@ -2,8 +2,15 @@ const express = require('express');
 const router = express.Router();
 const { prisma } = require('../lib/prisma.js');
 const requireAuth = require('../middleware/requireAuth.cjs');
+const { buildLinks } = require('../lib/buildLinks.cjs');
 
-// GET /api/projects/:projectId/info → minimal project “info” snapshot
+function safeJson(x) {
+  return JSON.parse(
+    JSON.stringify(x, (_, v) => (typeof v === 'bigint' ? v.toString() : v))
+  );
+}
+
+// GET /api/projects/:projectId/info → project info snapshot
 router.get('/projects/:projectId/info', requireAuth, async (req, res) => {
   try {
     const projectId = Number(req.params.projectId);
@@ -17,44 +24,11 @@ router.get('/projects/:projectId/info', requireAuth, async (req, res) => {
 
     const project = await prisma.project.findFirst({
       where: { id: projectId, tenantId },
-      select: {
-        id: true,
-        projectCode: true,
-        name: true,
-        status: true,
-        ribaStage: true,
-        sector: true,
-        labels: true,
-        startDate: true,
-        endDate: true,
-        budget: true,
-        actualSpend: true,
-        clientId: true,
-        clientContactId: true,
-        projectManagerUserId: true,
-        quantitySurveyorUserId: true,
-        contractType: true,
-        contractForm: true,
-        paymentTermsDays: true,
-        retentionPct: true,
-        currency: true,
-        sitePostcode: true,
-        siteLat: true,
-        siteLng: true,
-        country: true,
-        updatedAt: true,
+      include: {
         client: { select: { id: true, name: true } },
-        clientContact: { select: { id: true, name: true, email: true } },
-        projectManager: { select: { id: true, name: true } },
-        quantitySurveyor: { select: { id: true, name: true } },
-        _count: {
-          select: {
-            packages: true,
-            tasks: true,
-            contracts: true,
-            invoices: true,
-          },
-        },
+        clientContact: { select: { id: true, firstName: true, lastName: true, email: true } },
+        projectManager: { select: { id: true, name: true, email: true } },
+        quantitySurveyor: { select: { id: true, name: true, email: true } },
       },
     });
 
@@ -64,75 +38,31 @@ router.get('/projects/:projectId/info', requireAuth, async (req, res) => {
         .json({ error: { code: 'NOT_FOUND', message: 'Project not found' } });
     }
 
+    const out = safeJson(project);
+
+    // Back-compat: expose projectCode alongside code
+    if (out.code && !out.projectCode) {
+      out.projectCode = out.code;
+    }
+
+    // Derive name for contact from firstName/lastName
+    if (out.clientContact) {
+      const { firstName, lastName, email } = out.clientContact;
+      out.clientContact.name = firstName && lastName
+        ? `${firstName} ${lastName}`.trim()
+        : firstName || lastName || email || 'Unknown';
+    }
+
     // Build links array for frontend
-    const links = [];
-    if (project.client) {
-      links.push({
-        type: 'client',
-        id: project.client.id,
-        name: project.client.name,
-        href: `/clients/${project.client.id}`,
-      });
-    }
-    if (project.clientContact) {
-      links.push({
-        type: 'contact',
-        id: project.clientContact.id,
-        name: project.clientContact.name,
-        href: `/contacts/${project.clientContact.id}`,
-      });
-    }
-    if (project.projectManager) {
-      links.push({
-        type: 'user',
-        id: project.projectManager.id,
-        name: project.projectManager.name,
-        href: `/users/${project.projectManager.id}`,
-      });
-    }
-    if (project.quantitySurveyor) {
-      links.push({
-        type: 'user',
-        id: project.quantitySurveyor.id,
-        name: project.quantitySurveyor.name,
-        href: `/users/${project.quantitySurveyor.id}`,
-      });
-    }
+    out.links = buildLinks('projectInfo', {
+      ...out,
+      client: out.client,
+      clientContact: out.clientContact,
+      projectManager: out.projectManager,
+      quantitySurveyor: out.quantitySurveyor,
+    });
 
-    const payload = {
-      id: project.id,
-      projectCode: project.projectCode,
-      name: project.name,
-      status: project.status,
-      ribaStage: project.ribaStage,
-      sector: project.sector,
-      labels: project.labels,
-      startDate: project.startDate,
-      endDate: project.endDate,
-      value: project.budget ?? project.actualSpend ?? 0,
-      clientId: project.clientId,
-      clientContactId: project.clientContactId,
-      projectManagerUserId: project.projectManagerUserId,
-      quantitySurveyorUserId: project.quantitySurveyorUserId,
-      contractType: project.contractType,
-      contractForm: project.contractForm,
-      paymentTermsDays: project.paymentTermsDays,
-      retentionPct: project.retentionPct,
-      currency: project.currency,
-      sitePostcode: project.sitePostcode,
-      siteLat: project.siteLat,
-      siteLng: project.siteLng,
-      country: project.country,
-      client: project.client,
-      clientContact: project.clientContact,
-      projectManager: project.projectManager,
-      quantitySurveyor: project.quantitySurveyor,
-      counts: project._count,
-      links,
-      updatedAt: project.updatedAt,
-    };
-
-    return res.json(payload);
+    return res.json(out);
   } catch (e) {
     console.error('[projects/info] ', e);
     return res.status(500).json({
@@ -169,15 +99,13 @@ router.patch('/projects/:projectId/info', requireAuth, async (req, res) => {
         .json({ error: { code: 'NOT_FOUND', message: 'Project not found' } });
     }
 
-    // Build update data from allowed fields
+    // Map allowed fields to actual Prisma columns
     const data = {};
 
-    // Basic fields
-    if ('projectCode' in body) data.projectCode = body.projectCode;
+    // Basic fields - map projectCode to code
+    if ('projectCode' in body) data.code = body.projectCode;
     if ('name' in body) data.name = body.name;
     if ('status' in body) data.status = body.status;
-    if ('ribaStage' in body) data.ribaStage = body.ribaStage;
-    if ('sector' in body) data.sector = body.sector;
     if ('labels' in body) data.labels = body.labels;
 
     // Client & contacts
@@ -201,36 +129,22 @@ router.patch('/projects/:projectId/info', requireAuth, async (req, res) => {
     if ('siteLng' in body) data.siteLng = body.siteLng ? Number(body.siteLng) : null;
     if ('country' in body) data.country = body.country;
 
+    // Note: ribaStage and sector are NOT in the Prisma schema, so we ignore them
+
     // Update the project
     const updated = await prisma.project.update({
       where: { id: projectId },
       data,
-      select: {
-        id: true,
-        projectCode: true,
-        name: true,
-        status: true,
-        ribaStage: true,
-        sector: true,
-        labels: true,
-        clientId: true,
-        clientContactId: true,
-        projectManagerUserId: true,
-        quantitySurveyorUserId: true,
-        contractType: true,
-        contractForm: true,
-        paymentTermsDays: true,
-        retentionPct: true,
-        currency: true,
-        sitePostcode: true,
-        siteLat: true,
-        siteLng: true,
-        country: true,
-        updatedAt: true,
-      },
     });
 
-    return res.json(updated);
+    const out = safeJson(updated);
+
+    // Back-compat: expose projectCode alongside code
+    if (out.code && !out.projectCode) {
+      out.projectCode = out.code;
+    }
+
+    return res.json(out);
   } catch (e) {
     console.error('[projects/info PATCH] ', e);
     return res.status(500).json({
