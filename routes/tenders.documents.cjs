@@ -180,7 +180,7 @@ router.post('/:tenderId/documents', upload.single('file'), async (req, res, next
         mimeType: file.mimetype,
         size: file.size,
         storageKey,
-        uploadedById: req.user?.id || null
+        uploadedById: req.user?.id ? String(req.user.id) : null
       }
     });
 
