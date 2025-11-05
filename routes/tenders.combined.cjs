@@ -1,3 +1,13 @@
+// ============================================================================
+// LEGACY: Old Combined Tender API
+// ============================================================================
+// This is deprecated legacy code for the old TenderEditor UI.
+// For NEW work, use the canonical RFx/Request module:
+//   - Backend: routes/rfx.cjs, routes/requests.cjs
+//   - Frontend: RfxDetails.jsx (shown to users as "Tenders")
+// This file is kept for backwards compatibility only.
+// ============================================================================
+
 const express = require('express');
 const router  = express.Router();
 const { prisma } = require('../utils/prisma.cjs');

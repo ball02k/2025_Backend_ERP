@@ -1,3 +1,9 @@
+// CANONICAL: Core RFx/Tender API
+// This is the primary backend API used by the canonical Tender UI (RfxDetails.jsx).
+// Provides RFx builder, structure management, invites, Q&A, responses, scoring, and awarding.
+// User-facing route: /api/rfx/* (internal detail - UI shows "Tenders")
+// CANONICAL: /api/rfx/:id/invites used by Tender Invites tab
+
 const express = require('express');
 const crypto = require('crypto');
 const { requireProjectMember } = require('../middleware/membership.cjs');

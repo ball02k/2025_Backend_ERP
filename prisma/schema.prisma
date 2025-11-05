@@ -1039,6 +1039,7 @@ model RequestInvite {
   status           String    @default("invited")
   respondedAt      DateTime?
   responseToken    String?   @unique
+  lastSentAt       DateTime? // Track when invite was last sent/resent
 
   @@index([tenantId, requestId, status])
   @@index([tenantId, responseToken])

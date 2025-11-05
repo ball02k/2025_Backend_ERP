@@ -1,3 +1,8 @@
+// CANONICAL: Core Request/Tender Model API
+// This is the primary CRUD API for the Request model (backend name for Tenders).
+// Used by RfxDetails.jsx (canonical Tender UI) for fetching/updating tender data.
+// User-facing route: /api/requests/* (internal detail - UI shows "Tenders")
+
 const express = require('express');
 const router = express.Router();
 const { prisma, Prisma } = require('../utils/prisma.cjs');
