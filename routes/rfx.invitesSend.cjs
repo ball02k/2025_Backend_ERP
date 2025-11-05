@@ -410,11 +410,9 @@ module.exports = (prisma) => {
       // Note: Tenant model doesn't exist in schema, using fallback name in template context
       const tenant = null;
 
-      // Get email template (default to first template or use env fallback)
-      const emailTemplate = await prisma.emailTemplate.findFirst({
-        where: { tenantId, category: 'rfx_invite', isActive: true },
-        orderBy: { isDefault: 'desc' },
-      });
+      // Note: EmailTemplate model has tenantId as BigInt but we use text tenantId ("demo")
+      // Skip query for now and use fallback templates
+      const emailTemplate = null;
 
       // Subject and body templates
       const subjectTemplate = emailTemplate?.subject || process.env.EMAIL_SUBJECT_DEFAULT || 'RFx Invitation: {{rfx.title}}';
