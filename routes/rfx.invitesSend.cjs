@@ -113,11 +113,8 @@ module.exports = (prisma) => {
         return res.status(404).json({ error: 'RFx not found' });
       }
 
-      // Load tenant name for context (optional)
-      const tenant = await prisma.tenant.findFirst({
-        where: { tenantId },
-        select: { name: true },
-      }).catch(() => null);
+      // Note: Tenant model doesn't exist in schema, using fallback name in template context
+      const tenant = null;
 
       // Build public app URL base
       const publicAppUrl = process.env.PUBLIC_APP_URL || 'http://localhost:5173';
@@ -410,11 +407,8 @@ module.exports = (prisma) => {
         });
       }
 
-      // Get tenant details
-      const tenant = await prisma.tenant.findUnique({
-        where: { id: tenantId },
-        select: { id: true, name: true },
-      });
+      // Note: Tenant model doesn't exist in schema, using fallback name in template context
+      const tenant = null;
 
       // Get email template (default to first template or use env fallback)
       const emailTemplate = await prisma.emailTemplate.findFirst({
