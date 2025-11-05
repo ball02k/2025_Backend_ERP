@@ -382,10 +382,31 @@ module.exports = (prisma) => {
           budgetItems: {
             include: { budgetLine: true },
           },
+          contracts: {
+            where: { status: { not: 'archived' } }, // Exclude archived contracts
+            orderBy: { createdAt: 'desc' },
+            select: { id: true, status: true },
+          },
         },
       });
 
-      // Calculate budgetTotal for each package from budgetItems
+      // Get tenantId for querying tenders
+      const tenantId = req.user?.tenantId || req.tenantId || 'demo';
+
+      // Check for existing tenders (RFx) for each package
+      const packageIds = packages.map(pkg => pkg.id);
+      console.log('[projects.js] Checking for tenders:', { tenantId, projectId, packageIds });
+      const existingRfx = await prisma.request.findMany({
+        where: { tenantId, packageId: { in: packageIds } },
+        select: { id: true, packageId: true, status: true }
+      }).catch((err) => {
+        console.error('[projects.js] Failed to query requests:', err.message);
+        return [];
+      });
+      console.log('[projects.js] Found tenders:', existingRfx);
+      const rfxMap = new Map(existingRfx.map(r => [r.packageId, { id: r.id, status: r.status }]));
+
+      // Calculate budgetTotal for each package from budgetItems + add sourcing fields
       const packagesWithBudget = packages.map((pkg) => {
         const budgetTotal = Array.isArray(pkg.budgetItems)
           ? pkg.budgetItems.reduce((sum, item) => {
@@ -396,11 +417,55 @@ module.exports = (prisma) => {
             }, 0)
           : 0;
 
-        // Remove budgetItems from response to keep it clean
-        const { budgetItems, ...rest } = pkg;
-        return { ...rest, budgetTotal };
+        // Determine sourcing status and related info
+        let sourcingStatus = null;
+        let tenderId = null;
+        let contractId = null;
+
+        // Check for active tender (Request table)
+        const rfxInfo = rfxMap.get(pkg.id);
+        if (rfxInfo && ['draft', 'open', 'issued', 'evaluating'].includes(rfxInfo.status)) {
+          sourcingStatus = 'tender';
+          tenderId = rfxInfo.id;
+        }
+
+        // Check for contract (takes precedence if exists)
+        const primaryContract = pkg.contracts && pkg.contracts[0];
+        if (primaryContract) {
+          contractId = primaryContract.id;
+          if (!sourcingStatus) {
+            sourcingStatus = 'direct_award';
+          }
+        }
+
+        // Debug log for first package
+        if (pkg.id === packageIds[0]) {
+          console.log('[projects.js] First package sourcing:', {
+            packageId: pkg.id,
+            packageName: pkg.name,
+            sourcingStatus,
+            tenderId,
+            contractId,
+            hasContracts: pkg.contracts?.length,
+          });
+        }
+
+        // Remove budgetItems and contracts from response to keep it clean
+        const { budgetItems, contracts, ...rest } = pkg;
+
+        // Add sourcing fields + legacy fields for compatibility
+        return {
+          ...rest,
+          budgetTotal,
+          sourcingStatus,
+          tenderId,
+          contractId,
+          requestId: rfxInfo?.id,  // Legacy field
+          hasRfx: !!rfxInfo,        // Legacy field
+        };
       });
 
+      console.log('[projects.js] Returning', packagesWithBudget.length, 'packages');
       return res.json({ data: packagesWithBudget });
     } catch (err) {
       console.error('GET /projects/:projectId/packages failed:', err);

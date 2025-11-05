@@ -810,6 +810,8 @@ async function updateContractStatus(req, res, status) {
 router.post('/contracts/:id/issue', (req, res) => updateContractStatus(req, res, 'issued'));
 router.post('/contracts/:id/send-for-signature', (req, res) => updateContractStatus(req, res, 'sent_for_signature'));
 router.post('/contracts/:id/mark-signed', (req, res) => updateContractStatus(req, res, 'signed'));
+router.post('/contracts/:id/revert-to-draft', (req, res) => updateContractStatus(req, res, 'draft'));
+router.post('/contracts/:id/archive', (req, res) => updateContractStatus(req, res, 'archived'));
 
 // DELETE /contracts/:id
 router.delete('/contracts/:id', requireAuth, requirePermission('contracts:delete'), async (req, res) => {

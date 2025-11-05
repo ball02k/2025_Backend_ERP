@@ -188,6 +188,7 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
             },
           },
           contracts: {
+            where: { status: { not: 'archived' } }, // Exclude archived contracts
             orderBy: { createdAt: 'desc' },
             select: {
               id: true,
@@ -222,10 +223,15 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
 
     // Check for existing RFx for each package
     const packageIds = rows.map(pkg => pkg.id);
+    console.log('[projects.packages] Checking for tenders:', { tenantId, packageIds });
     const existingRfx = await prisma.request.findMany({
       where: { tenantId, packageId: { in: packageIds } },
       select: { id: true, packageId: true, status: true }
-    }).catch(() => []);
+    }).catch((err) => {
+      console.error('[projects.packages] Failed to query requests:', err.message);
+      return [];
+    });
+    console.log('[projects.packages] Found tenders:', existingRfx);
     const rfxMap = new Map(existingRfx.map(r => [r.packageId, { id: r.id, status: r.status }]));
 
     const data = rows.map((pkg) => {
@@ -264,8 +270,21 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
       normalized.tenderId = tenderId;
       normalized.contractId = contractId;
 
+      // Debug log for first package
+      if (pkg.id === packageIds[0]) {
+        console.log('[projects.packages] First package sourcing:', {
+          packageId: pkg.id,
+          packageName: pkg.name,
+          sourcingStatus,
+          tenderId,
+          contractId,
+          hasContracts: normalized.contracts?.length,
+        });
+      }
+
       return normalized;
     });
+    console.log('[projects.packages] Returning', data.length, 'packages');
     res.json({ items: data, total: data.length });
   } catch (e) { next(e); }
 });
@@ -385,6 +404,7 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
           ...packageSelect,
           awardSupplier: { select: { id: true, name: true } },
           contracts: {
+            where: { status: { not: 'archived' } }, // Exclude archived contracts
             orderBy: { createdAt: 'desc' },
             select: {
               id: true,
@@ -618,6 +638,7 @@ router.get('/packages/:packageId', async (req, res, next) => {
           ...packageSelect,
           awardSupplier: { select: { id: true, name: true } },
           contracts: {
+            where: { status: { not: 'archived' } }, // Exclude archived contracts
             orderBy: { createdAt: 'desc' },
             select: {
               id: true,
