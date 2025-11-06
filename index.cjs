@@ -356,7 +356,13 @@ app.use('/api/settings/tender-templates', requireAuth, tenderTemplatesRouter);
 app.use('/api/settings/email-templates', requireAuth, emailTemplatesRouter);
 app.get('/api/v1/tenants/modules', requireAuth, (req, res) => {
   const tenantId = req.user?.tenantId || TENANT_DEFAULT;
-  res.json({ tenantId, modules: ['scope_suggest'] });
+  // Return both modules array and individual boolean properties for backwards compatibility
+  res.json({
+    tenantId,
+    modules: ['scope_suggest', 'tendering', 'rfx'],
+    tendering: true,
+    rfx: true
+  });
 });
 
 app.use('/api', directAwardRouter);
