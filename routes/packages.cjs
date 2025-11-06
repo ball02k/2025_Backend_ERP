@@ -365,12 +365,15 @@ router.get(
 
     let lines = [];
     try {
-      lines = await prisma.budgetLineItem.findMany({
+      // Get budget lines through the PackageItem join table
+      const packageItems = await prisma.packageItem.findMany({
         where: { packageId: pkg.id },
+        include: { budgetLine: true },
         orderBy: { id: 'asc' },
       });
+      lines = packageItems.map(pi => pi.budgetLine).filter(Boolean);
     } catch (err) {
-      console.warn('[server/packages.get] budgetLineItem lookup skipped', err?.message || err);
+      console.warn('[server/packages.get] PackageItem lookup skipped', err?.message || err);
       lines = [];
     }
 

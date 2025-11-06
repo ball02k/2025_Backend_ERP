@@ -60,33 +60,87 @@ router.post('/packages/:id/direct-award', requireProjectMember, async (req, res)
       }
     }
 
-    const packageLineItems = await prisma.packageLineItem.findMany({
-      where: { packageId: pkg.id, tenantId },
-      orderBy: { id: 'asc' },
-    });
+    // Try to get PackageLineItem records first (new join table approach)
+    let packageLineItems = [];
+    try {
+      packageLineItems = await prisma.packageLineItem.findMany({
+        where: { packageId: pkg.id, tenantId },
+        orderBy: { id: 'asc' },
+      });
+      console.log(`[direct-award] PackageLineItem lookup: found ${packageLineItems.length} records`);
+    } catch (err) {
+      console.warn('[direct-award] PackageLineItem lookup failed, trying budgetLineItem', err?.message);
+    }
 
+    // Fallback to PackageItem (join table for package -> budgetLine) if PackageLineItem doesn't exist or is empty
+    let budgetLines = [];
     if (!packageLineItems.length) {
-      return res.status(400).json({ error: 'NO_PACKAGE_LINES' });
+      try {
+        const packageItems = await prisma.packageItem.findMany({
+          where: { packageId: pkg.id, tenantId },
+          include: { budgetLine: true },
+          orderBy: { id: 'asc' },
+        });
+        console.log(`[direct-award] PackageItem lookup: found ${packageItems.length} records`);
+        // Extract the budgetLine from each packageItem
+        budgetLines = packageItems.map(pi => pi.budgetLine).filter(Boolean);
+        console.log(`[direct-award] budgetLine extracted: found ${budgetLines.length} records`);
+        if (budgetLines.length > 0) {
+          console.log('[direct-award] Sample budgetLine:', JSON.stringify(budgetLines[0], null, 2));
+        }
+      } catch (err) {
+        console.warn('[direct-award] PackageItem lookup failed', err?.message);
+      }
+    }
+
+    // Combine both approaches - prefer PackageLineItem but fall back to budgetLineItem
+    const allLines = packageLineItems.length > 0 ? packageLineItems : budgetLines;
+    console.log(`[direct-award] Total lines available: ${allLines.length} (from ${packageLineItems.length > 0 ? 'PackageLineItem' : 'budgetLineItem'})`);
+
+    // Allow direct awards without budget lines if user provides manual award amount
+    if (!allLines.length) {
+      // If no package lines and no manual amount provided, return error
+      if (!body.awardAmount || !Number.isFinite(Number(body.awardAmount))) {
+        return res.status(400).json({
+          error: 'NO_PACKAGE_LINES',
+          message: 'This package has no budget lines. Please either add budget lines or provide a manual award amount.'
+        });
+      }
+      // Continue with empty line items - will create contract with just the award amount
     }
 
     const selectedSet = new Set(selectedLineIds);
-    const chosenLines =
-      mode === 'selected'
-        ? packageLineItems.filter(
+    const chosenLines = allLines.length === 0
+      ? [] // No lines available, create contract without line items
+      : mode === 'selected'
+        ? allLines.filter(
             (line) =>
               selectedSet.has(Number(line.budgetLineItemId)) ||
               selectedSet.has(Number(line.id))
           )
-        : packageLineItems;
+        : allLines;
 
-    if (!chosenLines.length) {
+    // Only check for selected lines if package has lines
+    if (allLines.length > 0 && mode === 'selected' && !chosenLines.length) {
       return res.status(400).json({ error: 'NO_SELECTED_LINES' });
     }
 
+    // Extract budget line IDs - handle both PackageLineItem and budgetLineItem
+    const isBudgetLineItemDirect = budgetLines.length > 0;
     const chosenBudgetLineIds = chosenLines
-      .map((line) => (line.budgetLineItemId != null ? Number(line.budgetLineItemId) : null))
+      .map((line) => {
+        if (isBudgetLineItemDirect && !line.budgetLineItemId) {
+          // This is a budgetLineItem record - use its ID directly
+          return Number(line.id);
+        }
+        // This is a PackageLineItem record - use budgetLineItemId field
+        return line.budgetLineItemId != null ? Number(line.budgetLineItemId) : null;
+      })
       .filter((id) => Number.isFinite(id));
-    const chosenPackageLineItemIds = chosenLines.map((line) => line.id).filter((id) => Number.isFinite(id));
+
+    const chosenPackageLineItemIds = isBudgetLineItemDirect
+      ? [] // budgetLineItem records don't have packageLineItemIds
+      : chosenLines.map((line) => line.id).filter((id) => Number.isFinite(id));
 
     let conflicts = [];
     if (chosenBudgetLineIds.length) {
@@ -151,8 +205,7 @@ router.post('/packages/:id/direct-award', requireProjectMember, async (req, res)
       });
     }
 
-    const chosenItems =
-      chosenLines;
+    const chosenItems = chosenLines;
 
     let subtotal = new Prisma.Decimal(0);
     const lineSnapshots = chosenItems.map((line) => {
@@ -167,9 +220,17 @@ router.post('/packages/:id/direct-award', requireProjectMember, async (req, res)
         }
       }
       subtotal = subtotal.add(totalDecimal);
+
+      // Determine if this is a PackageLineItem (join table) or budgetLineItem (direct)
+      // PackageLineItem has: id (packageLineItemId), budgetLineItemId (foreign key)
+      // budgetLineItem has: id (budgetLineItemId itself), no budgetLineItemId field
+      const isBudgetLineItemDirect = budgetLines.length > 0 && !line.budgetLineItemId;
+
       return {
-        packageLineItemId: line.id ?? null,
-        budgetLineId: line.budgetLineItemId != null ? Number(line.budgetLineItemId) : null,
+        packageLineItemId: isBudgetLineItemDirect ? null : (line.id ?? null),
+        budgetLineId: isBudgetLineItemDirect
+          ? Number(line.id) // budgetLineItem.id IS the budget line ID
+          : (line.budgetLineItemId != null ? Number(line.budgetLineItemId) : null),
         description: line.description || '',
         qty: qtyDecimal,
         rate: rateDecimal,
