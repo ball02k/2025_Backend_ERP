@@ -82,7 +82,7 @@ router.post('/register', async (req, res) => {
     // Generate JWT token with userId, email, role
     const token = jwt.sign(
       {
-        userId: newUser.id,
+        sub: newUser.id,
         email: newUser.email,
         role: newUser.role,
         tenantId: newUser.tenantId
@@ -163,7 +163,7 @@ router.post('/login', async (req, res) => {
     // Generate JWT token with 7 day expiry
     const token = jwt.sign(
       {
-        userId: user.id,
+        sub: user.id,
         email: user.email,
         role: user.role,
         tenantId: user.tenantId
