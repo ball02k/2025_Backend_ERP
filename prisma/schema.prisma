@@ -25,6 +25,12 @@ enum ResponsePricingType {
   HYBRID_WITH_BREAKDOWN // Supplier provided both total and breakdown
 }
 
+enum UserRoleEnum {
+  dev
+  user
+  admin
+}
+
 // Supplier Onboarding
 model OnboardingProject {
   id        Int      @id @default(autoincrement())
@@ -716,6 +722,7 @@ model User {
   email       String              @unique
   name        String
   passwordSHA String
+  role        UserRoleEnum        @default(user)
   isActive    Boolean             @default(true)
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
