@@ -1,6 +1,12 @@
 const { isDevAuthEnabled } = require('../utils/devFlags.cjs');
 
 module.exports = function devAuth(req, _res, next) {
+  // Skip authentication for public routes
+  const publicPaths = ['/auth', '/health', '/status', '/api/health', '/api/public'];
+  if (publicPaths.some(path => req.path.startsWith(path))) {
+    return next();
+  }
+
   // Dev-only shortcut to attach a demo user when no token is provided
   const bypass = isDevAuthEnabled();
   if (!bypass) return next();
