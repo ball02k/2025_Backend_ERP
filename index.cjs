@@ -128,6 +128,8 @@ const defaultOrigins = [
   'http://localhost:3000', // common React dev server
   'http://localhost:4173', // Vite preview
   'http://localhost:4174',
+  'https://two025-erp-yqs4.onrender.com',      // Render static site
+  'https://two025-frontend-erp.onrender.com', // Render web service
 ];
 const envOrigins = (process.env.CORS_ORIGINS || '')
   .split(',')
