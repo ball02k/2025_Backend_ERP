@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "aba8a3c"
+    "version": "c7b4deb"
   },
   "paths": {
     "*": {
@@ -188,6 +188,90 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "//api/public/rfx/respond/{responseToken}": {
+      "get": {
+        "summary": "GET //api/public/rfx/respond/:responseToken",
+        "parameters": [
+          {
+            "name": "responseToken",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/public/rfx/respond/{responseToken}/save": {
+      "post": {
+        "summary": "POST //api/public/rfx/respond/:responseToken/save",
+        "parameters": [
+          {
+            "name": "responseToken",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/public/rfx/respond/{responseToken}/submit": {
+      "post": {
+        "summary": "POST //api/public/rfx/respond/:responseToken/submit",
+        "parameters": [
+          {
+            "name": "responseToken",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
       }
     },
     "//api/users": {
@@ -1415,6 +1499,60 @@
             "bearerAuth": []
           }
         ]
+      },
+      "patch": {
+        "summary": "PATCH //api/projects/projects/:projectId/info",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Forbidden"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "//api/projects/{id}/overview": {
@@ -2175,32 +2313,6 @@
             }
           }
         }
-      },
-      "patch": {
-        "summary": "PATCH //api/packages/:packageId",
-        "parameters": [
-          {
-            "name": "packageId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 1,
-                  "updated": true
-                }
-              }
-            }
-          }
-        }
       }
     },
     "//api/packages/{packageId}/invites": {
@@ -2259,9 +2371,9 @@
         }
       }
     },
-    "//api/{id}/tenders": {
+    "//api/projects/{id}/tenders": {
       "get": {
-        "summary": "GET //api/:id/tenders",
+        "summary": "GET //api/projects/:id/tenders",
         "parameters": [
           {
             "name": "id",
@@ -2287,7 +2399,7 @@
         }
       },
       "post": {
-        "summary": "POST //api/:id/tenders",
+        "summary": "POST //api/projects/:id/tenders",
         "parameters": [
           {
             "name": "id",
@@ -2311,6 +2423,148 @@
             }
           }
         }
+      }
+    },
+    "//api/projects/{projectId}/tenders/{tenderId}": {
+      "delete": {
+        "summary": "DELETE //api/projects/:projectId/tenders/:tenderId",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "tenderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/packages/{id}": {
+      "patch": {
+        "summary": "PATCH //api/packages/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "GET //api/packages/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "DELETE //api/packages/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Forbidden"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "//api/packages/{id}/check-sourcing": {
@@ -2358,86 +2612,6 @@
                       "_example": true
                     }
                   ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/packages": {
-      "get": {
-        "summary": "GET //api/packages",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "total": 1,
-                  "items": [
-                    {
-                      "id": 1,
-                      "_example": true
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/packages/{packageId}/add-budget-lines": {
-      "post": {
-        "summary": "POST //api/packages/:packageId/add-budget-lines",
-        "parameters": [
-          {
-            "name": "packageId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 101,
-                  "created": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/packages/{id}/contracts": {
-      "get": {
-        "summary": "GET //api/packages/:id/contracts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": 1,
-                  "_example": true
                 }
               }
             }
@@ -2522,61 +2696,6 @@
                 "example": {
                   "id": 101,
                   "created": true
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "example": {
-                  "error": "Unauthorized"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "example": {
-                  "error": {
-                    "code": "FORBIDDEN",
-                    "message": "Forbidden"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ]
-      }
-    },
-    "//api/packages/{id}": {
-      "delete": {
-        "summary": "DELETE //api/packages/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "ok": true
                 }
               }
             }
@@ -2914,6 +3033,62 @@
     "//api/contracts/{id}/mark-signed": {
       "post": {
         "summary": "POST //api/contracts/:id/mark-signed",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/contracts/{id}/revert-to-draft": {
+      "post": {
+        "summary": "POST //api/contracts/:id/revert-to-draft",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/contracts/{id}/archive": {
+      "post": {
+        "summary": "POST //api/contracts/:id/archive",
         "parameters": [
           {
             "name": "id",
@@ -3436,6 +3611,88 @@
         }
       }
     },
+    "//api/projects/rfx/{rfxId}/invites": {
+      "get": {
+        "summary": "GET //api/projects/rfx/:rfxId/invites",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //api/projects/rfx/:rfxId/invites",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/projects/rfx/{rfxId}/quick-invite": {
+      "post": {
+        "summary": "POST //api/projects/rfx/:rfxId/quick-invite",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/{projectId}/rfx": {
       "get": {
         "summary": "GET //api/:projectId/rfx",
@@ -3542,6 +3799,88 @@
         "parameters": [
           {
             "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/rfx/{rfxId}/invites": {
+      "get": {
+        "summary": "GET //api/rfx/:rfxId/invites",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //api/rfx/:rfxId/invites",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/rfx/{rfxId}/quick-invite": {
+      "post": {
+        "summary": "POST //api/rfx/:rfxId/quick-invite",
+        "parameters": [
+          {
+            "name": "rfxId",
             "in": "path",
             "required": true,
             "schema": {
@@ -3967,6 +4306,42 @@
         }
       }
     },
+    "//api/rfx-builder/{rfxId}/apply-template/{templateId}": {
+      "post": {
+        "summary": "POST //api/rfx-builder/:rfxId/apply-template/:templateId",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "templateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/rfx-builder/{rfxId}/issue": {
       "post": {
         "summary": "POST //api/rfx-builder/:rfxId/issue",
@@ -4085,6 +4460,90 @@
         "parameters": [
           {
             "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/rfx/{rfxId}/send-invites": {
+      "post": {
+        "summary": "POST //api/rfx/:rfxId/send-invites",
+        "parameters": [
+          {
+            "name": "rfxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/rfx/invites/{inviteId}/resend": {
+      "post": {
+        "summary": "POST //api/rfx/invites/:inviteId/resend",
+        "parameters": [
+          {
+            "name": "inviteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/rfx/invites/{inviteId}/remove": {
+      "post": {
+        "summary": "POST //api/rfx/invites/:inviteId/remove",
+        "parameters": [
+          {
+            "name": "inviteId",
             "in": "path",
             "required": true,
             "schema": {
@@ -6401,6 +6860,34 @@
         }
       }
     },
+    "//api/tenders/{tenderId}/quick-invite": {
+      "post": {
+        "summary": "POST //api/tenders/:tenderId/quick-invite",
+        "parameters": [
+          {
+            "name": "tenderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/tenders/{tenderId}/clarifications": {
       "get": {
         "summary": "GET //api/tenders/:tenderId/clarifications",
@@ -6765,6 +7252,30 @@
                 "example": {
                   "id": 101,
                   "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/packages": {
+      "get": {
+        "summary": "GET //api/packages",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "total": 1,
+                  "items": [
+                    {
+                      "id": 1,
+                      "_example": true
+                    }
+                  ]
                 }
               }
             }
@@ -12384,6 +12895,30 @@
         }
       }
     },
+    "//api/suppliers/qualified": {
+      "get": {
+        "summary": "GET //api/suppliers/qualified",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "total": 1,
+                  "items": [
+                    {
+                      "id": 1,
+                      "_example": true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//api/suppliers/{id}": {
       "get": {
         "summary": "GET //api/suppliers/:id",
@@ -12587,30 +13122,6 @@
                 "example": {
                   "id": 1,
                   "_example": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "//api/suppliers/qualified": {
-      "get": {
-        "summary": "GET //api/suppliers/qualified",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "example": {
-                  "total": 1,
-                  "items": [
-                    {
-                      "id": 1,
-                      "_example": true
-                    }
-                  ]
                 }
               }
             }
@@ -14354,6 +14865,60 @@
                 "example": {
                   "id": 1,
                   "_example": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Forbidden"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "summary": "PATCH //api/projects/:projectId/info",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
                 }
               }
             }
@@ -17129,6 +17694,246 @@
                 "example": {
                   "id": 1,
                   "updated": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/settings/tender-templates": {
+      "get": {
+        "summary": "GET //api/settings/tender-templates",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "total": 1,
+                  "items": [
+                    {
+                      "id": 1,
+                      "_example": true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //api/settings/tender-templates",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/settings/tender-templates/{id}": {
+      "get": {
+        "summary": "GET //api/settings/tender-templates/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "PATCH //api/settings/tender-templates/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "DELETE //api/settings/tender-templates/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/settings/email-templates": {
+      "get": {
+        "summary": "GET //api/settings/email-templates",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "total": 1,
+                  "items": [
+                    {
+                      "id": 1,
+                      "_example": true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "POST //api/settings/email-templates",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//api/settings/email-templates/{id}": {
+      "get": {
+        "summary": "GET //api/settings/email-templates/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "_example": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "PATCH //api/settings/email-templates/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 1,
+                  "updated": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "DELETE //api/settings/email-templates/:id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true
                 }
               }
             }
