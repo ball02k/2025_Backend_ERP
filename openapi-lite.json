@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "API",
-    "version": "90064dc"
+    "version": "5daac33"
   },
   "paths": {
     "*": {
@@ -119,6 +119,25 @@
         }
       }
     },
+    "//auth/register": {
+      "post": {
+        "summary": "POST //auth/register",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": 101,
+                  "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "//auth/login": {
       "post": {
         "summary": "POST //auth/login",
@@ -131,6 +150,30 @@
                 "example": {
                   "id": 101,
                   "created": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "//auth/me": {
+      "get": {
+        "summary": "GET //auth/me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "total": 1,
+                  "items": [
+                    {
+                      "id": 1,
+                      "_example": true
+                    }
+                  ]
                 }
               }
             }
