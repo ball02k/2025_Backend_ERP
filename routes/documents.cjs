@@ -25,6 +25,17 @@ function ensureS3(){
   if (!S3Client) {
     ({ S3Client, PutObjectCommand } = require('@aws-sdk/client-s3'));
     ({ getSignedUrl } = require('@aws-sdk/s3-request-presigner'));
+
+    // Debug logging for S3 configuration
+    console.log('🔧 S3 Config:', {
+      provider: STORAGE_PROVIDER,
+      region: process.env.S3_REGION,
+      endpoint: process.env.S3_ENDPOINT,
+      bucket: process.env.S3_BUCKET,
+      hasAccessKey: !!process.env.AWS_ACCESS_KEY_ID,
+      hasSecretKey: !!process.env.AWS_SECRET_ACCESS_KEY
+    });
+
     s3 = new S3Client({
       region: process.env.S3_REGION || 'us-east-1',
       endpoint: process.env.S3_ENDPOINT,
