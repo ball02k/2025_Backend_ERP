@@ -131,6 +131,7 @@ router.get('/:id', async (req, res) => {
 
 // INIT upload (presign S3 or issue local upload URL)
 router.post('/init', async (req, res) => {
+  console.log('🚨 INIT ENDPOINT CALLED - STORAGE_PROVIDER:', process.env.STORAGE_PROVIDER || 'undefined');
   try {
     const { fileName, contentType } = req.body || {};
     if (!fileName) return res.status(400).json({ error: 'fileName is required' });
