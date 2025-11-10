@@ -140,8 +140,25 @@ router.post('/init', async (req, res) => {
       ensureS3();
       const bucket = process.env.S3_BUCKET;
       if (!bucket) return res.status(500).json({ error: 'S3_BUCKET not configured' });
-      const cmd = new PutObjectCommand({ Bucket: bucket, Key: storageKey, ContentType: contentType || 'application/octet-stream' });
+
+      // Log config for debugging
+      console.log('🔧 Generating presigned URL with:', {
+        endpoint: process.env.S3_ENDPOINT,
+        bucket,
+        key: storageKey,
+        contentType: contentType || 'application/octet-stream'
+      });
+
+      const cmd = new PutObjectCommand({
+        Bucket: bucket,
+        Key: storageKey,
+        ContentType: contentType || 'application/octet-stream'
+      });
+
       const uploadUrl = await getSignedUrl(s3, cmd, { expiresIn: 900 });
+
+      console.log('📤 Generated presigned URL:', uploadUrl.substring(0, 150) + '...');
+
       return res.json({ data: { provider: 's3', storageKey, uploadUrl, bucket } });
     } else {
       const token = signKey(storageKey);
