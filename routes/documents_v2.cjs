@@ -18,13 +18,26 @@ function ensureS3() {
   if (!S3Client) {
     ({ S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3'));
     ({ getSignedUrl } = require('@aws-sdk/s3-request-presigner'));
-    s3 = new S3Client({
+
+    // Debug logging for S3 configuration
+    console.log('🔧 S3 Config:', {
+      provider: STORAGE_PROVIDER,
       region: process.env.S3_REGION,
+      endpoint: process.env.S3_ENDPOINT,
+      bucket: process.env.S3_BUCKET,
+      hasAccessKey: !!process.env.AWS_ACCESS_KEY_ID,
+      hasSecretKey: !!process.env.AWS_SECRET_ACCESS_KEY
+    });
+
+    s3 = new S3Client({
+      region: process.env.S3_REGION || 'us-east-1',
+      endpoint: process.env.S3_ENDPOINT,
+      forcePathStyle: true, // Critical for Oracle Cloud compatibility
       credentials:
-        process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY
+        process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
           ? {
-              accessKeyId: process.env.S3_ACCESS_KEY_ID,
-              secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+              accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+              secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
             }
           : undefined,
     });
@@ -33,6 +46,7 @@ function ensureS3() {
 
 // POST /api/documents/init
 router.post('/init', async (req, res) => {
+  console.log('🚨 INIT ENDPOINT CALLED - STORAGE_PROVIDER:', STORAGE_PROVIDER);
   try {
     // Accept both new and legacy field names from FE
     const body = req.body || {};
@@ -49,7 +63,23 @@ router.post('/init', async (req, res) => {
         ContentType: mimeType || 'application/octet-stream',
       });
       const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-      return res.json({ data: { storageKey, uploadUrl } });
+
+      // Fix: AWS SDK v3 presigner doesn't respect custom endpoints for Oracle Cloud
+      // Manually rewrite URL to use Oracle Cloud endpoint
+      let finalUrl = uploadUrl;
+      if (process.env.S3_ENDPOINT && uploadUrl.includes('amazonaws.com')) {
+        const awsPattern = /https:\/\/([^.]+)\.s3\.([^.]+)\.amazonaws\.com\/([^?]+)(\?.*)/;
+        const match = uploadUrl.match(awsPattern);
+        if (match) {
+          const [, bucket, region, key, queryString] = match;
+          finalUrl = `${process.env.S3_ENDPOINT}/${bucket}/${key}${queryString}`;
+          console.log('🔄 Rewrote AWS URL to Oracle Cloud:', finalUrl.substring(0, 150) + '...');
+        }
+      }
+
+      console.log('📤 Generated presigned URL:', finalUrl.substring(0, 150) + '...');
+
+      return res.json({ data: { storageKey, uploadUrl: finalUrl } });
     }
 
     const token = signKey(storageKey);
