@@ -161,14 +161,15 @@ async function loadDocumentBufferById(tenantId, fileId) {
   const idBig = BigInt(String(fileId));
   const doc = await prisma.document.findFirst({
     where: { id: idBig, tenantId },
-    select: { storageKey: true, filename: true, storageProvider: true },
+    select: { storageKey: true, filename: true },
   });
   if (!doc) throw new Error('DOCUMENT_NOT_FOUND');
 
+  // Check environment variable for storage provider
+  const STORAGE_PROVIDER = (process.env.STORAGE_PROVIDER || 'local').toLowerCase();
+
   // Handle S3 storage
-  if (doc.storageProvider === 's3') {
-    const STORAGE_PROVIDER = (process.env.STORAGE_PROVIDER || 'local').toLowerCase();
-    if (STORAGE_PROVIDER !== 's3') throw new Error('S3 not configured');
+  if (STORAGE_PROVIDER === 's3') {
 
     const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
     const s3 = new S3Client({
