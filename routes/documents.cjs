@@ -175,7 +175,12 @@ router.post('/init', async (req, res) => {
 
       console.log('📤 Generated presigned URL:', finalUrl.substring(0, 150) + '...');
 
-      return res.json({ data: { provider: 's3', storageKey, uploadUrl: finalUrl, bucket } });
+      return res.json({
+        storageKey,
+        url: finalUrl,
+        method: 'PUT',
+        mimeType: contentType || 'application/octet-stream'
+      });
     } else {
       const token = signKey(storageKey);
       const uploadUrl = `/api/documents/local/upload/${encodeURIComponent(storageKey)}?token=${token}`;
