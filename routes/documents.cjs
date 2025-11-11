@@ -158,9 +158,24 @@ router.post('/init', async (req, res) => {
 
       const uploadUrl = await getSignedUrl(s3, cmd, { expiresIn: 900 });
 
-      console.log('📤 Generated presigned URL:', uploadUrl.substring(0, 150) + '...');
+      // Fix: AWS SDK v3 presigner doesn't respect custom endpoints for Oracle Cloud
+      // Manually rewrite URL to use Oracle Cloud endpoint
+      let finalUrl = uploadUrl;
+      if (process.env.S3_ENDPOINT && uploadUrl.includes('amazonaws.com')) {
+        // Extract bucket, key, and query string from AWS URL
+        const awsPattern = /https:\/\/([^.]+)\.s3\.([^.]+)\.amazonaws\.com\/([^?]+)(\?.*)/;
+        const match = uploadUrl.match(awsPattern);
+        if (match) {
+          const [, bucket, region, key, queryString] = match;
+          // Reconstruct URL with Oracle Cloud endpoint (path-style)
+          finalUrl = `${process.env.S3_ENDPOINT}/${bucket}/${key}${queryString}`;
+          console.log('🔄 Rewrote AWS URL to Oracle Cloud:', finalUrl.substring(0, 150) + '...');
+        }
+      }
 
-      return res.json({ data: { provider: 's3', storageKey, uploadUrl, bucket } });
+      console.log('📤 Generated presigned URL:', finalUrl.substring(0, 150) + '...');
+
+      return res.json({ data: { provider: 's3', storageKey, uploadUrl: finalUrl, bucket } });
     } else {
       const token = signKey(storageKey);
       const uploadUrl = `/api/documents/local/upload/${encodeURIComponent(storageKey)}?token=${token}`;
