@@ -156,14 +156,42 @@ function parseCsvString(csvText) {
   return { headers, rows };
 }
 
-/** Load a document file buffer by id using local storage provider. */
+/** Load a document file buffer by id from S3 or local storage. */
 async function loadDocumentBufferById(tenantId, fileId) {
   const idBig = BigInt(String(fileId));
   const doc = await prisma.document.findFirst({
     where: { id: idBig, tenantId },
-    select: { storageKey: true, filename: true },
+    select: { storageKey: true, filename: true, storageProvider: true },
   });
   if (!doc) throw new Error('DOCUMENT_NOT_FOUND');
+
+  // Handle S3 storage
+  if (doc.storageProvider === 's3') {
+    const STORAGE_PROVIDER = (process.env.STORAGE_PROVIDER || 'local').toLowerCase();
+    if (STORAGE_PROVIDER !== 's3') throw new Error('S3 not configured');
+
+    const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+    const s3 = new S3Client({
+      region: process.env.S3_REGION || 'us-east-1',
+      endpoint: process.env.S3_ENDPOINT,
+      forcePathStyle: true,
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      },
+    });
+
+    const command = new GetObjectCommand({
+      Bucket: process.env.S3_BUCKET,
+      Key: doc.storageKey,
+    });
+
+    const response = await s3.send(command);
+    const buf = Buffer.from(await response.Body.transformToByteArray());
+    return { buf, filename: doc.filename || path.basename(doc.storageKey) };
+  }
+
+  // Handle local storage
   const p = localPath(doc.storageKey);
   if (!fs.existsSync(p)) throw new Error('FILE_NOT_FOUND');
   const buf = fs.readFileSync(p);
