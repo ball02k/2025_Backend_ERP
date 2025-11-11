@@ -48,6 +48,9 @@ function attachUser(req, _res, next) {
 }
 
 function requireAuth(req, res, next) {
+  // Skip auth check for OPTIONS (CORS preflight)
+  if (req.method === 'OPTIONS') return next();
+
   if (!req.user || !Number.isFinite(Number(req.user.id)) || !req.user.tenantId) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
