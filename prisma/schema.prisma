@@ -328,11 +328,20 @@ model Variation {
   contractId   Int?
 
   // Core identifiers
-  reference     String? @db.VarChar(64)
-  referenceCode String? @db.VarChar(64) // legacy
-  title         String  @db.VarChar(255)
-  description   String? @db.Text
-  contractType  String  @db.VarChar(24)
+  reference          String? @db.VarChar(64)
+  referenceCode      String? @db.VarChar(64) // legacy
+  variationNumber    String? @db.VarChar(50) // VO-001, VO-002, etc.
+  title              String  @db.VarChar(255)
+  description        String? @db.Text
+  contractType       String  @db.VarChar(24)
+
+  // Initiation details
+  siteInstructionRef String? @db.VarChar(100)
+  instructedBy       Int?    // User ID
+  instructionDate    DateTime?
+  originatedFrom     String? @db.VarChar(50) // Client, Architect, Engineer, etc.
+  urgency            String  @default("standard") @db.VarChar(20) // standard, urgent, critical
+  category           String? @db.VarChar(50) // Addition, Omission, Substitution, Daywork
 
   // Strings (avoid Prisma enums)
   type        String  @db.VarChar(24)
@@ -349,11 +358,35 @@ model Variation {
   notes          String?
   justification  String?
 
+  // Detailed financial breakdown (UK construction practice)
+  estimatedValue   Decimal? @db.Decimal(18, 2)  // Initial estimate
+  quotedValue      Decimal? @db.Decimal(18, 2)  // Contractor's quote
+  negotiatedValue  Decimal? @db.Decimal(18, 2)  // After negotiation
+  approvedValue    Decimal? @db.Decimal(18, 2)  // Final approved
+  certifiedValue   Decimal? @db.Decimal(18, 2)  // Certified for payment
+  dayworkValue     Decimal? @db.Decimal(18, 2)  // Daywork portion
+  breakdown        Json?                         // Array of cost items
+
   // Legacy/computed fields retained for compatibility
   estimated_cost Decimal? @db.Decimal(18, 2)
   estimated_sell Decimal? @db.Decimal(18, 2)
   agreed_cost    Decimal? @db.Decimal(18, 2)
   agreed_sell    Decimal? @db.Decimal(18, 2)
+
+  // Time & Programme Impact
+  extensionClaimed    Int?     // EOT claimed (days)
+  extensionGranted    Int?     // EOT granted (days)
+  timeJustification   String?  @db.Text
+  affectedActivities  Json?    // Array of affected activities/packages
+
+  // Workflow & Approvals
+  approvals           Json?    // Array of approval records
+  implementationDate  DateTime?
+  completionDate      DateTime?
+
+  // Related Items
+  relatedVariationIds Int[]    // Related/superseded variations
+  affectedPackageIds  Int[]    // Packages affected by this variation
 
   // Dates
   notifiedDate   DateTime?
@@ -373,12 +406,16 @@ model Variation {
 
   // Meta
   is_deleted Boolean  @default(false)
+  createdBy  Int?     // User who created this variation
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   // Relations
   lines         VariationLine[]
   statusHistory VariationStatusHistory[]
+  documents     VariationDocument[]
+  comments      VariationComment[]
+  approvalRecords VariationApproval[]
 
   @@index([projectId])
   @@index([type])
@@ -396,6 +433,70 @@ model Variation {
   @@index([updatedAt])
   @@index([tenantId, title])
   @@index([tenantId, reference])
+  @@index([variationNumber])
+  @@index([urgency])
+  @@index([tenantId, contractId, variationNumber])
+}
+
+model VariationDocument {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  variationId Int
+  variation   Variation @relation(fields: [variationId], references: [id], onDelete: Cascade)
+
+  type        String    // Site Instruction, Quotation, Drawing, Photo, etc.
+  title       String
+  fileId      String    // Reference to file storage
+  fileName    String
+  fileSize    Int
+  mimeType    String
+
+  uploadedBy  Int?
+  uploadedAt  DateTime  @default(now())
+
+  @@index([variationId])
+  @@index([tenantId])
+}
+
+model VariationComment {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  variationId Int
+  variation   Variation @relation(fields: [variationId], references: [id], onDelete: Cascade)
+
+  content     String    @db.Text
+  internal    Boolean   @default(true) // Internal vs shared with contractor
+
+  createdBy   Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([variationId])
+  @@index([tenantId])
+  @@index([createdAt])
+}
+
+model VariationApproval {
+  id             Int       @id @default(autoincrement())
+  tenantId       String
+  variationId    Int
+  variation      Variation @relation(fields: [variationId], references: [id], onDelete: Cascade)
+
+  approverUserId Int?
+  approverRole   String    // Project Manager, Cost Manager, Client Representative, etc.
+  sequenceOrder  Int       @default(1)
+  status         String    @default("pending") // pending, approved, rejected
+  decision       String?   // approved, rejected, conditional
+  comments       String?   @db.Text
+  conditions     Json?     // Array of conditions if conditional approval
+
+  requestedAt    DateTime  @default(now())
+  respondedAt    DateTime?
+
+  @@index([variationId])
+  @@index([status])
+  @@index([approverUserId])
+  @@index([tenantId])
 }
 
 model VariationLine {
@@ -429,6 +530,7 @@ model VariationStatusHistory {
 
   fromStatus String?  @db.VarChar(24)
   toStatus   String   @db.VarChar(24)
+  changedBy  Int?     // User ID who made the change
   note       String?  @db.VarChar(255)
   changedAt  DateTime @default(now())
 
@@ -1134,7 +1236,7 @@ model TenderTemplateQuestion {
 // Email Templates for automated communications (e.g., tender invites)
 model EmailTemplate {
   id              BigInt   @id @default(autoincrement())
-  tenantId        BigInt
+  tenantId        String   @default("demo")
   name            String
   type            String   // e.g. 'tender_invite'
   subjectTemplate String

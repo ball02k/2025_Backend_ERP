@@ -113,8 +113,11 @@ module.exports = (prisma) => {
         return res.status(404).json({ error: 'RFx not found' });
       }
 
-      // Note: Tenant model doesn't exist in schema, using fallback name in template context
-      const tenant = null;
+      // Load tenant name for context (optional)
+      const tenant = await prisma.tenant.findFirst({
+        where: { tenantId },
+        select: { name: true },
+      }).catch(() => null);
 
       // Build public app URL base
       const publicAppUrl = process.env.PUBLIC_APP_URL || 'http://localhost:5173';
@@ -381,6 +384,7 @@ module.exports = (prisma) => {
             select: {
               id: true,
               name: true,
+              code: true,
               projectId: true,
               project: {
                 select: {
@@ -407,12 +411,17 @@ module.exports = (prisma) => {
         });
       }
 
-      // Note: Tenant model doesn't exist in schema, using fallback name in template context
-      const tenant = null;
+      // Get tenant details
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { id: true, name: true },
+      });
 
-      // Note: EmailTemplate model has tenantId as BigInt but we use text tenantId ("demo")
-      // Skip query for now and use fallback templates
-      const emailTemplate = null;
+      // Get email template (default to first template or use env fallback)
+      const emailTemplate = await prisma.emailTemplate.findFirst({
+        where: { tenantId, category: 'rfx_invite', isActive: true },
+        orderBy: { isDefault: 'desc' },
+      });
 
       // Subject and body templates
       const subjectTemplate = emailTemplate?.subject || process.env.EMAIL_SUBJECT_DEFAULT || 'RFx Invitation: {{rfx.title}}';
@@ -441,7 +450,7 @@ Best regards,
       // Build context object for template rendering
       const ctx = {
         supplier: {
-          name: invite.supplierName || supplier?.name || 'Supplier',
+          name: invite.supplierName || invite.supplier?.name || 'Supplier',
           email: invite.email,
         },
         contact: {
@@ -468,7 +477,7 @@ Best regards,
         link,
         // Legacy placeholders for backward compatibility
         LINK: link,
-        SUPPLIER_NAME: invite.supplierName || supplier?.name || 'Supplier',
+        SUPPLIER_NAME: invite.supplierName || invite.supplier?.name || 'Supplier',
       };
 
       // Render email subject and body using template context

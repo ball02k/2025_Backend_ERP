@@ -32,7 +32,13 @@ router.get('/', requireTenantAdmin, async (req, res) => {
     const tenantId = req.user.tenantId;
     const { type } = req.query;
 
-    const where = { tenantId: BigInt(tenantId) };
+    // Validate tenantId exists
+    if (!tenantId) {
+      console.error('[email-templates] Missing tenantId');
+      return res.status(400).json({ error: 'Invalid tenant configuration' });
+    }
+
+    const where = { tenantId: String(tenantId) };
     if (type && type.trim()) {
       where.type = type.trim();
     }
@@ -80,12 +86,19 @@ router.get('/', requireTenantAdmin, async (req, res) => {
 router.get('/:id', requireTenantAdmin, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
+
+    // Validate tenantId exists
+    if (!tenantId) {
+      console.error('[email-templates] Missing tenantId');
+      return res.status(400).json({ error: 'Invalid tenant configuration' });
+    }
+
     const templateId = BigInt(req.params.id);
 
     const template = await prisma.emailTemplate.findFirst({
       where: {
         id: templateId,
-        tenantId: BigInt(tenantId),
+        tenantId: String(tenantId),
       },
     });
 
@@ -96,7 +109,7 @@ router.get('/:id', requireTenantAdmin, async (req, res) => {
     // Convert BigInt to Number
     const result = {
       id: Number(template.id),
-      tenantId: Number(template.tenantId),
+      tenantId: template.tenantId,  // Already a String
       name: template.name,
       type: template.type,
       subjectTemplate: template.subjectTemplate,
@@ -124,6 +137,12 @@ router.post('/', requireTenantAdmin, async (req, res) => {
     const userId = req.user.id;
     const { name, type, subjectTemplate, bodyTemplate, isDefault } = req.body;
 
+    // Validate tenantId exists
+    if (!tenantId) {
+      console.error('[email-templates] Missing tenantId');
+      return res.status(400).json({ error: 'Invalid tenant configuration' });
+    }
+
     // Validation
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Template name is required' });
@@ -147,7 +166,7 @@ router.post('/', requireTenantAdmin, async (req, res) => {
       if (isDefault === true) {
         await tx.emailTemplate.updateMany({
           where: {
-            tenantId: BigInt(tenantId),
+            tenantId: String(tenantId),
             type: type.trim(),
             isDefault: true,
           },
@@ -160,7 +179,7 @@ router.post('/', requireTenantAdmin, async (req, res) => {
       // Create new template
       const newTemplate = await tx.emailTemplate.create({
         data: {
-          tenantId: BigInt(tenantId),
+          tenantId: String(tenantId),
           name: name.trim(),
           type: type.trim(),
           subjectTemplate: subjectTemplate.trim(),
@@ -176,7 +195,7 @@ router.post('/', requireTenantAdmin, async (req, res) => {
     // Convert BigInt to Number
     const result = {
       id: Number(template.id),
-      tenantId: Number(template.tenantId),
+      tenantId: template.tenantId,  // Already a String
       name: template.name,
       type: template.type,
       subjectTemplate: template.subjectTemplate,
@@ -201,6 +220,13 @@ router.post('/', requireTenantAdmin, async (req, res) => {
 router.patch('/:id', requireTenantAdmin, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
+
+    // Validate tenantId exists
+    if (!tenantId) {
+      console.error('[email-templates] Missing tenantId');
+      return res.status(400).json({ error: 'Invalid tenant configuration' });
+    }
+
     const templateId = BigInt(req.params.id);
     const { name, type, subjectTemplate, bodyTemplate, isDefault } = req.body;
 
@@ -208,7 +234,7 @@ router.patch('/:id', requireTenantAdmin, async (req, res) => {
     const existing = await prisma.emailTemplate.findFirst({
       where: {
         id: templateId,
-        tenantId: BigInt(tenantId),
+        tenantId: String(tenantId),
       },
     });
 
@@ -247,7 +273,7 @@ router.patch('/:id', requireTenantAdmin, async (req, res) => {
           const effectiveType = type !== undefined ? type.trim() : existing.type;
           await tx.emailTemplate.updateMany({
             where: {
-              tenantId: BigInt(tenantId),
+              tenantId: String(tenantId),
               type: effectiveType,
               isDefault: true,
               id: { not: templateId },
@@ -271,7 +297,7 @@ router.patch('/:id', requireTenantAdmin, async (req, res) => {
     // Convert BigInt to Number
     const result = {
       id: Number(template.id),
-      tenantId: Number(template.tenantId),
+      tenantId: template.tenantId,  // Already a String
       name: template.name,
       type: template.type,
       subjectTemplate: template.subjectTemplate,
@@ -296,13 +322,20 @@ router.patch('/:id', requireTenantAdmin, async (req, res) => {
 router.delete('/:id', requireTenantAdmin, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
+
+    // Validate tenantId exists
+    if (!tenantId) {
+      console.error('[email-templates] Missing tenantId');
+      return res.status(400).json({ error: 'Invalid tenant configuration' });
+    }
+
     const templateId = BigInt(req.params.id);
 
     // Verify template exists and belongs to tenant
     const existing = await prisma.emailTemplate.findFirst({
       where: {
         id: templateId,
-        tenantId: BigInt(tenantId),
+        tenantId: String(tenantId),
       },
     });
 
