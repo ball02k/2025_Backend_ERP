@@ -31,6 +31,32 @@ enum UserRoleEnum {
   admin
 }
 
+// ==============================================================================
+// PAYMENT APPLICATIONS SYSTEM - UK CONSTRUCTION ACT COMPLIANT
+// ==============================================================================
+
+enum PaymentApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  CERTIFIED
+  PAYMENT_NOTICE_SENT
+  PAY_LESS_ISSUED
+  APPROVED
+  PAID
+  PARTIALLY_PAID
+  DISPUTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum RetentionReleaseType {
+  PRACTICAL_COMPLETION
+  FINAL_ACCOUNT
+  EARLY_RELEASE
+  RETENTION_BOND
+}
+
 // Supplier Onboarding
 model OnboardingProject {
   id        Int      @id @default(autoincrement())
@@ -236,6 +262,10 @@ model Project {
   projectManager   User?    @relation("Project_ProjectManager", fields: [projectManagerUserId], references: [id])
   quantitySurveyor User?    @relation("Project_QuantitySurveyor", fields: [quantitySurveyorUserId], references: [id])
 
+  // APPROVAL FRAMEWORK RELATIONS
+  projectRoles      ProjectRole[]      @relation("ProjectRoles")
+  approvalWorkflows ApprovalWorkflow[] @relation("ProjectApprovalWorkflows")
+
   @@index([tenantId, status])
   @@index([tenantId, name])
   // Hot paths: client-filtered project lists and planned end sorting
@@ -328,20 +358,20 @@ model Variation {
   contractId   Int?
 
   // Core identifiers
-  reference          String? @db.VarChar(64)
-  referenceCode      String? @db.VarChar(64) // legacy
-  variationNumber    String? @db.VarChar(50) // VO-001, VO-002, etc.
-  title              String  @db.VarChar(255)
-  description        String? @db.Text
-  contractType       String  @db.VarChar(24)
+  reference       String? @db.VarChar(64)
+  referenceCode   String? @db.VarChar(64) // legacy
+  variationNumber String? @db.VarChar(50) // VO-001, VO-002, etc.
+  title           String  @db.VarChar(255)
+  description     String? @db.Text
+  contractType    String  @db.VarChar(24)
 
   // Initiation details
-  siteInstructionRef String? @db.VarChar(100)
-  instructedBy       Int?    // User ID
+  siteInstructionRef String?   @db.VarChar(100)
+  instructedBy       Int? // User ID
   instructionDate    DateTime?
-  originatedFrom     String? @db.VarChar(50) // Client, Architect, Engineer, etc.
-  urgency            String  @default("standard") @db.VarChar(20) // standard, urgent, critical
-  category           String? @db.VarChar(50) // Addition, Omission, Substitution, Daywork
+  originatedFrom     String?   @db.VarChar(50) // Client, Architect, Engineer, etc.
+  urgency            String    @default("standard") @db.VarChar(20) // standard, urgent, critical
+  category           String?   @db.VarChar(50) // Addition, Omission, Substitution, Daywork
 
   // Strings (avoid Prisma enums)
   type        String  @db.VarChar(24)
@@ -359,13 +389,13 @@ model Variation {
   justification  String?
 
   // Detailed financial breakdown (UK construction practice)
-  estimatedValue   Decimal? @db.Decimal(18, 2)  // Initial estimate
-  quotedValue      Decimal? @db.Decimal(18, 2)  // Contractor's quote
-  negotiatedValue  Decimal? @db.Decimal(18, 2)  // After negotiation
-  approvedValue    Decimal? @db.Decimal(18, 2)  // Final approved
-  certifiedValue   Decimal? @db.Decimal(18, 2)  // Certified for payment
-  dayworkValue     Decimal? @db.Decimal(18, 2)  // Daywork portion
-  breakdown        Json?                         // Array of cost items
+  estimatedValue  Decimal? @db.Decimal(18, 2) // Initial estimate
+  quotedValue     Decimal? @db.Decimal(18, 2) // Contractor's quote
+  negotiatedValue Decimal? @db.Decimal(18, 2) // After negotiation
+  approvedValue   Decimal? @db.Decimal(18, 2) // Final approved
+  certifiedValue  Decimal? @db.Decimal(18, 2) // Certified for payment
+  dayworkValue    Decimal? @db.Decimal(18, 2) // Daywork portion
+  breakdown       Json? // Array of cost items
 
   // Legacy/computed fields retained for compatibility
   estimated_cost Decimal? @db.Decimal(18, 2)
@@ -374,19 +404,19 @@ model Variation {
   agreed_sell    Decimal? @db.Decimal(18, 2)
 
   // Time & Programme Impact
-  extensionClaimed    Int?     // EOT claimed (days)
-  extensionGranted    Int?     // EOT granted (days)
-  timeJustification   String?  @db.Text
-  affectedActivities  Json?    // Array of affected activities/packages
+  extensionClaimed   Int? // EOT claimed (days)
+  extensionGranted   Int? // EOT granted (days)
+  timeJustification  String? @db.Text
+  affectedActivities Json? // Array of affected activities/packages
 
   // Workflow & Approvals
-  approvals           Json?    // Array of approval records
-  implementationDate  DateTime?
-  completionDate      DateTime?
+  approvals          Json? // Array of approval records
+  implementationDate DateTime?
+  completionDate     DateTime?
 
   // Related Items
-  relatedVariationIds Int[]    // Related/superseded variations
-  affectedPackageIds  Int[]    // Packages affected by this variation
+  relatedVariationIds Int[] // Related/superseded variations
+  affectedPackageIds  Int[] // Packages affected by this variation
 
   // Dates
   notifiedDate   DateTime?
@@ -406,15 +436,15 @@ model Variation {
 
   // Meta
   is_deleted Boolean  @default(false)
-  createdBy  Int?     // User who created this variation
+  createdBy  Int? // User who created this variation
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   // Relations
-  lines         VariationLine[]
-  statusHistory VariationStatusHistory[]
-  documents     VariationDocument[]
-  comments      VariationComment[]
+  lines           VariationLine[]
+  statusHistory   VariationStatusHistory[]
+  documents       VariationDocument[]
+  comments        VariationComment[]
   approvalRecords VariationApproval[]
 
   @@index([projectId])
@@ -444,15 +474,15 @@ model VariationDocument {
   variationId Int
   variation   Variation @relation(fields: [variationId], references: [id], onDelete: Cascade)
 
-  type        String    // Site Instruction, Quotation, Drawing, Photo, etc.
-  title       String
-  fileId      String    // Reference to file storage
-  fileName    String
-  fileSize    Int
-  mimeType    String
+  type     String // Site Instruction, Quotation, Drawing, Photo, etc.
+  title    String
+  fileId   String // Reference to file storage
+  fileName String
+  fileSize Int
+  mimeType String
 
-  uploadedBy  Int?
-  uploadedAt  DateTime  @default(now())
+  uploadedBy Int?
+  uploadedAt DateTime @default(now())
 
   @@index([variationId])
   @@index([tenantId])
@@ -464,12 +494,12 @@ model VariationComment {
   variationId Int
   variation   Variation @relation(fields: [variationId], references: [id], onDelete: Cascade)
 
-  content     String    @db.Text
-  internal    Boolean   @default(true) // Internal vs shared with contractor
+  content  String  @db.Text
+  internal Boolean @default(true) // Internal vs shared with contractor
 
-  createdBy   Int?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdBy Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([variationId])
   @@index([tenantId])
@@ -477,21 +507,21 @@ model VariationComment {
 }
 
 model VariationApproval {
-  id             Int       @id @default(autoincrement())
-  tenantId       String
-  variationId    Int
-  variation      Variation @relation(fields: [variationId], references: [id], onDelete: Cascade)
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+  variationId Int
+  variation   Variation @relation(fields: [variationId], references: [id], onDelete: Cascade)
 
   approverUserId Int?
-  approverRole   String    // Project Manager, Cost Manager, Client Representative, etc.
-  sequenceOrder  Int       @default(1)
-  status         String    @default("pending") // pending, approved, rejected
-  decision       String?   // approved, rejected, conditional
-  comments       String?   @db.Text
-  conditions     Json?     // Array of conditions if conditional approval
+  approverRole   String // Project Manager, Cost Manager, Client Representative, etc.
+  sequenceOrder  Int     @default(1)
+  status         String  @default("pending") // pending, approved, rejected
+  decision       String? // approved, rejected, conditional
+  comments       String? @db.Text
+  conditions     Json? // Array of conditions if conditional approval
 
-  requestedAt    DateTime  @default(now())
-  respondedAt    DateTime?
+  requestedAt DateTime  @default(now())
+  respondedAt DateTime?
 
   @@index([variationId])
   @@index([status])
@@ -530,7 +560,7 @@ model VariationStatusHistory {
 
   fromStatus String?  @db.VarChar(24)
   toStatus   String   @db.VarChar(24)
-  changedBy  Int?     // User ID who made the change
+  changedBy  Int? // User ID who made the change
   note       String?  @db.VarChar(255)
   changedAt  DateTime @default(now())
 
@@ -841,6 +871,15 @@ model User {
 
   // Back-relation for TenderInvitation
   sentTenderInvitations TenderInvitation[] @relation("TenderInvitationInvitedBy")
+
+  // APPROVAL FRAMEWORK RELATIONS
+  projectRoles           ProjectRole[]     @relation("ProjectRoleUser")
+  projectRoleDeputies    ProjectRole[]     @relation("ProjectRoleDeputy")
+  personas               UserPersona[]     @relation("UserPersonas")
+  approvalStepsAssigned  ApprovalStep[]    @relation("ApprovalStepAssignee")
+  approvalStepsDecided   ApprovalStep[]    @relation("ApprovalStepDecider")
+  approvalStepsDelegated ApprovalStep[]    @relation("ApprovalStepDelegation")
+  approvalHistoryActions ApprovalHistory[] @relation("ApprovalHistoryUser")
 
   @@index([tenantId, email])
 }
@@ -1235,18 +1274,18 @@ model TenderTemplateQuestion {
 
 // Email Templates for automated communications (e.g., tender invites)
 model EmailTemplate {
-  id              BigInt   @id @default(autoincrement())
-  tenantId        String   @default("demo")
+  id              BigInt    @id @default(autoincrement())
+  tenantId        String    @default("demo")
   name            String
-  type            String   // e.g. 'tender_invite'
+  type            String // e.g. 'tender_invite'
   subjectTemplate String
-  bodyTemplate    String   @db.Text
-  isDefault       Boolean  @default(false)
+  bodyTemplate    String    @db.Text
+  isDefault       Boolean   @default(false)
   createdByUserId BigInt?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   lastUsedAt      DateTime?
-  timesUsed       Int      @default(0)
+  timesUsed       Int       @default(0)
 
   @@index([tenantId])
   @@index([tenantId, type])
@@ -1640,57 +1679,184 @@ model EmailAttachment {
   documentId     BigInt?
 }
 
-// --- Applications for Payment (AfP) ---
+// ==============================================================================
+// ENHANCED Applications for Payment (AfP) - UK Construction Act Compliant
+// ==============================================================================
 model ApplicationForPayment {
-  id              Int       @id @default(autoincrement())
-  tenantId        String
-  projectId       Int
-  supplierId      Int?
-  contractId      Int?
-  applicationNo   String // e.g. "AFP-2025-00012", unique per tenant
-  applicationDate DateTime // date submitted
-  periodStart     DateTime
-  periodEnd       DateTime
-  assessmentDate  DateTime? // JCT IVD / NEC assessment date
-  dueDate         DateTime? // contractual due date for payment
-  currency        String // "GBP" default
-  // Claimed
-  grossToDate     Decimal   @db.Decimal(18, 2)
-  variationsValue Decimal   @db.Decimal(18, 2)
-  prelimsValue    Decimal   @db.Decimal(18, 2)
-  retentionValue  Decimal   @db.Decimal(18, 2)
-  mosValue        Decimal   @db.Decimal(18, 2) // materials on site
-  offsiteValue    Decimal   @db.Decimal(18, 2) // materials off site
-  deductionsValue Decimal   @db.Decimal(18, 2) // contra charges etc.
-  netClaimed      Decimal   @db.Decimal(18, 2)
+  id       Int    @id @default(autoincrement())
+  tenantId String
 
-  // Certification
+  // Relationships
+  projectId  Int
+  project    Project   @relation(fields: [projectId], references: [id])
+  supplierId Int?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+  contractId Int?
+  contract   Contract? @relation(fields: [contractId], references: [id])
+
+  // Application Details
+  applicationNumber Int? // Sequential per contract: 1, 2, 3...
+  applicationNo     String // e.g. "PA-001", "AFP-2025-00012" (unique per tenant)
+  reference         String? // Alternative reference
+  title             String? // "Payment Application #3 - May 2025"
+
+  // Dates (Critical for Act compliance)
+  applicationDate  DateTime // When contractor submits
+  valuationDate    DateTime? // Cut-off for measuring work (assessment date)
+  dueDate          DateTime? // When payment becomes due (7-14 days)
+  finalPaymentDate DateTime? // Last day to pay (21-28 days from due)
+
+  // Legacy period dates (keep for compatibility)
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  assessmentDate DateTime? // JCT IVD / NEC assessment date (maps to valuationDate)
+
+  // Status
+  status String // Use PaymentApplicationStatus values as strings
+
+  // Currency
+  currency String @default("GBP")
+
+  // CONTRACTOR'S CLAIMED FIGURES
+  claimedGrossValue     Decimal @default(0) @db.Decimal(12, 2)
+  claimedRetention      Decimal @default(0) @db.Decimal(12, 2)
+  claimedNetValue       Decimal @default(0) @db.Decimal(12, 2)
+  claimedPreviouslyPaid Decimal @default(0) @db.Decimal(12, 2)
+  claimedThisPeriod     Decimal @default(0) @db.Decimal(12, 2)
+
+  // Legacy claimed fields (keep for compatibility)
+  grossToDate     Decimal @default(0) @db.Decimal(18, 2)
+  variationsValue Decimal @default(0) @db.Decimal(18, 2)
+  prelimsValue    Decimal @default(0) @db.Decimal(18, 2)
+  retentionValue  Decimal @default(0) @db.Decimal(18, 2)
+  mosValue        Decimal @default(0) @db.Decimal(18, 2) // materials on site
+  offsiteValue    Decimal @default(0) @db.Decimal(18, 2) // materials off site
+  deductionsValue Decimal @default(0) @db.Decimal(18, 2) // contra charges
+  netClaimed      Decimal @default(0) @db.Decimal(18, 2)
+
+  // QS/COST MANAGER'S CERTIFIED FIGURES
+  certifiedGrossValue     Decimal? @db.Decimal(12, 2)
+  certifiedRetention      Decimal? @db.Decimal(12, 2)
+  certifiedNetValue       Decimal? @db.Decimal(12, 2)
+  certifiedPreviouslyPaid Decimal? @db.Decimal(12, 2)
+  certifiedThisPeriod     Decimal? @db.Decimal(12, 2)
+
+  // Legacy certification (keep for compatibility)
   certifiedAmount    Decimal?  @db.Decimal(18, 2)
   certifiedDate      DateTime?
   certifiedByUserId  Int?
-  certificationNotes String?
+  certificationNotes String?   @db.Text
 
-  // Notices timeline
-  paymentNoticeIssuedAt DateTime?
-  payLessNoticeIssuedAt DateTime?
-  payLessReason         String?
+  // Actual payment
+  amountPaid       Decimal?  @db.Decimal(12, 2)
+  paidDate         DateTime?
+  paymentReference String? // Bank transfer ref, cheque number
 
-  status    String // draft | submitted | payment_notice | pay_less_notice | certified | rejected | paid
-  reference String? // free text: invoice ref, CA note etc.
-  notes     String?
+  // Breakdown (JSON for flexibility)
+  lineItems        Json? // Array of work packages valued
+  variations       Json? // Variations included
+  materialsOnSite  Json? // Materials stored on site
+  previouslyValued Json? // Cumulative from last application
 
+  // Documents
+  submissionDocument    String? // Contractor's application PDF
+  valuationDocument     String? // QS assessment/certificate
+  paymentNoticeDocument String? // Formal payment notice
+  payLessNoticeDocument String? // If issuing pay-less
+
+  // Notes & Comments
+  contractorNotes String? @db.Text
+  qsNotes         String? @db.Text
+  internalNotes   String? @db.Text
+  rejectionReason String? @db.Text
+  notes           String? @db.Text // Legacy field
+
+  // People
+  submittedBy Int? // Contractor user/contact ID
+  submittedAt DateTime?
+  reviewedBy  Int? // QS/Cost manager
+  reviewedAt  DateTime?
+  approvedBy  Int? // Finance/PM approval
+  approvedAt  DateTime?
+
+  // Payment Notice Tracking
+  paymentNoticeSent     Boolean   @default(false)
+  paymentNoticeSentAt   DateTime?
+  paymentNoticeAmount   Decimal?  @db.Decimal(12, 2)
+  paymentNoticeIssuedAt DateTime? // Legacy
+
+  payLessNoticeSent     Boolean   @default(false)
+  payLessNoticeSentAt   DateTime?
+  payLessNoticeAmount   Decimal?  @db.Decimal(12, 2)
+  payLessNoticeReason   String?   @db.Text
+  payLessReason         String?   @db.Text // Legacy
+  payLessNoticeIssuedAt DateTime? // Legacy
+
+  // Retention Tracking
+  retentionPercentage    Decimal @default(5.0) @db.Decimal(5, 2)
+  retentionHeldToDate    Decimal @default(0) @db.Decimal(12, 2)
+  retentionReleasedPC    Decimal @default(0) @db.Decimal(12, 2) // At Practical Completion
+  retentionReleasedFinal Decimal @default(0) @db.Decimal(12, 2) // After defects period
+
+  // Compliance & Audit
+  isActCompliant  Boolean @default(true)
+  complianceNotes String? @db.Text
+  disputeRaised   Boolean @default(false)
+  disputeDetails  String? @db.Text
+
+  // Email Ingestion (Cloudflare Email Routing)
+  sourceType           String? // "EMAIL" | "MANUAL" | "API"
+  emailSender          String? // Sender email address
+  emailSubject         String? // Email subject line
+  emailBody            String? @db.Text // Email body text
+  emailReceivedAt      DateTime? // When email was received
+  emailMessageId       String? // Unique email ID from Cloudflare
+  emailAttachmentCount Int? // Number of attachments in email
+
+  // OCR Processing (AWS Textract)
+  ocrStatus         String? // "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "SKIPPED"
+  ocrStartedAt      DateTime?
+  ocrCompletedAt    DateTime?
+  ocrError          String? @db.Text
+  ocrRawText        String? @db.Text // Full extracted text from Textract
+  ocrConfidence     Decimal? @db.Decimal(5, 2) // Overall confidence score (0-100)
+  ocrS3Key          String? // S3 key for original PDF
+  ocrS3Bucket       String? // S3 bucket name
+  ocrJobId          String? // AWS Textract job ID
+  ocrExtractedData  Json? // Structured data extracted from OCR
+
+  // Contract Matching
+  contractMatchMethod     String? // "AUTO_MATCHED" | "SUGGESTED" | "MANUAL"
+  contractMatchConfidence Decimal? @db.Decimal(5, 2) // Matching confidence (0-100)
+  suggestedContracts      Json? // Array of suggested contract IDs with scores
+  contractMatchedAt       DateTime?
+  contractMatchedBy       Int? // User who confirmed the match
+
+  // Auto-Population Flags
+  autoPopulated        Boolean @default(false) // Was this created from OCR?
+  requiresReview       Boolean @default(false) // QS needs to review OCR data
+  ocrReviewedBy        Int?
+  ocrReviewedAt        DateTime?
+  ocrReviewNotes       String? @db.Text
+
+  // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  project       Project         @relation(fields: [projectId], references: [id])
-  supplier      Supplier?       @relation(fields: [supplierId], references: [id])
-  contract      Contract?       @relation(fields: [contractId], references: [id])
-  AfpAttachment AfpAttachment[]
+  // Relations
+  attachments     AfpAttachment[]
+  lineItemDetails PaymentApplicationLineItem[]
 
   @@unique([tenantId, applicationNo])
+  @@index([contractId, applicationNumber])
   @@index([tenantId, projectId, applicationDate])
   @@index([tenantId, supplierId])
   @@index([tenantId, status])
+  @@index([contractId, status])
+  @@index([projectId, status])
+  @@index([dueDate])
+  @@index([finalPaymentDate])
+  @@index([tenantId, contractId, applicationNumber])
 }
 
 model AfpAttachment {
@@ -1703,6 +1869,75 @@ model AfpAttachment {
 
   afp ApplicationForPayment @relation(fields: [afpId], references: [id])
   // Document.id remains BigInt elsewhere
+}
+
+// ==============================================================================
+// Payment Application Line Items - Detailed BOQ valuations
+// ==============================================================================
+model PaymentApplicationLineItem {
+  id       Int    @id @default(autoincrement())
+  tenantId String
+
+  applicationId Int
+  application   ApplicationForPayment @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  packageId Int?
+
+  description String
+  reference   String? // BOQ item reference
+
+  // Quantities
+  quantityPrevious   Decimal? @db.Decimal(12, 4)
+  quantityThisPeriod Decimal? @db.Decimal(12, 4)
+  quantityCumulative Decimal? @db.Decimal(12, 4)
+  unit               String?
+
+  // Values
+  rate            Decimal? @db.Decimal(12, 4)
+  valuePrevious   Decimal  @default(0) @db.Decimal(12, 2)
+  valueThisPeriod Decimal  @default(0) @db.Decimal(12, 2)
+  valueCumulative Decimal  @default(0) @db.Decimal(12, 2)
+
+  // QS Assessment (if different from claimed)
+  qsCertifiedQuantity Decimal? @db.Decimal(12, 4)
+  qsCertifiedValue    Decimal? @db.Decimal(12, 2)
+  qsNotes             String?  @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, applicationId])
+  @@index([packageId])
+}
+
+// ==============================================================================
+// Retention Releases - Practical Completion & Final Account
+// ==============================================================================
+model RetentionRelease {
+  id       Int    @id @default(autoincrement())
+  tenantId String
+
+  contractId Int
+  contract   Contract @relation(fields: [contractId], references: [id])
+
+  releaseType   String // Use RetentionReleaseType values
+  releaseAmount Decimal  @db.Decimal(12, 2)
+  releaseDate   DateTime
+
+  // Trigger events
+  practicalCompletionDate DateTime?
+  defectsEndDate          DateTime?
+
+  approvedBy Int?
+  approvedAt DateTime?
+
+  notes    String? @db.Text
+  document String? // Certificate/approval doc
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, contractId])
+  @@index([releaseDate])
 }
 
 /// Finance: OCR job queue (additive)
@@ -2280,20 +2515,38 @@ model Contract {
   lockedAt        DateTime?
   sourceMode      String?
 
+  // Payment Application Settings (UK Construction Act)
+  paymentFrequency    String   @default("MONTHLY") // MONTHLY, MILESTONE, STAGE
+  paymentDueDays      Int      @default(14) // Days from valuation to due date
+  paymentFinalDays    Int      @default(21) // Days from due date to final date
+  retentionPercentage Decimal  @default(5.0) @db.Decimal(5, 2)
+  retentionLimit      Decimal? @db.Decimal(12, 2) // Max retention amount (cap)
+
+  // Payment Application Tracking
+  valuationDayOfMonth Int? // e.g., 25 (last Friday approximation)
+  nextApplicationDue  DateTime?
+
+  // Cumulative Financial Tracking
+  totalCertifiedToDate Decimal @default(0) @db.Decimal(12, 2) // Total certified value across all applications
+  totalPaidToDate      Decimal @default(0) @db.Decimal(12, 2) // Total actually paid
+  retentionHeld        Decimal @default(0) @db.Decimal(12, 2) // Current retention held
+  retentionReleased    Decimal @default(0) @db.Decimal(12, 2) // Retention released
+
   // relations
-  project        Project                 @relation(fields: [projectId], references: [id])
-  package        Package?                @relation(fields: [packageId], references: [id])
-  supplier       Supplier                @relation(fields: [supplierId], references: [id])
-  rfx            Rfx?                    @relation("ContractRfx", fields: [rfxId], references: [id])
-  award          Award?                  @relation("ContractAward", fields: [awardId], references: [id])
-  lineItems      ContractLineItem[]
-  applications   ApplicationForPayment[]
-  invoices       Invoice[]
-  purchaseOrders PurchaseOrder[]
-  documents      ContractDocument[]
-  approvalSteps  ContractApprovalStep[]
-  approvals      ContractApproval[]
-  files          ContractFile[]
+  project           Project                 @relation(fields: [projectId], references: [id])
+  package           Package?                @relation(fields: [packageId], references: [id])
+  supplier          Supplier                @relation(fields: [supplierId], references: [id])
+  rfx               Rfx?                    @relation("ContractRfx", fields: [rfxId], references: [id])
+  award             Award?                  @relation("ContractAward", fields: [awardId], references: [id])
+  lineItems         ContractLineItem[]
+  applications      ApplicationForPayment[]
+  invoices          Invoice[]
+  purchaseOrders    PurchaseOrder[]
+  documents         ContractDocument[]
+  approvalSteps     ContractApprovalStep[]
+  approvals         ContractApproval[]
+  files             ContractFile[]
+  retentionReleases RetentionRelease[]
 
   @@index([projectId])
   @@index([supplierId])
@@ -3936,4 +4189,553 @@ model JobChecklist {
   // Indexes
   @@index([tenantId, jobId])
   @@map("job_checklists")
+}
+
+// ==============================================================================
+// SETTINGS & APPROVAL FRAMEWORK
+// Comprehensive configurable approval system for construction ERP
+// ==============================================================================
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum EntityType {
+  PACKAGE
+  CONTRACT
+  VARIATION
+  PAYMENT_APPLICATION
+  BUDGET
+  PROCUREMENT_REQUEST
+  DESIGN_CHANGE
+  PURCHASE_ORDER
+}
+
+enum WorkflowStatus {
+  PENDING
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  CANCELLED
+  OVERRIDDEN
+}
+
+enum ProjectRoleType {
+  PROJECT_MANAGER
+  COMMERCIAL_MANAGER
+  CONSTRUCTION_MANAGER
+  PACKAGE_MANAGER
+  DESIGN_LEAD
+  QS_COST_MANAGER
+  PLANNING_ENGINEER
+  HSQE_MANAGER
+  SITE_MANAGER
+  PROJECT_DIRECTOR
+  CONTRACTS_MANAGER
+  PROCUREMENT_MANAGER
+  CLIENT_REPRESENTATIVE
+  QUANTITY_SURVEYOR
+}
+
+enum StepStatus {
+  PENDING
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+  SKIPPED
+  OVERRIDDEN
+}
+
+enum StepDecision {
+  APPROVED
+  APPROVED_WITH_CONDITIONS
+  REJECTED
+  CHANGES_REQUIRED
+  REFER_UP
+  DEFER
+}
+
+enum ModuleType {
+  PROJECTS
+  BUDGET
+  PACKAGES
+  TENDERS
+  DIRECT_AWARDS
+  INTERNAL_ALLOCATION
+  CONTRACTS
+  VARIATIONS
+  PAYMENT_APPLICATIONS
+  INVOICES
+  PURCHASE_ORDERS
+  JOB_SCHEDULING
+  RESOURCES
+  DOCUMENTS
+  ANALYTICS
+  SUPPLIERS
+  DIARY
+}
+
+enum FieldType {
+  TEXT
+  NUMBER
+  DATE
+  DROPDOWN
+  MULTI_SELECT
+  CHECKBOX
+  TEXTAREA
+  CURRENCY
+  PERCENTAGE
+  EMAIL
+  PHONE
+  URL
+  FILE_UPLOAD
+}
+
+enum NotificationEventType {
+  APPROVAL_REQUESTED
+  APPROVAL_GRANTED
+  APPROVAL_REJECTED
+  APPROVAL_OVERDUE
+  ENTITY_CREATED
+  ENTITY_UPDATED
+  ENTITY_DELETED
+  DEADLINE_APPROACHING
+  BUDGET_THRESHOLD_EXCEEDED
+  STATUS_CHANGED
+  DOCUMENT_UPLOADED
+  COMMENT_ADDED
+  USER_MENTIONED
+  WORKFLOW_COMPLETE
+}
+
+enum NotificationPreference {
+  EMAIL_ONLY
+  IN_APP_ONLY
+  EMAIL_AND_IN_APP
+  SMS_ONLY
+  ALL_CHANNELS
+  NONE
+}
+
+// ============================================
+// TENANT-LEVEL SETTINGS
+// ============================================
+
+model TenantSettings {
+  id       String @id @default(cuid())
+  tenantId String @unique
+
+  // Module Toggles
+  modulesEnabled Json @default("{\"tenders\": true, \"directAwards\": true, \"internalAllocation\": false}")
+
+  // Default Workflows
+  defaultApprovalWorkflows Json?
+
+  // Notification Preferences
+  notificationDefaults Json?
+
+  // Document Settings
+  documentRetentionDays Int @default(2555) // 7 years
+
+  // Company Info (for templates)
+  companyName    String?
+  companyAddress String?
+  companyPhone   String?
+  companyEmail   String?
+  companyLogo    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("tenant_settings")
+}
+
+// ============================================
+// APPROVAL THRESHOLD CONFIGURATION
+// ============================================
+
+model ApprovalThreshold {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // What does this apply to?
+  entityType EntityType // PACKAGE, CONTRACT, VARIATION, PAYMENT_APP
+
+  // Threshold definition
+  name     String // "Small Works", "Medium Value", "High Value"
+  minValue Decimal  @db.Decimal(12, 2) // £0
+  maxValue Decimal? @db.Decimal(12, 2) // £50,000 (null = unlimited)
+
+  // Approval chain - JSON array of approval stages
+  // Example: [{"stage": 1, "role": "PACKAGE_MANAGER", "required": true, "description": "Initial review"}, ...]
+  approvalSteps Json
+
+  // Additional requirements
+  requiresRiskAssessment Boolean @default(false)
+  requiresDesignReview   Boolean @default(false)
+  requiresHSQE           Boolean @default(false)
+  requiresClientApproval Boolean @default(false)
+
+  // Timing
+  targetApprovalDays Int @default(5)
+
+  // Display
+  isActive Boolean @default(true)
+  sequence Int // Display order in settings
+
+  // Description
+  description String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  workflows ApprovalWorkflow[]
+
+  @@index([tenantId, entityType])
+  @@index([tenantId, entityType, minValue, maxValue])
+  @@index([tenantId, isActive])
+  @@map("approval_thresholds")
+}
+
+// ============================================
+// PROJECT ROLE ASSIGNMENTS
+// ============================================
+
+model ProjectRole {
+  id        String  @id @default(cuid())
+  projectId Int
+  project   Project @relation("ProjectRoles", fields: [projectId], references: [id], onDelete: Cascade)
+
+  userId Int
+  user   User @relation("ProjectRoleUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Role/Persona
+  role ProjectRoleType
+
+  // Alternate/Deputies
+  deputyUserId Int?
+  deputy       User? @relation("ProjectRoleDeputy", fields: [deputyUserId], references: [id])
+
+  // Permissions & Notifications
+  canApprovePackages   Boolean @default(false)
+  canApproveContracts  Boolean @default(false)
+  canApproveVariations Boolean @default(false)
+  canApprovePayments   Boolean @default(false)
+
+  receiveNotifications   Boolean                @default(true)
+  notificationPreference NotificationPreference @default(EMAIL_AND_IN_APP)
+
+  // Validity
+  startDate DateTime  @default(now())
+  endDate   DateTime?
+  isActive  Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  approvalSteps ApprovalStep[]
+
+  @@unique([projectId, userId, role])
+  @@index([projectId, role, isActive])
+  @@index([userId, isActive])
+  @@map("project_roles")
+}
+
+// ============================================
+// USER PERSONAS (Multi-role users)
+// ============================================
+
+model UserPersona {
+  id     String @id @default(cuid())
+  userId Int
+  user   User   @relation("UserPersonas", fields: [userId], references: [id], onDelete: Cascade)
+
+  persona   ProjectRoleType
+  isPrimary Boolean         @default(false)
+
+  // Competencies
+  canLead    Boolean @default(false)
+  canApprove Boolean @default(false)
+
+  // Approval limits (in GBP)
+  maxApprovalValue Decimal? @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, persona])
+  @@index([userId])
+  @@map("user_personas")
+}
+
+// ============================================
+// APPROVAL WORKFLOW INSTANCE
+// ============================================
+
+model ApprovalWorkflow {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // What's being approved
+  entityType  EntityType
+  entityId    String
+  entityValue Decimal?   @db.Decimal(12, 2)
+
+  // Which threshold matched
+  thresholdId String?
+  threshold   ApprovalThreshold? @relation(fields: [thresholdId], references: [id])
+
+  // Project context
+  projectId Int
+  project   Project @relation("ProjectApprovalWorkflows", fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Overall status
+  status WorkflowStatus @default(PENDING)
+
+  // Steps
+  steps ApprovalStep[]
+
+  // Tracking
+  initiatedBy     String
+  initiatedByUser Int?
+  initiatedAt     DateTime  @default(now())
+  completedAt     DateTime?
+
+  // Escalation
+  isOverdue   Boolean   @default(false)
+  escalatedAt DateTime?
+
+  // Comments/Notes
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([projectId, status])
+  @@index([tenantId, status])
+  @@index([tenantId, entityType])
+  @@index([isOverdue])
+  @@map("approval_workflows")
+}
+
+model ApprovalStep {
+  id         String           @id @default(cuid())
+  workflowId String
+  workflow   ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  // Step definition
+  stage       Int // 1, 2, 3, 4...
+  role        ProjectRoleType
+  isRequired  Boolean         @default(true)
+  description String?
+
+  // Assigned to (via ProjectRole)
+  projectRoleId  String?
+  projectRole    ProjectRole? @relation(fields: [projectRoleId], references: [id])
+  assignedUserId Int?
+  assignedUser   User?        @relation("ApprovalStepAssignee", fields: [assignedUserId], references: [id])
+
+  // Status
+  status StepStatus @default(PENDING)
+
+  // Decision
+  decision      StepDecision?
+  decidedBy     Int?
+  decidedByUser User?         @relation("ApprovalStepDecider", fields: [decidedBy], references: [id])
+  decidedAt     DateTime?
+  comments      String?       @db.Text
+  conditions    String?       @db.Text // "Approved subject to £5k reduction"
+
+  // Timing
+  dueDate      DateTime?
+  reminderSent Boolean   @default(false)
+
+  // Delegation
+  delegatedTo     Int?
+  delegatedToUser User?     @relation("ApprovalStepDelegation", fields: [delegatedTo], references: [id])
+  delegatedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workflowId, stage])
+  @@index([assignedUserId, status])
+  @@index([status, dueDate])
+  @@map("approval_steps")
+}
+
+// ============================================
+// MODULE-SPECIFIC SETTINGS
+// ============================================
+
+model ModuleSettings {
+  id       String @id @default(cuid())
+  tenantId String
+
+  module ModuleType
+
+  // General
+  isEnabled Boolean @default(true)
+
+  // Configuration (module-specific JSON config)
+  config Json?
+
+  // Display
+  displayName  String?
+  description  String? @db.Text
+  icon         String?
+  displayOrder Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, module])
+  @@index([tenantId, isEnabled])
+  @@map("module_settings")
+}
+
+// ============================================
+// CUSTOM FIELDS
+// ============================================
+
+model CustomField {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // Scope
+  entityType EntityType
+  projectId  Int? // If project-specific
+
+  // Field definition
+  fieldName String // "Risk Category", "Client Reference"
+  fieldKey  String // "riskCategory", "clientRef"
+  fieldType FieldType
+
+  // Options (for dropdowns, multi-select) - JSON array
+  options Json?
+
+  // Validation
+  isRequired Boolean @default(false)
+  validation Json? // Regex, min/max, etc.
+
+  // Display
+  displayOrder Int
+  helpText     String?
+  placeholder  String?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  values CustomFieldValue[]
+
+  @@unique([tenantId, entityType, fieldKey])
+  @@index([tenantId, entityType])
+  @@index([projectId])
+  @@map("custom_fields")
+}
+
+model CustomFieldValue {
+  id String @id @default(cuid())
+
+  customFieldId String
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+
+  entityType EntityType
+  entityId   String
+
+  value String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([customFieldId, entityId])
+  @@index([entityType, entityId])
+  @@map("custom_field_values")
+}
+
+// ============================================
+// NOTIFICATION RULES
+// ============================================
+
+model NotificationRule {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // Trigger
+  eventType  NotificationEventType
+  entityType EntityType?
+
+  // Recipients (JSON array of ProjectRoleType)
+  roles Json
+
+  // Delivery channels (JSON array: ["EMAIL", "IN_APP", "SMS"])
+  channels Json
+
+  // Template
+  templateId String?
+
+  // Custom template content (overrides templateId)
+  emailSubject String?
+  emailBody    String? @db.Text
+  inAppTitle   String?
+  inAppBody    String? @db.Text
+
+  // Conditions (when to send - JSON object)
+  // Example: {"value": {"gt": 100000}, "status": "PENDING"}
+  conditions Json?
+
+  // Timing
+  sendImmediately Boolean @default(true)
+  delayMinutes    Int?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, eventType])
+  @@index([tenantId, isActive])
+  @@map("notification_rules")
+}
+
+// ============================================
+// APPROVAL HISTORY / AUDIT LOG
+// ============================================
+
+model ApprovalHistory {
+  id       String @id @default(cuid())
+  tenantId String
+
+  workflowId String
+  stepId     String?
+
+  // What changed
+  action      String // "created", "approved", "rejected", "escalated", "overridden"
+  description String @db.Text
+
+  // Who did it
+  userId Int?
+  user   User? @relation("ApprovalHistoryUser", fields: [userId], references: [id])
+
+  // Previous/New values
+  previousValue Json?
+  newValue      Json?
+
+  // Context
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([workflowId])
+  @@index([tenantId, createdAt])
+  @@index([userId])
+  @@map("approval_history")
 }

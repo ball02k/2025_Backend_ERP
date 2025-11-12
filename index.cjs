@@ -25,7 +25,10 @@ console.log(getDeltaPrompt());
 // Request tracing logger
 const { withReqId, onFinish } = require('./lib/logger.cjs');
 
-const variationsRouter = require('./routes/variations.cjs');
+const variationsRouter = require('./routes/variations-enhanced.cjs');
+const paymentApplicationsRouter = require('./routes/payment-applications.cjs');
+const emailIngestionRouter = require('./routes/email-ingestion.cjs');
+const financeDashboardRouter = require('./routes/finance.dashboard.cjs');
 const documentsRouter = require('./routes/documents_v2.cjs');
 const projectsOverviewRouter = require('./routes/projects_overview.cjs');
 const projectDocumentsRouter = require('./routes/project_documents.cjs');
@@ -108,6 +111,10 @@ const workersRouter = require('./routes/workers.cjs');
 const equipmentRouter = require('./routes/equipment.cjs');
 const jobSchedulesRouter = require('./routes/jobSchedules.cjs');
 const timeEntriesRouter = require('./routes/timeEntries.cjs');
+// Approval Framework
+const approvalsRouter = require('./routes/approvals.cjs');
+const settingsApprovalsRouter = require('./routes/settings.approvals.cjs');
+const projectRolesRouter = require('./routes/projects.roles.cjs');
 // Also import handlers directly for top-level mounting
 const { previewHandler: budgetsPreview, commitHandler: budgetsCommit } = require('./routes/budgets.import.cjs');
 const { ensureFeature } = require('./middleware/featureGuard.js');
@@ -224,8 +231,8 @@ app.get('/openapi-lite.json', (req, res) => {
 
 app.use(devDeltaRoutes);
 
-app.use('/auth', authRouter);
-app.use('/me', meRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/me', meRouter);
 
 // Public RFx response API (NO auth required - uses magic link token)
 app.use('/api/public/rfx', require('./routes/rfx.public.cjs'));
@@ -304,6 +311,12 @@ app.use('/api/time-entries', requireAuth, timeEntriesRouter(prisma));
 // Variations routes: mount under both /api and /api/variations for compatibility
 app.use('/api', requireAuth, variationsRouter);
 app.use('/api/variations', requireAuth, variationsRouter);
+// Payment Applications routes - UK Construction Act compliant
+app.use('/api', requireAuth, paymentApplicationsRouter);
+// Email Ingestion & OCR for Payment Applications
+app.use('/api/email-ingestion', emailIngestionRouter);
+// Finance Dashboard routes - Company-wide finance views
+app.use('/api', requireAuth, financeDashboardRouter);
 app.use('/api/documents', requireAuth, documentsRouter);
 app.use('/api/onboarding', requireAuth, onboardingRouter);
 app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
@@ -356,6 +369,11 @@ app.use('/api', financeInboundRouter);
 app.use('/api/v1/settings', requireAuth, settingsV1Router);
 app.use('/api/settings/tender-templates', requireAuth, tenderTemplatesRouter);
 app.use('/api/settings/email-templates', requireAuth, emailTemplatesRouter);
+app.use('/api/settings/approvals', requireAuth, settingsApprovalsRouter);
+
+// Approval Framework
+app.use('/api/approvals', requireAuth, approvalsRouter);
+app.use('/api/projects', requireAuth, projectRolesRouter);
 app.get('/api/v1/tenants/modules', requireAuth, (req, res) => {
   const tenantId = req.user?.tenantId || TENANT_DEFAULT;
   // Return both modules array and individual boolean properties for backwards compatibility

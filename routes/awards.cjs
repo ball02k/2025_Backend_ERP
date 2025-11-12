@@ -1,14 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { prisma } = require('../lib/prisma');
-const { requireAuth, requirePermission } = require('../lib/auth.cjs');
+const requireAuth = require('../middleware/requireAuth.cjs');
+const { requirePerm } = require('../middleware/checkPermission.cjs');
 const { checkSupplierCompliance } = require('../lib/compliance.cjs');
 const { writeAudit } = require('../lib/audit.cjs');
 
 router.post(
   '/packages/:id/award',
   requireAuth,
-  requirePermission('procurement:award'),
+  requirePerm('procurement:award'),
   async (req, res) => {
     try {
       const tenantId = req.user.tenantId;

@@ -5,7 +5,8 @@ const crypto = require('crypto');
 const { Prisma } = require('@prisma/client');
 const { prisma } = require('../utils/prisma.cjs');
 const { requireTenant } = require('../middleware/tenant.cjs');
-const { requireAuth, requirePermission } = require('../lib/auth.cjs');
+const requireAuth = require('../middleware/requireAuth.cjs');
+const { requirePerm } = require('../middleware/checkPermission.cjs');
 const { writeAudit, auditReject } = require('../lib/audit.cjs');
 const { makeStorageKey, localPath } = require('../utils/storage.cjs');
 
@@ -145,6 +146,7 @@ const contractInclude = {
   supplier: { select: { id: true, name: true } },
   package: { select: { id: true, name: true } },
   project: { select: { id: true, name: true, code: true } },
+  rfx: { select: { id: true, title: true } },
 };
 
 const contractWithLinesInclude = {
@@ -814,7 +816,7 @@ router.post('/contracts/:id/revert-to-draft', (req, res) => updateContractStatus
 router.post('/contracts/:id/archive', (req, res) => updateContractStatus(req, res, 'archived'));
 
 // DELETE /contracts/:id
-router.delete('/contracts/:id', requireAuth, requirePermission('contracts:delete'), async (req, res) => {
+router.delete('/contracts/:id', requireAuth, requirePerm('contracts:delete'), async (req, res) => {
   const tenantId  = req.tenant.id;
   const userId    = req.user.id;
   const contractId = Number(req.params.id);

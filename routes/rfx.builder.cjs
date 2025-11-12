@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { prisma } = require('../utils/prisma.cjs');
-const { requireAuth } = require('../lib/auth.cjs');
+const requireAuth = require('../middleware/requireAuth.cjs');
 
 const router = express.Router();
 

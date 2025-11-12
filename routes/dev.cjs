@@ -1,12 +1,12 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const { sign } = require('../utils/jwt.cjs');
-const { JWT_SECRET } = require('../middleware/auth.cjs');
 
 const prisma = new PrismaClient();
 const router = express.Router();
 
 const TENANT_DEFAULT = process.env.TENANT_DEFAULT || 'demo';
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
 // POST /api/dev/login?tenant=demo
 router.post('/login', async (req, res) => {

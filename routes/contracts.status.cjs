@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { prisma } = require('../utils/prisma.cjs');
-const { requireAuth } = require('../middleware/auth.cjs');
+const requireAuth = require('../middleware/requireAuth.cjs');
 
 /**
  * POST /contracts/:id/status

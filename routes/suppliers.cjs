@@ -3,7 +3,7 @@ const router = express.Router();
 const { prisma } = require('../utils/prisma.cjs');
 const { checkSupplierCompliance } = require('../services/compliance.service.cjs');
 const jwt = require('jsonwebtoken');
-const { requireAuth } = require('../middleware/auth.cjs') || { requireAuth: (_req,_res,next)=>next() };
+const requireAuth = require('../middleware/requireAuth.cjs') || { requireAuth: (_req,_res,next)=>next() };
 
 // Read-only Suppliers API (tenant-scoped)
 

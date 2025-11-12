@@ -11,7 +11,7 @@ const express = require('express');
 
 const router = express.Router();
 const { prisma } = require('../utils/prisma.cjs');
-const { requireAuth } = require('../lib/auth.cjs');
+const requireAuth = require('../middleware/requireAuth.cjs');
 const { makeStorageKey, signKey, writeLocalFile } = require('../utils/storage.cjs');
 
 router.use(requireAuth);

@@ -1,6 +1,6 @@
 const express = require('express');
 const { prisma } = require('../utils/prisma.cjs');
-const { requireAuth } = require('../lib/auth.cjs');
+const requireAuth = require('../middleware/requireAuth.cjs');
 
 // ============================================================================
 // LEGACY: This is the OLD Tender module

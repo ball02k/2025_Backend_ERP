@@ -11,7 +11,7 @@ const express = require('express');
 
 const router = express.Router();
 const { prisma } = require('../utils/prisma.cjs');
-const { requireAuth } = require('../lib/auth');
+const requireAuth = require('../middleware/requireAuth.cjs');
 const { getTenantId } = require('../lib/tenant');
 const { writeAudit } = require('./audit.writer.cjs');
 

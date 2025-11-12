@@ -59,13 +59,13 @@ router.post('/register', async (req, res) => {
     // Hash password with bcrypt (salt rounds >= 10)
     const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
-    // Create new user with default role 'user'
+    // Create new user with default role 'dev' (SUPERADMIN - full access)
     const newUser = await prisma.user.create({
       data: {
         email: email.toLowerCase(),
         name: name.trim(),
         passwordSHA: passwordHash, // Using passwordSHA field as specified
-        role: 'user', // Default role for new registrations
+        role: 'dev', // Default role for new registrations - SUPERADMIN with full access
         tenantId: userTenantId,
         isActive: true
       },
