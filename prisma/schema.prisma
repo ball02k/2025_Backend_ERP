@@ -258,6 +258,7 @@ model Project {
   // CVR tracking
   cvrCommitments        CVRCommitment[]
   cvrActuals            CVRActual[]
+  cvrReports            CVRReport[]             @relation("ProjectCVRReports")
 
   // Additive relations for new info fields
   clientContact    Contact? @relation("Project_ClientContact", fields: [clientContactId], references: [id])
@@ -1025,17 +1026,17 @@ model ProjectMembership {
 }
 
 model PurchaseOrder {
-  id         Int        @id @default(autoincrement())
-  tenantId   String     @default("demo")
-  projectId  Int
-  code       String
-  supplier   String
-  supplierId Int?
-  contractId Int?
-  budgetLineId Int? // CVR: Link to budget line
-  status     String     @default("DRAFT") // "DRAFT" | "SUBMITTED" | "APPROVED" | "ISSUED" | "INVOICED" | "PAID" | "CANCELLED"
-  orderDate  DateTime   @default(now())
-  total      Decimal    @default(0)
+  id            Int         @id @default(autoincrement())
+  tenantId      String      @default("demo")
+  projectId     Int
+  code          String
+  supplier      String
+  supplierId    Int?
+  contractId    Int?
+  budgetLineId  Int? // CVR: Link to budget line
+  status        String      @default("DRAFT") // "DRAFT" | "SUBMITTED" | "APPROVED" | "ISSUED" | "INVOICED" | "PAID" | "CANCELLED"
+  orderDate     DateTime    @default(now())
+  total         Decimal     @default(0)
   // CVR: Enhanced workflow tracking
   submittedDate DateTime?
   approvedDate  DateTime?
@@ -1043,13 +1044,13 @@ model PurchaseOrder {
   issuedDate    DateTime?
   cancelledDate DateTime?
   cancelReason  String?
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-  project    Project    @relation(fields: [projectId], references: [id])
-  contract   Contract?  @relation(fields: [contractId], references: [id])
-  budgetLine BudgetLine? @relation(fields: [budgetLineId], references: [id])
-  lines      POLine[]
-  deliveries Delivery[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  project       Project     @relation(fields: [projectId], references: [id])
+  contract      Contract?   @relation(fields: [contractId], references: [id])
+  budgetLine    BudgetLine? @relation(fields: [budgetLineId], references: [id])
+  lines         POLine[]
+  deliveries    Delivery[]
 
   @@unique([tenantId, code])
   @@index([tenantId, projectId, status])
@@ -1455,12 +1456,44 @@ model SpmScore {
   comment     String?
 }
 
+// ==========================================
+// BUDGET CATEGORY TAGGING SYSTEM
+// ==========================================
+
+model BudgetCategory {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // Category details
+  code        String // PREL, SUBS, SUPS, etc.
+  name        String // "Preliminaries", "Substructure"
+  description String? @db.Text
+
+  // Display
+  color     String @default("#64748b") // Hex color for badge
+  sortOrder Int    @default(0)
+
+  // Status
+  isActive  Boolean @default(true)
+  isDefault Boolean @default(false) // System-provided
+
+  // Audit
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  budgetLines BudgetLine[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+}
+
 model BudgetLine {
   id          Int      @id @default(autoincrement())
   tenantId    String   @default("demo")
   projectId   Int
   code        String?
-  category    String?
   periodMonth String?
   description String?
   qty         Decimal  @default(0) @db.Decimal(18, 2)
@@ -1471,29 +1504,42 @@ model BudgetLine {
   planned     Decimal? @db.Decimal(18, 2)
   estimated   Decimal? @db.Decimal(18, 2)
   actual      Decimal? @db.Decimal(18, 2)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  costCodeId  Int?
-  // Grouping (additive)
-  groupId     Int?
-  sortOrder   Int?     @default(0)
-  position    Int      @default(0)
 
-  project       Project            @relation(fields: [projectId], references: [id])
-  costCode      CostCode?          @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
-  group         BudgetGroup?       @relation(fields: [groupId], references: [id])
+  // Forecast/Anticipated Final tracking (British English: "Forecast" not "Anticipated")
+  forecastFinalCost   Decimal?  @db.Decimal(18, 2)
+  forecastVariance    Decimal?  @db.Decimal(18, 2)
+  lastForecastUpdated DateTime?
+  forecastNotes       String?   @db.Text
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  costCodeId Int?
+  categoryId String? // NEW: Category tagging
+  // Grouping (additive)
+  groupId    Int?
+  sortOrder  Int?     @default(0)
+  position   Int      @default(0)
+
+  project            Project                @relation(fields: [projectId], references: [id])
+  costCode           CostCode?              @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  budgetCategory     BudgetCategory?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  group              BudgetGroup?           @relation(fields: [groupId], references: [id])
   // Link budget lines to procurement packages
-  packageItems  PackageItem[]
-  contractLines ContractLineItem[] @relation("BudgetLineContractLines")
+  packageItems       PackageItem[]
+  contractLines      ContractLineItem[]     @relation("BudgetLineContractLines")
   // CVR tracking
-  cvrCommitments CVRCommitment[]
-  cvrActuals     CVRActual[]
-  purchaseOrders PurchaseOrder[]
-  invoices       Invoice[]
+  cvrCommitments     CVRCommitment[]
+  cvrActuals         CVRActual[]
+  contractValuations ContractValuation[]    @relation("BudgetLineValuations")
+  purchaseOrders     PurchaseOrder[]
+  invoices           Invoice[]
+  // Category allocations
+  allocations        BudgetLineAllocation[]
 
   @@index([tenantId, projectId])
   @@index([tenantId, projectId, periodMonth])
   @@index([tenantId, costCodeId])
+  @@index([tenantId, categoryId])
   @@index([tenantId, groupId])
 }
 
@@ -1590,21 +1636,21 @@ model FinancialItem {
 
 // Invoices (project-scoped)
 model Invoice {
-  id            Int       @id @default(autoincrement())
+  id            Int         @id @default(autoincrement())
   tenantId      String
   projectId     Int
-  project       Project   @relation(fields: [projectId], references: [id])
+  project       Project     @relation(fields: [projectId], references: [id])
   supplierId    Int?
-  supplier      Supplier? @relation(fields: [supplierId], references: [id])
+  supplier      Supplier?   @relation(fields: [supplierId], references: [id])
   budgetLineId  Int? // CVR: Link to budget line
   budgetLine    BudgetLine? @relation(fields: [budgetLineId], references: [id])
   number        String
   issueDate     DateTime?
   dueDate       DateTime?
-  net           Decimal   @default(0)
-  vat           Decimal   @default(0)
-  gross         Decimal   @default(0)
-  status        String    @default("RECEIVED") // "RECEIVED" | "MATCHED" | "APPROVED" | "PAID" | "DISPUTED" | "CANCELLED"
+  net           Decimal     @default(0)
+  vat           Decimal     @default(0)
+  gross         Decimal     @default(0)
+  status        String      @default("RECEIVED") // "RECEIVED" | "MATCHED" | "APPROVED" | "PAID" | "DISPUTED" | "CANCELLED"
   // Additive finance fields
   documentId    BigInt?
   ocrStatus     String?
@@ -1616,18 +1662,18 @@ model Invoice {
   // Additive links to tie into budget/contract rollups
   packageId     Int?
   contractId    Int?
-  contract      Contract? @relation(fields: [contractId], references: [id])
+  contract      Contract?   @relation(fields: [contractId], references: [id])
   // CVR: Enhanced workflow tracking
   receivedDate  DateTime?
   matchedDate   DateTime?
   approvedDate  DateTime?
   approvedBy    Int?
   paidDate      DateTime?
-  paidAmount    Decimal? @db.Decimal(18, 2)
+  paidAmount    Decimal?    @db.Decimal(18, 2)
   paymentRef    String? // Bank transfer reference
-  disputeReason String? @db.Text
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  disputeReason String?     @db.Text
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   @@index([tenantId, projectId, status])
   @@index([tenantId, supplierId])
@@ -1838,36 +1884,36 @@ model ApplicationForPayment {
   sourceType           String? // "EMAIL" | "MANUAL" | "API"
   emailSender          String? // Sender email address
   emailSubject         String? // Email subject line
-  emailBody            String? @db.Text // Email body text
+  emailBody            String?   @db.Text // Email body text
   emailReceivedAt      DateTime? // When email was received
   emailMessageId       String? // Unique email ID from Cloudflare
   emailAttachmentCount Int? // Number of attachments in email
 
   // OCR Processing (AWS Textract)
-  ocrStatus         String? // "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "SKIPPED"
-  ocrStartedAt      DateTime?
-  ocrCompletedAt    DateTime?
-  ocrError          String? @db.Text
-  ocrRawText        String? @db.Text // Full extracted text from Textract
-  ocrConfidence     Decimal? @db.Decimal(5, 2) // Overall confidence score (0-100)
-  ocrS3Key          String? // S3 key for original PDF
-  ocrS3Bucket       String? // S3 bucket name
-  ocrJobId          String? // AWS Textract job ID
-  ocrExtractedData  Json? // Structured data extracted from OCR
+  ocrStatus        String? // "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "SKIPPED"
+  ocrStartedAt     DateTime?
+  ocrCompletedAt   DateTime?
+  ocrError         String?   @db.Text
+  ocrRawText       String?   @db.Text // Full extracted text from Textract
+  ocrConfidence    Decimal?  @db.Decimal(5, 2) // Overall confidence score (0-100)
+  ocrS3Key         String? // S3 key for original PDF
+  ocrS3Bucket      String? // S3 bucket name
+  ocrJobId         String? // AWS Textract job ID
+  ocrExtractedData Json? // Structured data extracted from OCR
 
   // Contract Matching
   contractMatchMethod     String? // "AUTO_MATCHED" | "SUGGESTED" | "MANUAL"
-  contractMatchConfidence Decimal? @db.Decimal(5, 2) // Matching confidence (0-100)
+  contractMatchConfidence Decimal?  @db.Decimal(5, 2) // Matching confidence (0-100)
   suggestedContracts      Json? // Array of suggested contract IDs with scores
   contractMatchedAt       DateTime?
   contractMatchedBy       Int? // User who confirmed the match
 
   // Auto-Population Flags
-  autoPopulated        Boolean @default(false) // Was this created from OCR?
-  requiresReview       Boolean @default(false) // QS needs to review OCR data
-  ocrReviewedBy        Int?
-  ocrReviewedAt        DateTime?
-  ocrReviewNotes       String? @db.Text
+  autoPopulated  Boolean   @default(false) // Was this created from OCR?
+  requiresReview Boolean   @default(false) // QS needs to review OCR data
+  ocrReviewedBy  Int?
+  ocrReviewedAt  DateTime?
+  ocrReviewNotes String?   @db.Text
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -2563,20 +2609,21 @@ model Contract {
   retentionReleased    Decimal @default(0) @db.Decimal(12, 2) // Retention released
 
   // relations
-  project           Project                 @relation(fields: [projectId], references: [id])
-  package           Package?                @relation(fields: [packageId], references: [id])
-  supplier          Supplier                @relation(fields: [supplierId], references: [id])
-  rfx               Rfx?                    @relation("ContractRfx", fields: [rfxId], references: [id])
-  award             Award?                  @relation("ContractAward", fields: [awardId], references: [id])
-  lineItems         ContractLineItem[]
-  applications      ApplicationForPayment[]
-  invoices          Invoice[]
-  purchaseOrders    PurchaseOrder[]
-  documents         ContractDocument[]
-  approvalSteps     ContractApprovalStep[]
-  approvals         ContractApproval[]
-  files             ContractFile[]
-  retentionReleases RetentionRelease[]
+  project            Project                 @relation(fields: [projectId], references: [id])
+  package            Package?                @relation(fields: [packageId], references: [id])
+  supplier           Supplier                @relation(fields: [supplierId], references: [id])
+  rfx                Rfx?                    @relation("ContractRfx", fields: [rfxId], references: [id])
+  award              Award?                  @relation("ContractAward", fields: [awardId], references: [id])
+  lineItems          ContractLineItem[]
+  applications       ApplicationForPayment[]
+  invoices           Invoice[]
+  purchaseOrders     PurchaseOrder[]
+  documents          ContractDocument[]
+  approvalSteps      ContractApprovalStep[]
+  approvals          ContractApproval[]
+  files              ContractFile[]
+  retentionReleases  RetentionRelease[]
+  contractValuations ContractValuation[]     @relation("ContractValuations")
 
   @@index([projectId])
   @@index([supplierId])
@@ -4787,13 +4834,17 @@ model CVRCommitment {
   budgetLineId Int?
   budgetLine   BudgetLine? @relation(fields: [budgetLineId], references: [id])
 
+  // Link to category allocation (optional)
+  allocationId String?
+  allocation   BudgetLineAllocation? @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+
   // Source of commitment
   sourceType String // "CONTRACT" | "VARIATION" | "PURCHASE_ORDER"
   sourceId   Int // contractId, variationId, or poId
 
   // Financial
-  amount   Decimal  @db.Decimal(18, 2)
-  currency String   @default("GBP")
+  amount   Decimal @db.Decimal(18, 2)
+  currency String  @default("GBP")
   status   String // "PENDING" | "COMMITTED" | "SUPERSEDED" | "CANCELLED"
 
   // Metadata
@@ -4802,7 +4853,7 @@ model CVRCommitment {
   costCode    String?
 
   // Dates
-  commitmentDate DateTime @default(now())
+  commitmentDate DateTime  @default(now())
   effectiveDate  DateTime? // When commitment takes effect
   cancelledDate  DateTime?
 
@@ -4816,6 +4867,7 @@ model CVRCommitment {
   @@index([tenantId, sourceType, sourceId])
   @@index([tenantId, projectId, status])
   @@index([tenantId, costCode])
+  @@index([allocationId])
   @@map("cvr_commitments")
 }
 
@@ -4832,13 +4884,17 @@ model CVRActual {
   budgetLineId Int?
   budgetLine   BudgetLine? @relation(fields: [budgetLineId], references: [id])
 
+  // Link to category allocation (optional)
+  allocationId String?
+  allocation   BudgetLineAllocation? @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+
   // Source of actual cost
   sourceType String // "INVOICE" | "PAYMENT_APPLICATION" | "DIRECT_COST"
   sourceId   Int // invoiceId, applicationId, or other ID
 
   // Financial
-  amount   Decimal  @db.Decimal(18, 2)
-  currency String   @default("GBP")
+  amount   Decimal @db.Decimal(18, 2)
+  currency String  @default("GBP")
   status   String // "RECORDED" | "CERTIFIED" | "PAID" | "REVERSED"
 
   // Metadata
@@ -4847,9 +4903,9 @@ model CVRActual {
   costCode    String?
 
   // Dates
-  incurredDate DateTime @default(now())
+  incurredDate  DateTime  @default(now())
   certifiedDate DateTime?
-  paidDate     DateTime?
+  paidDate      DateTime?
 
   // Audit
   createdBy Int?
@@ -4862,5 +4918,232 @@ model CVRActual {
   @@index([tenantId, projectId, status])
   @@index([tenantId, costCode])
   @@index([tenantId, incurredDate])
+  @@index([allocationId])
   @@map("cvr_actuals")
+}
+
+// ==============================================================================
+// CONTRACT VALUATION - Revenue/Value Tracking (British English)
+// ==============================================================================
+
+model ContractValuation {
+  id       Int    @id @default(autoincrement())
+  tenantId String
+
+  // Link to contract
+  contractId Int
+  contract   Contract @relation("ContractValuations", fields: [contractId], references: [id])
+
+  // Link to budget (optional)
+  budgetLineId Int?
+  budgetLine   BudgetLine? @relation("BudgetLineValuations", fields: [budgetLineId], references: [id])
+
+  // Valuation details
+  valuationNumber Int
+  valuationDate   DateTime
+
+  // Amounts (British English: "Gross" not "Total")
+  grossValuation   Decimal @db.Decimal(18, 2)
+  retention        Decimal @db.Decimal(18, 2)
+  netValuation     Decimal @db.Decimal(18, 2)
+  previouslyValued Decimal @db.Decimal(18, 2)
+  thisValuation    Decimal @db.Decimal(18, 2)
+
+  // Materials on site (if applicable)
+  materialsOnSite Decimal? @db.Decimal(18, 2)
+
+  // Status
+  status String @default("DRAFT") // DRAFT, SUBMITTED, CERTIFIED, INVOICED
+
+  // Dates
+  certifiedDate DateTime?
+  invoicedDate  DateTime?
+  paidDate      DateTime?
+
+  // Notes (British English: "Notes" not "Comments")
+  notes String? @db.Text
+
+  // Audit
+  createdBy Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, contractId])
+  @@index([tenantId, budgetLineId])
+  @@index([tenantId, valuationDate])
+  @@index([tenantId, status])
+  @@map("contract_valuations")
+}
+
+// ==============================================================================
+// CVR REPORT - Period Reporting with Approval Workflow (British English)
+// ==============================================================================
+
+model CVRReport {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // Link to project
+  projectId Int
+  project   Project @relation("ProjectCVRReports", fields: [projectId], references: [id])
+
+  // Report details
+  reportDate DateTime
+  periodEnd  DateTime
+  reportType String // MONTHLY, QUARTERLY, YEAR_END, AD_HOC
+
+  // Status (British English workflow)
+  status String @default("IN_PROGRESS") // IN_PROGRESS, SUBMITTED, APPROVED, REJECTED
+
+  // Snapshot data (stored as JSON for flexibility)
+  snapshotData Json
+
+  // Notes (British English: "Comments" as a field name, but "Notes" in UI)
+  comments String? @db.Text
+
+  // Approval workflow
+  submittedBy Int?
+  submittedAt DateTime?
+
+  approvedBy Int?
+  approvedAt DateTime?
+
+  rejectedBy      Int?
+  rejectedAt      DateTime?
+  rejectionReason String?   @db.Text
+
+  // Export paths (British English: "Exported" not "Generated")
+  exportedPdf   String? // Path to PDF
+  exportedExcel String? // Path to Excel
+
+  // Audit
+  createdBy Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, reportDate])
+  @@index([tenantId, status])
+  @@index([tenantId, periodEnd])
+  @@map("cvr_reports")
+}
+
+// ==============================================================================
+// ALLOCATION CATEGORIES & BUDGET LINE ALLOCATIONS
+// ==============================================================================
+
+/// AllocationCategory - Defines standard construction categories for budget splitting
+/// Used to split budget lines into categories like Prelims, Substructure, etc.
+model AllocationCategory {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // Category details
+  code        String // PREL, SUBS, SUPS, EXTW, etc.
+  name        String // "Preliminaries", "Substructure", etc.
+  description String? @db.Text
+
+  // Hierarchy (for nested categories)
+  parentId String?
+  parent   AllocationCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children AllocationCategory[] @relation("CategoryHierarchy")
+
+  // Display order
+  sortOrder Int @default(0)
+
+  // Status
+  isActive  Boolean @default(true)
+  isDefault Boolean @default(false) // System-provided categories
+
+  // Audit
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  allocations BudgetLineAllocation[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@index([parentId])
+  @@map("allocation_categories")
+}
+
+/// BudgetLineAllocation - Splits a budget line into category allocations
+/// Example: £500k budget line → £50k Prelims + £150k Substructure + ...
+model BudgetLineAllocation {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // Parent budget line
+  budgetLineId Int
+  budgetLine   BudgetLine @relation(fields: [budgetLineId], references: [id], onDelete: Cascade)
+
+  // Category
+  categoryId String
+  category   AllocationCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  // Financial
+  allocatedAmount Decimal @db.Decimal(12, 2)
+  currency        String  @default("GBP")
+
+  // Status
+  status String @default("ACTIVE") // ACTIVE, TRANSFERRED, CANCELLED
+
+  // Notes
+  notes String? @db.Text
+
+  // Audit
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  cvrCommitments CVRCommitment[]
+  cvrActuals     CVRActual[]
+  transfersFrom  BudgetTransfer[] @relation("TransferFrom")
+  transfersTo    BudgetTransfer[] @relation("TransferTo")
+
+  @@unique([budgetLineId, categoryId, tenantId])
+  @@index([tenantId, budgetLineId])
+  @@index([categoryId])
+  @@index([status])
+  @@map("budget_line_allocations")
+}
+
+/// BudgetTransfer - Tracks budget transfers between category allocations
+/// Used for moving budget between categories with audit trail
+model BudgetTransfer {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // Transfer details
+  fromAllocationId String
+  fromAllocation   BudgetLineAllocation @relation("TransferFrom", fields: [fromAllocationId], references: [id], onDelete: Restrict)
+
+  toAllocationId String
+  toAllocation   BudgetLineAllocation @relation("TransferTo", fields: [toAllocationId], references: [id], onDelete: Restrict)
+
+  // Amount
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("GBP")
+
+  // Justification
+  reason String @db.Text
+
+  // Approval
+  status          String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectionReason String?   @db.Text
+
+  // Audit
+  requestedBy String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, fromAllocationId])
+  @@index([tenantId, toAllocationId])
+  @@index([status])
+  @@map("budget_transfers")
 }

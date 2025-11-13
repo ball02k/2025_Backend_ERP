@@ -36,7 +36,15 @@ function shapeLine(b) {
     sortOrder: num(b.sortOrder) ?? 0,
     position: num(b.position) ?? 0,
     groupId: b.groupId ? Number(b.groupId) : null,
+    categoryId: b.categoryId || null,
     costCode: b.costCode ? { id: b.costCode.id, code: b.costCode.code, description: b.costCode.description ?? "" } : null,
+    budgetCategory: b.budgetCategory ? {
+      id: b.budgetCategory.id,
+      code: b.budgetCategory.code,
+      name: b.budgetCategory.name,
+      color: b.budgetCategory.color,
+      sortOrder: num(b.budgetCategory.sortOrder) ?? 0
+    } : null,
     // Map through join table; include status if present
     packages: Array.isArray(b.packageItems)
       ? b.packageItems
@@ -95,7 +103,9 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
         sortOrder: true,
         position: true,
         groupId: true,
+        categoryId: true,
         costCode: { select: { id: true, code: true, description: true } },
+        budgetCategory: { select: { id: true, code: true, name: true, color: true, sortOrder: true } },
         packageItems: {
           select: {
             package: {
@@ -176,6 +186,46 @@ router.get('/:projectId/budgets', requireProjectMember, async (req, res) => {
         const amt = lineAmountValue(l);
         return s + (Number(amt) || 0);
       }, 0);
+      res.json({ groups: out, total });
+      return;
+    } else if (String(grouping) === 'categories') {
+      // Group by budget category; UNCATEGORIZED first
+      groups.set('cat:UNCATEGORIZED', { key: 'cat:UNCATEGORIZED', name: 'Uncategorized', color: '#ef4444', sortOrder: 999, subtotal: 0, items: [] });
+
+      for (const l of lines) {
+        const amt = lineAmountValue(l);
+        if (l.budgetCategory) {
+          const key = `cat:${l.budgetCategory.id}`;
+          if (!groups.has(key)) {
+            groups.set(key, {
+              key,
+              name: l.budgetCategory.name,
+              categoryId: l.budgetCategory.id,
+              categoryCode: l.budgetCategory.code,
+              color: l.budgetCategory.color,
+              sortOrder: l.budgetCategory.sortOrder ?? 10000,
+              subtotal: 0,
+              items: []
+            });
+          }
+          const g = groups.get(key);
+          g.items.push(l);
+          g.subtotal += amt;
+        } else {
+          // Uncategorized
+          const g = groups.get('cat:UNCATEGORIZED');
+          g.items.push(l);
+          g.subtotal += amt;
+        }
+      }
+
+      const out = Array.from(groups.values()).sort((a, b) => {
+        // Uncategorized last
+        if (a.key === 'cat:UNCATEGORIZED') return 1;
+        if (b.key === 'cat:UNCATEGORIZED') return -1;
+        return (a.sortOrder || 0) - (b.sortOrder || 0);
+      });
+      const total = out.reduce((s, g) => s + (Number(g.subtotal) || 0), 0);
       res.json({ groups: out, total });
       return;
     } else {

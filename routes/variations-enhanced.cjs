@@ -134,6 +134,84 @@ function getApprovalWorkflow(variation) {
 // ============================================================================
 
 /**
+ * GET /api/variations?projectId=...&limit=...&offset=...
+ * List all variations for a project (across all contracts)
+ */
+router.get('/variations', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const projectId = Number(req.query.projectId);
+    const limit = Number(req.query.limit) || 100;
+    const offset = Number(req.query.offset) || 0;
+
+    if (!tenantId) return res.status(400).json({ error: 'tenantId required' });
+    if (!projectId) return res.status(400).json({ error: 'projectId required' });
+
+    // Get total count
+    const total = await prisma.variation.count({
+      where: {
+        tenantId,
+        projectId,
+        is_deleted: false,
+      },
+    });
+
+    // Get variations with related data
+    const variations = await prisma.variation.findMany({
+      where: {
+        tenantId,
+        projectId,
+        is_deleted: false,
+      },
+      include: {
+        contract: {
+          select: {
+            id: true,
+            number: true,
+            title: true,
+            supplierId: true,
+            supplier: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+        budgetLine: {
+          select: {
+            id: true,
+            code: true,
+            description: true,
+          },
+        },
+        documents: {
+          select: { id: true, type: true, title: true },
+        },
+        approvalRecords: {
+          select: { id: true, status: true, approverRole: true },
+        },
+      },
+      orderBy: [
+        { createdAt: 'desc' },
+        { variationNumber: 'desc' },
+      ],
+      take: limit,
+      skip: offset,
+    });
+
+    res.json({
+      total,
+      limit,
+      offset,
+      variations: variations.map((v) => withLinks('variation', v)),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * GET /api/contracts/:contractId/variations
  * List all variations for a contract
  */

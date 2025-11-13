@@ -93,6 +93,9 @@ const afpRouter = require('./routes/afp.cjs');
 const afpOpenRouter = require('./routes/afp.open.cjs');
 const cvrRouter = require('./routes/financials.cvr.cjs');
 const cvrRealtimeRouter = require('./routes/cvr.cjs'); // Real-time CVR tracking
+const contractValuationsRouter = require('./routes/contract-valuations.cjs'); // Contract valuations for revenue tracking
+const cvrReportsRouter = require('./routes/cvr-reports.cjs'); // CVR period reports with approval workflow
+const allocationsRouter = require('./routes/allocations.cjs'); // Category allocations for CVR tracking
 const purchaseOrdersRouter = require('./routes/purchaseOrders.cjs'); // PO CRUD with CVR integration
 const invoicesRouter = require('./routes/invoices.cjs'); // Invoice CRUD with CVR integration
 const diaryRouter = require('./routes/diary.cjs');
@@ -110,6 +113,7 @@ const settingsV1Router = require('./routes/settings.v1.cjs');
 const contractTemplatesRouter = require('./routes/contract.templates.cjs');
 const tradesRouter = require('./routes/trades.cjs');
 const jobsRouter = require('./routes/jobs.cjs');
+const uploadRouter = require('./routes/upload.cjs');
 const workersRouter = require('./routes/workers.cjs');
 const equipmentRouter = require('./routes/equipment.cjs');
 const jobSchedulesRouter = require('./routes/jobSchedules.cjs');
@@ -183,6 +187,13 @@ app.use(demoGuard);
 // Static file serving for contract uploads
 const FILE_STORAGE_DIR = process.env.FILE_STORAGE_DIR || './uploads/contracts';
 app.use('/static/contracts', express.static(path.resolve(FILE_STORAGE_DIR)));
+
+// Serve uploaded files in development
+if (process.env.NODE_ENV === 'development' || process.env.FILE_STORAGE_TYPE === 'local') {
+  const uploadPath = path.resolve(process.env.FILE_STORAGE_PATH || './uploads');
+  app.use('/uploads', express.static(uploadPath));
+  console.log(`📁 Serving static files from: ${uploadPath}`);
+}
 
 // Rewrite common malformed URLs where the frontend missed the '?' before query params
 // Example: /api/projectslimit=10&offset=0 -> /api/projects?limit=10&offset=0
@@ -321,11 +332,15 @@ app.use('/api/email-ingestion', emailIngestionRouter);
 // Finance Dashboard routes - Company-wide finance views
 app.use('/api', requireAuth, financeDashboardRouter);
 app.use('/api/documents', requireAuth, documentsRouter);
+app.use('/api/upload', uploadRouter);
 app.use('/api/onboarding', requireAuth, onboardingRouter);
 app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
 app.use('/api', requireAuth, procurementRoutes);
 app.use('/api', requireAuth, cvrRouter(prisma));
 app.use('/api/cvr', requireAuth, cvrRealtimeRouter(prisma)); // Real-time CVR API
+app.use('/api/contract-valuations', requireAuth, contractValuationsRouter(prisma)); // Contract valuations for revenue tracking
+app.use('/api/cvr-reports', requireAuth, cvrReportsRouter(prisma)); // CVR period reports with approval workflow
+app.use('/api/allocations', requireAuth, allocationsRouter); // Category allocations for CVR tracking
 app.use('/api/purchase-orders', requireAuth, purchaseOrdersRouter(prisma)); // Purchase Orders with CVR
 app.use('/api/invoices', requireAuth, invoicesRouter(prisma)); // Invoices with CVR
 app.use('/api/financials', requireAuth, financialsRouter);
@@ -356,6 +371,7 @@ app.use('/api/rfis', requireAuth, rfisRouter);
 app.use('/api/qa', requireAuth, qaRouter);
 app.use('/api/hs', requireAuth, hsRouter);
 app.use('/api/carbon', requireAuth, carbonRouter);
+app.use('/api/budget-categories', requireAuth, require('./routes/budgetCategories.cjs'));
 app.use('/api/analytics', requireAuth, analyticsRouter(prisma));
 app.use('/api', homeRoutes(prisma, { requireAuth }));
 // Applications for Payment (AfP)

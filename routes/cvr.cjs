@@ -201,5 +201,160 @@ module.exports = function cvrRouter(prisma) {
     }
   });
 
+  // ==============================================================================
+  // ENHANCED CVR ENDPOINTS - Forecast, Revenue, Profit/Loss (British English)
+  // ==============================================================================
+
+  /**
+   * GET /cvr/summary-enhanced?projectId=123
+   * Get enhanced CVR summary including forecast and profit/loss
+   */
+  router.get('/summary-enhanced', async (req, res, next) => {
+    try {
+      const tenantId = getTenantId(req);
+      const projectId = Number(req.query.projectId);
+
+      if (!projectId) {
+        return res.status(400).json({ error: 'projectId is required' });
+      }
+
+      const summary = await cvrService.getCVRSummaryEnhanced(tenantId, projectId);
+      res.json(summary);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * GET /cvr/forecast?budgetLineId=123
+   * Get forecast final cost for a budget line
+   */
+  router.get('/forecast', async (req, res, next) => {
+    try {
+      const tenantId = getTenantId(req);
+      const budgetLineId = Number(req.query.budgetLineId);
+
+      if (!budgetLineId) {
+        return res.status(400).json({ error: 'budgetLineId is required' });
+      }
+
+      const forecast = await cvrService.calculateForecastFinalCost(tenantId, budgetLineId);
+      res.json(forecast);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * GET /cvr/profit-loss?projectId=123
+   * Get profit/loss analysis for a project
+   */
+  router.get('/profit-loss', async (req, res, next) => {
+    try {
+      const tenantId = getTenantId(req);
+      const projectId = Number(req.query.projectId);
+
+      if (!projectId) {
+        return res.status(400).json({ error: 'projectId is required' });
+      }
+
+      const profitLoss = await cvrService.calculateProfitLoss(tenantId, projectId);
+      res.json(profitLoss);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * GET /cvr/revenue?projectId=123
+   * Get project revenue from contract valuations
+   */
+  router.get('/revenue', async (req, res, next) => {
+    try {
+      const tenantId = getTenantId(req);
+      const projectId = Number(req.query.projectId);
+
+      if (!projectId) {
+        return res.status(400).json({ error: 'projectId is required' });
+      }
+
+      const revenue = await cvrService.calculateProjectRevenue(tenantId, projectId);
+      res.json(revenue);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * GET /cvr/costs?projectId=123
+   * Get project costs breakdown
+   */
+  router.get('/costs', async (req, res, next) => {
+    try {
+      const tenantId = getTenantId(req);
+      const projectId = Number(req.query.projectId);
+
+      if (!projectId) {
+        return res.status(400).json({ error: 'projectId is required' });
+      }
+
+      const costs = await cvrService.calculateProjectCosts(tenantId, projectId);
+      res.json(costs);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /cvr/snapshot
+   * Take a period snapshot for movement tracking
+   */
+  router.post('/snapshot', async (req, res, next) => {
+    try {
+      const tenantId = getTenantId(req);
+      const userId = getUserId(req);
+      const { projectId, periodEnd } = req.body;
+
+      if (!projectId || !periodEnd) {
+        return res.status(400).json({ error: 'projectId and periodEnd are required' });
+      }
+
+      const snapshot = await cvrService.takePeriodSnapshot(
+        tenantId,
+        Number(projectId),
+        new Date(periodEnd),
+        userId
+      );
+
+      res.status(201).json(snapshot);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * GET /cvr/movement?projectId=123&fromPeriod=2025-01&toPeriod=2025-02
+   * Get CVR movement between two periods
+   */
+  router.get('/movement', async (req, res, next) => {
+    try {
+      const tenantId = getTenantId(req);
+      const projectId = Number(req.query.projectId);
+      const fromPeriod = new Date(req.query.fromPeriod);
+      const toPeriod = new Date(req.query.toPeriod);
+
+      if (!projectId || !fromPeriod || !toPeriod) {
+        return res.status(400).json({
+          error: 'projectId, fromPeriod, and toPeriod are required',
+        });
+      }
+
+      const movement = await cvrService.getCVRMovement(tenantId, projectId, fromPeriod, toPeriod);
+      res.json(movement);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   return router;
 };
