@@ -92,6 +92,9 @@ const financeReceiptsRouter = require('./routes/finance.receipts.cjs');
 const afpRouter = require('./routes/afp.cjs');
 const afpOpenRouter = require('./routes/afp.open.cjs');
 const cvrRouter = require('./routes/financials.cvr.cjs');
+const cvrRealtimeRouter = require('./routes/cvr.cjs'); // Real-time CVR tracking
+const purchaseOrdersRouter = require('./routes/purchaseOrders.cjs'); // PO CRUD with CVR integration
+const invoicesRouter = require('./routes/invoices.cjs'); // Invoice CRUD with CVR integration
 const diaryRouter = require('./routes/diary.cjs');
 const scopeAssistRouter = require('./routes/scope.assist.cjs');
 const budgetsImportRouter = require('./routes/budgets.import.cjs');
@@ -322,6 +325,9 @@ app.use('/api/onboarding', requireAuth, onboardingRouter);
 app.use('/api/procurement', requireAuth, require('./routes/procurement.cjs'));
 app.use('/api', requireAuth, procurementRoutes);
 app.use('/api', requireAuth, cvrRouter(prisma));
+app.use('/api/cvr', requireAuth, cvrRealtimeRouter(prisma)); // Real-time CVR API
+app.use('/api/purchase-orders', requireAuth, purchaseOrdersRouter(prisma)); // Purchase Orders with CVR
+app.use('/api/invoices', requireAuth, invoicesRouter(prisma)); // Invoices with CVR
 app.use('/api/financials', requireAuth, financialsRouter);
 // Also expose financials under /api/projects/financials for compatibility
 app.use('/api/projects/financials', requireAuth, financialsRouter);

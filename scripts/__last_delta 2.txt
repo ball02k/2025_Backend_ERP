@@ -1,0 +1,16 @@
+FRONTEND_DELTA_PROMPT
+--------------------------------
+You are syncing the FRONTEND after backend API changes.
+
+API CHANGES:
+- POST /api/requests/:id/award now requires permission `procurement:award` and returns 403 { error:{ code:'FORBIDDEN', message:'Missing permission: procurement:award' } } when absent.
+
+UPDATE THESE CALLS/COMPONENTS:
+- Procurement.jsx and RFxCompare.jsx: check user permission before calling award endpoint and handle 403 errors.
+
+TEST UPDATES:
+- Add tests covering missing permission on RFx award.
+
+After applying, bump localStorage.lastSeenCatalogHash to "<CURRENT_HASH>".
+--------------------------------
+/END FRONTEND_DELTA_PROMPT

@@ -1,0 +1,77 @@
+### DEV login to get token
+POST http://localhost:3001/api/dev/login
+Content-Type: application/json
+
+{}
+
+### List variations (requires token and projectId)
+GET http://localhost:3001/api/variations?projectId={{projectId}}&status=&type=&q=&limit=10&offset=0
+Authorization: Bearer {{token}}
+X-Tenant-Id: demo
+
+### Create variation with lines
+POST http://localhost:3001/api/variations
+Authorization: Bearer {{token}}
+Content-Type: application/json
+X-Tenant-Id: demo
+
+{
+  "projectId": {{projectId}},
+  "title": "Fire door spec change",
+  "reference": "CE-101",
+  "contractType": "NEC4",
+  "status": "proposed",
+  "type": "compensation_event",
+  "reason": "Client instruction",
+  "submissionDate": "2025-08-01",
+  "value": "12500.00",
+  "costImpact": "11250.00",
+  "timeImpactDays": 5,
+  "notes": "Provisional until QS review",
+  "lines": [
+    { "description": "Replace doors set A", "qty": "10.000", "rate": "1000.00", "value": "10000.00", "sort": 1 },
+    { "description": "Adjust frames", "qty": "1.000", "rate": "2500.00", "value": "2500.00", "sort": 2 }
+  ]
+}
+
+### Get variation by id (include lines)
+GET http://localhost:3001/api/variations/{{variationId}}
+Authorization: Bearer {{token}}
+X-Tenant-Id: demo
+
+### Update variation (replace-all lines)
+PUT http://localhost:3001/api/variations/{{variationId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+X-Tenant-Id: demo
+
+{
+  "status": "approved",
+  "lines": [
+    { "description": "Revised line", "qty": "2.000", "rate": "1000.00", "value": "2000.00", "sort": 1 }
+  ]
+}
+
+### Delete variation
+DELETE http://localhost:3001/api/variations/{{variationId}}
+Authorization: Bearer {{token}}
+X-Tenant-Id: demo
+
+### CSV template
+GET http://localhost:3001/api/variations/csv/template
+Authorization: Bearer {{token}}
+X-Tenant-Id: demo
+
+### CSV export (optional project filter)
+GET http://localhost:3001/api/variations/csv/export?projectId={{projectId}}
+Authorization: Bearer {{token}}
+X-Tenant-Id: demo
+
+### CSV import (raw CSV body)
+POST http://localhost:3001/api/variations/csv/import
+Authorization: Bearer {{token}}
+Content-Type: text/csv
+X-Tenant-Id: demo
+
+projectId,title,reference,contractType,type,status,reason,submissionDate,decisionDate,value,costImpact,timeImpactDays,notes
+{{projectId}},"Spec change A",CE-200,NEC4,compensation_event,submitted,"Client instruction",2025-08-01,,2500.00,2000.00,2,"Batch import"

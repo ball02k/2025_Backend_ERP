@@ -1,0 +1,315 @@
+{
+  "comment": "Canonical API registry - prevents duplicate endpoint implementations. Generated 2025-11-04",
+  "version": "1.0.0",
+  "apis": {
+    "tenders": {
+      "canonical": {
+        "base": "/api/requests",
+        "endpoints": [
+          "GET /api/requests",
+          "GET /api/requests/:id",
+          "GET /api/requests/:id/bundle",
+          "POST /api/requests",
+          "PATCH /api/requests/:id",
+          "DELETE /api/requests/:id",
+          "POST /api/requests/:id/publish",
+          "POST /api/requests/:id/deadline",
+          "GET /api/requests/:id/sections",
+          "POST /api/requests/:id/sections",
+          "PATCH /api/requests/sections/:sectionId",
+          "DELETE /api/requests/sections/:sectionId",
+          "GET /api/requests/:id/questions",
+          "POST /api/requests/:id/questions",
+          "PATCH /api/requests/questions/:questionId",
+          "DELETE /api/requests/questions/:questionId",
+          "GET /api/requests/:id/invites",
+          "POST /api/requests/:id/invites",
+          "POST /api/requests/:id/invites/:inviteId/resend",
+          "GET /api/requests/:id/qna",
+          "POST /api/requests/:id/qna",
+          "POST /api/requests/qna/:qnaId/answer",
+          "GET /api/requests/:id/responses",
+          "POST /api/requests/:id/responses/submit",
+          "POST /api/requests/:id/scoring/activate",
+          "GET /api/requests/:id/scoring",
+          "PATCH /api/requests/:id/scoring/scale",
+          "PATCH /api/requests/:id/scoring/policy",
+          "GET /api/requests/:id/scoring/status",
+          "GET /api/requests/:id/score/:supplierId/preview",
+          "POST /api/requests/:id/score/:supplierId",
+          "POST /api/requests/:id/award",
+          "POST /api/requests/:id/create-po",
+          "POST /api/requests/:id/duplicate",
+          "GET /api/requests/:id/export",
+          "GET /api/requests/:id/suppliers/summary",
+          "POST /api/requests/import"
+        ]
+      },
+      "canonicalAlternative": {
+        "base": "/api/tenders-combined",
+        "note": "Alternative tender API used by TenderEditor.jsx - consider consolidating",
+        "endpoints": [
+          "GET /api/tenders-combined/:id/full",
+          "PATCH /api/tenders-combined/:id",
+          "POST /api/tenders-combined/:id/publish",
+          "POST /api/tenders-combined/:id/extend"
+        ]
+      },
+      "canonicalInvites": {
+        "base": "/api/rfx/:id/invites",
+        "note": "Dedicated invite management API",
+        "endpoints": [
+          "GET /api/rfx/:id/invites",
+          "POST /api/rfx/:id/send-invites",
+          "POST /api/rfx/:id/quick-invite"
+        ]
+      },
+      "canonicalPublic": {
+        "base": "/api/rfx/respond/:responseToken",
+        "note": "Public supplier portal (no auth required)",
+        "endpoints": [
+          "GET /api/rfx/respond/:responseToken",
+          "POST /api/rfx/respond/:responseToken/submit"
+        ]
+      },
+      "canonicalQnA": {
+        "base": "/api/tenders-qna/:id/qna",
+        "note": "Threaded Q&A API",
+        "endpoints": [
+          "GET /api/tenders-qna/:id/qna",
+          "POST /api/tenders-qna/:id/qna",
+          "POST /api/tenders-qna/:id/qna/:qnaId/publish",
+          "POST /api/tenders-qna/:id/qna/:qnaId/lock"
+        ]
+      },
+      "legacy": {
+        "base": "/api/tenders",
+        "note": "Old tender API - migrate to /api/requests",
+        "endpoints": [
+          "GET /api/tenders/:tenderId",
+          "GET /api/tenders/:tenderId/questions",
+          "GET /api/tenders/:tenderId/responses"
+        ]
+      },
+      "legacyDevOnly": {
+        "base": "/api/tenders",
+        "note": "Legacy endpoints used only by DEV-mode pages",
+        "endpoints": [
+          "POST /api/tenders/:tenderId/invites",
+          "POST /api/tenders/:tenderId/manual-response",
+          "PATCH /api/tenders/:tenderId/responses/:id/reject",
+          "POST /api/tenders/:tenderId/award",
+          "PATCH /api/tenders/:tenderId/responses/:id/score"
+        ]
+      },
+      "orphan": [
+        "GET /api/tenders (list - not called, use /api/requests instead)"
+      ]
+    },
+    "projects": {
+      "canonical": {
+        "base": "/api/projects",
+        "endpoints": [
+          "GET /api/projects",
+          "GET /api/projects/:id",
+          "POST /api/projects",
+          "PATCH /api/projects/:id",
+          "DELETE /api/projects/:id",
+          "POST /api/projects/:projectId/tenders",
+          "GET /api/projects/:projectId/tenders",
+          "GET /api/projects/tenders/:tenderId",
+          "PATCH /api/projects/tenders/:tenderId",
+          "POST /api/projects/:projectId/tenders/:tenderId/bids",
+          "GET /api/projects/:projectId/packages",
+          "POST /api/projects/:projectId/packages",
+          "GET /api/projects/:projectId/packages/:packageId",
+          "PATCH /api/projects/:projectId/packages/:packageId",
+          "POST /api/projects/:projectId/packages/:packageId/push-to-rfx"
+        ]
+      },
+      "legacy": [],
+      "orphan": []
+    },
+    "suppliers": {
+      "canonical": {
+        "base": "/api/suppliers",
+        "endpoints": [
+          "GET /api/suppliers",
+          "GET /api/suppliers/:id",
+          "POST /api/suppliers",
+          "PATCH /api/suppliers/:id",
+          "DELETE /api/suppliers/:id"
+        ]
+      },
+      "legacy": [],
+      "orphan": []
+    },
+    "contracts": {
+      "canonical": {
+        "base": "/api/contracts",
+        "endpoints": [
+          "GET /api/contracts",
+          "GET /api/contracts/:id",
+          "POST /api/contracts",
+          "PATCH /api/contracts/:id",
+          "DELETE /api/contracts/:id"
+        ]
+      },
+      "legacy": [],
+      "orphan": []
+    },
+    "documents": {
+      "canonical": {
+        "base": "/api/documents",
+        "endpoints": [
+          "GET /api/documents",
+          "GET /api/documents/:id",
+          "POST /api/documents",
+          "PATCH /api/documents/:id",
+          "DELETE /api/documents/:id"
+        ]
+      },
+      "legacy": [],
+      "orphan": []
+    },
+    "finance": {
+      "canonical": {
+        "invoices": {
+          "base": "/api/finance/invoices",
+          "endpoints": [
+            "GET /api/finance/invoices",
+            "GET /api/finance/invoices/:id",
+            "POST /api/finance/invoices",
+            "PATCH /api/finance/invoices/:id",
+            "DELETE /api/finance/invoices/:id"
+          ]
+        },
+        "pos": {
+          "base": "/api/finance/pos",
+          "endpoints": [
+            "GET /api/finance/pos",
+            "GET /api/finance/pos/:id",
+            "POST /api/finance/pos",
+            "PATCH /api/finance/pos/:id",
+            "DELETE /api/finance/pos/:id"
+          ]
+        },
+        "afp": {
+          "base": "/api/finance/afp",
+          "endpoints": [
+            "GET /api/finance/afp",
+            "GET /api/finance/afp/:id",
+            "POST /api/finance/afp",
+            "PATCH /api/finance/afp/:id"
+          ]
+        },
+        "receipts": {
+          "base": "/api/finance/receipts",
+          "endpoints": [
+            "GET /api/finance/receipts",
+            "GET /api/finance/receipts/:id",
+            "POST /api/finance/receipts"
+          ]
+        }
+      },
+      "legacy": [],
+      "orphan": []
+    },
+    "settings": {
+      "canonical": {
+        "emailTemplates": {
+          "base": "/api/settings/email-templates",
+          "endpoints": [
+            "GET /api/settings/email-templates",
+            "GET /api/settings/email-templates/:id",
+            "POST /api/settings/email-templates",
+            "PATCH /api/settings/email-templates/:id"
+          ]
+        },
+        "taxonomies": {
+          "base": "/api/settings/taxonomies",
+          "endpoints": [
+            "GET /api/settings/taxonomies",
+            "POST /api/settings/taxonomies",
+            "PATCH /api/settings/taxonomies/:id"
+          ]
+        },
+        "costCodes": {
+          "base": "/api/settings/cost-codes",
+          "endpoints": [
+            "GET /api/settings/cost-codes",
+            "POST /api/settings/cost-codes",
+            "PATCH /api/settings/cost-codes/:id"
+          ]
+        }
+      },
+      "legacy": [],
+      "orphan": []
+    }
+  },
+  "usageMapping": {
+    "/api/requests": {
+      "usedBy": [
+        "src/pages/RfxDetails.jsx",
+        "src/pages/RfxList.jsx",
+        "src/pages/RfxCreate.jsx",
+        "src/components/tender/QuestionBuilder.jsx"
+      ]
+    },
+    "/api/tenders-combined": {
+      "usedBy": [
+        "src/pages/project/TenderEditor.jsx"
+      ],
+      "note": "Consider migrating to /api/requests"
+    },
+    "/api/rfx/:id/invites": {
+      "usedBy": [
+        "src/pages/RfxDetails.jsx"
+      ]
+    },
+    "/api/tenders-qna": {
+      "usedBy": [
+        "src/pages/project/TenderEditor.jsx"
+      ]
+    },
+    "/api/tenders (legacy)": {
+      "usedBy": [
+        "src/pages/project/TenderEditor.jsx (partial)",
+        "src/pages/rfx/TenderManage.jsx (DEV only)",
+        "src/pages/rfx/TenderResponses.jsx (DEV only)"
+      ],
+      "migrationStatus": "in-progress"
+    }
+  },
+  "deprecationWarnings": {
+    "/api/tenders/:id": "LEGACY: Use /api/requests/:id instead",
+    "/api/tenders/:id/invites": "LEGACY (DEV only): Use /api/rfx/:id/send-invites instead",
+    "/api/tenders/:id/manual-response": "LEGACY (DEV only): Use UI instead",
+    "/api/tenders/:id/responses/:id/reject": "LEGACY (DEV only): Use award workflow instead",
+    "/api/tenders/:id/award": "LEGACY (DEV only): Use /api/requests/:id/award instead"
+  },
+  "consolidationPlan": {
+    "phase1": {
+      "description": "Document all /api/tenders usage",
+      "status": "complete",
+      "date": "2025-11-04"
+    },
+    "phase2": {
+      "description": "Migrate TenderEditor.jsx from /api/tenders-combined to /api/requests",
+      "status": "pending",
+      "priority": "high"
+    },
+    "phase3": {
+      "description": "Remove legacy /api/tenders endpoints",
+      "status": "pending",
+      "priority": "medium",
+      "blockedBy": "phase2"
+    },
+    "phase4": {
+      "description": "Remove DEV-only legacy endpoints",
+      "status": "pending",
+      "priority": "low",
+      "blockedBy": "phase3"
+    }
+  }
+}

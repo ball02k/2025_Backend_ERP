@@ -1,0 +1,1 @@
+-- No-op: these indexes already exist from the baseline migration.

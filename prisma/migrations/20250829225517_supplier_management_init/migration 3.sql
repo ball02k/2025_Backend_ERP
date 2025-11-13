@@ -1,0 +1,3 @@
+-- Migration made a no-op because baseline already introduced Supplier and
+-- PurchaseOrder.supplierId and related indexes. Keeping this migration empty
+-- allows shadow database creation to succeed during `prisma migrate dev`.

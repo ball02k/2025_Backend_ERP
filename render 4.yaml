@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: erp-backend
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm run render-build
+    startCommand: npm run render-start
+    envVars:
+      - key: NODE_VERSION
+        value: 18
+      - key: DATABASE_URL
+        sync: false
+      - key: SHADOW_DATABASE_URL
+        sync: false
+      - key: MODEL_PROVIDER
+        value: ollama
+      - key: OLLAMA_BASE_URL
+        sync: false
+      - key: OLLAMA_MODEL
+        value: llama3.1:8b
+      - key: ONLYOFFICE_DS_URL
+        sync: false
+      - key: ONLYOFFICE_JWT_SECRET
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: FILE_STORAGE_DIR
+        value: ./uploads/contracts
+      - key: PORT
+        value: 3001
+    autoDeploy: true

@@ -1,0 +1,6 @@
+code,name,planned,packageId
+S01,Structural Steel,250000,
+M01,Mechanical & Electrical,200000,
+F01,Finishes,150000,
+P01,Preliminaries,100000,
+C01,Contingency,50000,

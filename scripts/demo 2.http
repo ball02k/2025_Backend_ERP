@@ -1,0 +1,172 @@
+### Create demo client (required for project creation)
+POST {{BASE_URL}}/api/clients
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{
+  "name": "Demo Client Ltd",
+  "companyRegNo": "DEM012345",
+  "vatNo": "GB123456789",
+  "address1": "1 Demo Way",
+  "city": "London",
+  "county": "Greater London",
+  "postcode": "EC1A 1AA"
+}
+
+### Create project (use returned clientId)
+POST {{BASE_URL}}/api/projects
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{
+  "code": "DEMO-001",
+  "name": "Demo Project – HQ Fit-Out",
+  "description": "Demo dataset seeded via scripts/demo.seed.cjs",
+  "clientId": {{clientId}},
+  "status": "Live",
+  "type": "Commercial",
+  "budget": 750000,
+  "actualSpend": 0,
+  "startDate": "2025-01-08T00:00:00.000Z",
+  "endDate": "2025-09-30T00:00:00.000Z",
+  "country": "GB",
+  "currency": "GBP"
+}
+
+### Upsert budget lines
+POST {{BASE_URL}}/api/projects/{{projectId}}/budget
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{
+  "lines": [
+    { "code": "S01", "name": "Structural Steel", "planned": 250000 },
+    { "code": "M01", "name": "Mechanical & Electrical", "planned": 200000 },
+    { "code": "F01", "name": "Finishes", "planned": 150000 },
+    { "code": "P01", "name": "Preliminaries", "planned": 100000 },
+    { "code": "C01", "name": "Contingency", "planned": 50000 }
+  ]
+}
+
+### List budget
+GET {{BASE_URL}}/api/projects/{{projectId}}/budget
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+
+### Create packages (repeat per entry, attach packageId to budget via second POST if needed)
+POST {{BASE_URL}}/api/projects/{{projectId}}/packages
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{
+  "name": "Structural Steel Package",
+  "scope": "Supply and installation of structural steelwork",
+  "trade": "Structural",
+  "budgetEstimate": 250000,
+  "deadline": "{{futureIso}}"
+}
+
+### Invite suppliers to a package
+POST {{BASE_URL}}/api/procurement/packages/{{packageId}}/invite
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{
+  "supplierIds": [ {{supplierId1}}, {{supplierId2}}, {{supplierId3}} ]
+}
+
+### Submit supplier bid
+POST {{BASE_URL}}/api/procurement/packages/{{packageId}}/submit
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{
+  "supplierId": {{supplierId}},
+  "price": 240000,
+  "durationWeeks": 26,
+  "details": { "notes": "Demo price" }
+}
+
+### Create RFx for a package
+POST {{BASE_URL}}/api/requests
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{
+  "title": "Structural Steel RFx",
+  "type": "Tender",
+  "deadline": "{{futureIso}}",
+  "packageId": {{packageId}}
+}
+
+### Publish RFx
+POST {{BASE_URL}}/api/requests/{{rfxId}}/publish
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{}
+
+### Submit RFx response
+POST {{BASE_URL}}/api/requests/{{rfxId}}/responses/submit
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{
+  "supplierId": {{supplierId}},
+  "answers": { "price": 240000 }
+}
+
+### Award RFx to supplier
+POST {{BASE_URL}}/api/requests/{{rfxId}}/award
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{
+  "supplierId": {{supplierId}},
+  "reason": "Demo award"
+}
+
+### Create contract via procurement award
+POST {{BASE_URL}}/api/procurement/packages/{{packageId}}/award
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{
+  "supplierId": {{supplierId}},
+  "contractValue": 240000,
+  "title": "Structural Steel Contract"
+}
+
+### Create invoice (records actuals)
+POST {{BASE_URL}}/api/finance/invoices
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}
+Content-Type: application/json
+
+{
+  "projectId": {{projectId}},
+  "supplierId": {{supplierId}},
+  "number": "INV-DEMO-S01-001",
+  "issueDate": "{{todayIso}}",
+  "dueDate": "{{futureIso}}",
+  "net": 50000,
+  "vat": 0,
+  "gross": 50000,
+  "status": "Approved"
+}
+
+### Project overview rollup
+GET {{BASE_URL}}/api/projects/{{projectId}}/overview
+X-Tenant-Id: demo
+Authorization: Bearer {{DEMO_TOKEN}}

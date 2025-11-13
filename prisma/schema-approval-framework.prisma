@@ -1,0 +1,548 @@
+// ==============================================================================
+// SETTINGS & APPROVAL FRAMEWORK
+// Comprehensive configurable approval system for construction ERP
+// ==============================================================================
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum EntityType {
+  PACKAGE
+  CONTRACT
+  VARIATION
+  PAYMENT_APPLICATION
+  BUDGET
+  PROCUREMENT_REQUEST
+  DESIGN_CHANGE
+  PURCHASE_ORDER
+}
+
+enum WorkflowStatus {
+  PENDING
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  CANCELLED
+  OVERRIDDEN
+}
+
+enum ProjectRoleType {
+  PROJECT_MANAGER
+  COMMERCIAL_MANAGER
+  CONSTRUCTION_MANAGER
+  PACKAGE_MANAGER
+  DESIGN_LEAD
+  QS_COST_MANAGER
+  PLANNING_ENGINEER
+  HSQE_MANAGER
+  SITE_MANAGER
+  PROJECT_DIRECTOR
+  CONTRACTS_MANAGER
+  PROCUREMENT_MANAGER
+  CLIENT_REPRESENTATIVE
+  QUANTITY_SURVEYOR
+}
+
+enum StepStatus {
+  PENDING
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+  SKIPPED
+  OVERRIDDEN
+}
+
+enum StepDecision {
+  APPROVED
+  APPROVED_WITH_CONDITIONS
+  REJECTED
+  CHANGES_REQUIRED
+  REFER_UP
+  DEFER
+}
+
+enum ModuleType {
+  PROJECTS
+  BUDGET
+  PACKAGES
+  TENDERS
+  DIRECT_AWARDS
+  INTERNAL_ALLOCATION
+  CONTRACTS
+  VARIATIONS
+  PAYMENT_APPLICATIONS
+  INVOICES
+  PURCHASE_ORDERS
+  JOB_SCHEDULING
+  RESOURCES
+  DOCUMENTS
+  ANALYTICS
+  SUPPLIERS
+  DIARY
+}
+
+enum FieldType {
+  TEXT
+  NUMBER
+  DATE
+  DROPDOWN
+  MULTI_SELECT
+  CHECKBOX
+  TEXTAREA
+  CURRENCY
+  PERCENTAGE
+  EMAIL
+  PHONE
+  URL
+  FILE_UPLOAD
+}
+
+enum NotificationEventType {
+  APPROVAL_REQUESTED
+  APPROVAL_GRANTED
+  APPROVAL_REJECTED
+  APPROVAL_OVERDUE
+  ENTITY_CREATED
+  ENTITY_UPDATED
+  ENTITY_DELETED
+  DEADLINE_APPROACHING
+  BUDGET_THRESHOLD_EXCEEDED
+  STATUS_CHANGED
+  DOCUMENT_UPLOADED
+  COMMENT_ADDED
+  USER_MENTIONED
+  WORKFLOW_COMPLETE
+}
+
+enum NotificationPreference {
+  EMAIL_ONLY
+  IN_APP_ONLY
+  EMAIL_AND_IN_APP
+  SMS_ONLY
+  ALL_CHANNELS
+  NONE
+}
+
+// ============================================
+// TENANT-LEVEL SETTINGS
+// ============================================
+
+model TenantSettings {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+
+  // Module Toggles
+  modulesEnabled Json @default("{\"tenders\": true, \"directAwards\": true, \"internalAllocation\": false}")
+
+  // Default Workflows
+  defaultApprovalWorkflows Json?
+
+  // Notification Preferences
+  notificationDefaults Json?
+
+  // Document Settings
+  documentRetentionDays Int @default(2555) // 7 years
+
+  // Company Info (for templates)
+  companyName    String?
+  companyAddress String?
+  companyPhone   String?
+  companyEmail   String?
+  companyLogo    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("tenant_settings")
+}
+
+// ============================================
+// APPROVAL THRESHOLD CONFIGURATION
+// ============================================
+
+model ApprovalThreshold {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // What does this apply to?
+  entityType EntityType // PACKAGE, CONTRACT, VARIATION, PAYMENT_APP
+
+  // Threshold definition
+  name     String // "Small Works", "Medium Value", "High Value"
+  minValue Decimal @db.Decimal(12, 2) // £0
+  maxValue Decimal? @db.Decimal(12, 2) // £50,000 (null = unlimited)
+
+  // Approval chain - JSON array of approval stages
+  // Example: [{"stage": 1, "role": "PACKAGE_MANAGER", "required": true, "description": "Initial review"}, ...]
+  approvalSteps Json
+
+  // Additional requirements
+  requiresRiskAssessment Boolean @default(false)
+  requiresDesignReview   Boolean @default(false)
+  requiresHSQE           Boolean @default(false)
+  requiresClientApproval Boolean @default(false)
+
+  // Timing
+  targetApprovalDays Int @default(5)
+
+  // Display
+  isActive Boolean @default(true)
+  sequence Int // Display order in settings
+
+  // Description
+  description String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  workflows ApprovalWorkflow[]
+
+  @@index([tenantId, entityType])
+  @@index([tenantId, entityType, minValue, maxValue])
+  @@index([tenantId, isActive])
+  @@map("approval_thresholds")
+}
+
+// ============================================
+// PROJECT ROLE ASSIGNMENTS
+// ============================================
+
+model ProjectRole {
+  id        String  @id @default(cuid())
+  projectId Int
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  userId Int
+  user   User @relation("ProjectRoleUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Role/Persona
+  role ProjectRoleType
+
+  // Alternate/Deputies
+  deputyUserId Int?
+  deputy       User? @relation("ProjectRoleDeputy", fields: [deputyUserId], references: [id])
+
+  // Permissions & Notifications
+  canApprovePackages   Boolean @default(false)
+  canApproveContracts  Boolean @default(false)
+  canApproveVariations Boolean @default(false)
+  canApprovePayments   Boolean @default(false)
+
+  receiveNotifications   Boolean                @default(true)
+  notificationPreference NotificationPreference @default(EMAIL_AND_IN_APP)
+
+  // Validity
+  startDate DateTime @default(now())
+  endDate   DateTime?
+  isActive  Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  approvalSteps ApprovalStep[]
+
+  @@unique([projectId, userId, role])
+  @@index([projectId, role, isActive])
+  @@index([userId, isActive])
+  @@map("project_roles")
+}
+
+// ============================================
+// USER PERSONAS (Multi-role users)
+// ============================================
+
+model UserPersona {
+  id     String @id @default(cuid())
+  userId Int
+  user   User   @relation("UserPersonas", fields: [userId], references: [id], onDelete: Cascade)
+
+  persona   ProjectRoleType
+  isPrimary Boolean         @default(false)
+
+  // Competencies
+  canLead    Boolean @default(false)
+  canApprove Boolean @default(false)
+
+  // Approval limits (in GBP)
+  maxApprovalValue Decimal? @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, persona])
+  @@index([userId])
+  @@map("user_personas")
+}
+
+// ============================================
+// APPROVAL WORKFLOW INSTANCE
+// ============================================
+
+model ApprovalWorkflow {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // What's being approved
+  entityType  EntityType
+  entityId    String
+  entityValue Decimal?   @db.Decimal(12, 2)
+
+  // Which threshold matched
+  thresholdId String?
+  threshold   ApprovalThreshold? @relation(fields: [thresholdId], references: [id])
+
+  // Project context
+  projectId Int
+  project   Project @relation("ProjectApprovalWorkflows", fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Overall status
+  status WorkflowStatus @default(PENDING)
+
+  // Steps
+  steps ApprovalStep[]
+
+  // Tracking
+  initiatedBy   String
+  initiatedByUser Int?
+  initiatedAt     DateTime @default(now())
+  completedAt     DateTime?
+
+  // Escalation
+  isOverdue   Boolean   @default(false)
+  escalatedAt DateTime?
+
+  // Comments/Notes
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([projectId, status])
+  @@index([tenantId, status])
+  @@index([tenantId, entityType])
+  @@index([isOverdue])
+  @@map("approval_workflows")
+}
+
+model ApprovalStep {
+  id         String           @id @default(cuid())
+  workflowId String
+  workflow   ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  // Step definition
+  stage       Int // 1, 2, 3, 4...
+  role        ProjectRoleType
+  isRequired  Boolean         @default(true)
+  description String?
+
+  // Assigned to (via ProjectRole)
+  projectRoleId  String?
+  projectRole    ProjectRole? @relation(fields: [projectRoleId], references: [id])
+  assignedUserId Int?
+  assignedUser   User?        @relation("ApprovalStepAssignee", fields: [assignedUserId], references: [id])
+
+  // Status
+  status StepStatus @default(PENDING)
+
+  // Decision
+  decision  StepDecision?
+  decidedBy Int?
+  decidedByUser User?    @relation("ApprovalStepDecider", fields: [decidedBy], references: [id])
+  decidedAt DateTime?
+  comments  String?   @db.Text
+  conditions String?  @db.Text // "Approved subject to £5k reduction"
+
+  // Timing
+  dueDate      DateTime?
+  reminderSent Boolean   @default(false)
+
+  // Delegation
+  delegatedTo     Int?
+  delegatedToUser User?     @relation("ApprovalStepDelegation", fields: [delegatedTo], references: [id])
+  delegatedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workflowId, stage])
+  @@index([assignedUserId, status])
+  @@index([status, dueDate])
+  @@map("approval_steps")
+}
+
+// ============================================
+// MODULE-SPECIFIC SETTINGS
+// ============================================
+
+model ModuleSettings {
+  id       String @id @default(cuid())
+  tenantId String
+
+  module ModuleType
+
+  // General
+  isEnabled Boolean @default(true)
+
+  // Configuration (module-specific JSON config)
+  config Json?
+
+  // Display
+  displayName String?
+  description String? @db.Text
+  icon        String?
+  displayOrder Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, module])
+  @@index([tenantId, isEnabled])
+  @@map("module_settings")
+}
+
+// ============================================
+// CUSTOM FIELDS
+// ============================================
+
+model CustomField {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // Scope
+  entityType EntityType
+  projectId  Int? // If project-specific
+
+  // Field definition
+  fieldName String // "Risk Category", "Client Reference"
+  fieldKey  String // "riskCategory", "clientRef"
+  fieldType FieldType
+
+  // Options (for dropdowns, multi-select) - JSON array
+  options Json?
+
+  // Validation
+  isRequired Boolean @default(false)
+  validation Json? // Regex, min/max, etc.
+
+  // Display
+  displayOrder Int
+  helpText     String?
+  placeholder  String?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  values CustomFieldValue[]
+
+  @@unique([tenantId, entityType, fieldKey])
+  @@index([tenantId, entityType])
+  @@index([projectId])
+  @@map("custom_fields")
+}
+
+model CustomFieldValue {
+  id String @id @default(cuid())
+
+  customFieldId String
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+
+  entityType EntityType
+  entityId   String
+
+  value String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([customFieldId, entityId])
+  @@index([entityType, entityId])
+  @@map("custom_field_values")
+}
+
+// ============================================
+// NOTIFICATION RULES
+// ============================================
+
+model NotificationRule {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // Trigger
+  eventType  NotificationEventType
+  entityType EntityType?
+
+  // Recipients (JSON array of ProjectRoleType)
+  roles Json
+
+  // Delivery channels (JSON array: ["EMAIL", "IN_APP", "SMS"])
+  channels Json
+
+  // Template
+  templateId String?
+
+  // Custom template content (overrides templateId)
+  emailSubject String?
+  emailBody    String? @db.Text
+  inAppTitle   String?
+  inAppBody    String? @db.Text
+
+  // Conditions (when to send - JSON object)
+  // Example: {"value": {"gt": 100000}, "status": "PENDING"}
+  conditions Json?
+
+  // Timing
+  sendImmediately Boolean @default(true)
+  delayMinutes    Int?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, eventType])
+  @@index([tenantId, isActive])
+  @@map("notification_rules")
+}
+
+// ============================================
+// APPROVAL HISTORY / AUDIT LOG
+// ============================================
+
+model ApprovalHistory {
+  id       String @id @default(cuid())
+  tenantId String
+
+  workflowId String
+  stepId     String?
+
+  // What changed
+  action      String // "created", "approved", "rejected", "escalated", "overridden"
+  description String @db.Text
+
+  // Who did it
+  userId Int?
+  user   User? @relation("ApprovalHistoryUser", fields: [userId], references: [id])
+
+  // Previous/New values
+  previousValue Json?
+  newValue      Json?
+
+  // Context
+  ipAddress  String?
+  userAgent  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([workflowId])
+  @@index([tenantId, createdAt])
+  @@index([userId])
+  @@map("approval_history")
+}

@@ -255,6 +255,9 @@ model Project {
   ApplicationForPayment ApplicationForPayment[]
   // MVP additive
   tenders               Tender[]
+  // CVR tracking
+  cvrCommitments        CVRCommitment[]
+  cvrActuals            CVRActual[]
 
   // Additive relations for new info fields
   clientContact    Contact? @relation("Project_ClientContact", fields: [clientContactId], references: [id])
@@ -1029,13 +1032,22 @@ model PurchaseOrder {
   supplier   String
   supplierId Int?
   contractId Int?
-  status     String     @default("Open")
+  budgetLineId Int? // CVR: Link to budget line
+  status     String     @default("DRAFT") // "DRAFT" | "SUBMITTED" | "APPROVED" | "ISSUED" | "INVOICED" | "PAID" | "CANCELLED"
   orderDate  DateTime   @default(now())
   total      Decimal    @default(0)
+  // CVR: Enhanced workflow tracking
+  submittedDate DateTime?
+  approvedDate  DateTime?
+  approvedBy    Int?
+  issuedDate    DateTime?
+  cancelledDate DateTime?
+  cancelReason  String?
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
   project    Project    @relation(fields: [projectId], references: [id])
   contract   Contract?  @relation(fields: [contractId], references: [id])
+  budgetLine BudgetLine? @relation(fields: [budgetLineId], references: [id])
   lines      POLine[]
   deliveries Delivery[]
 
@@ -1043,6 +1055,7 @@ model PurchaseOrder {
   @@index([tenantId, projectId, status])
   @@index([tenantId, supplierId])
   @@index([tenantId, contractId])
+  @@index([tenantId, budgetLineId])
 }
 
 model POLine {
@@ -1472,6 +1485,11 @@ model BudgetLine {
   // Link budget lines to procurement packages
   packageItems  PackageItem[]
   contractLines ContractLineItem[] @relation("BudgetLineContractLines")
+  // CVR tracking
+  cvrCommitments CVRCommitment[]
+  cvrActuals     CVRActual[]
+  purchaseOrders PurchaseOrder[]
+  invoices       Invoice[]
 
   @@index([tenantId, projectId])
   @@index([tenantId, projectId, periodMonth])
@@ -1578,13 +1596,15 @@ model Invoice {
   project       Project   @relation(fields: [projectId], references: [id])
   supplierId    Int?
   supplier      Supplier? @relation(fields: [supplierId], references: [id])
+  budgetLineId  Int? // CVR: Link to budget line
+  budgetLine    BudgetLine? @relation(fields: [budgetLineId], references: [id])
   number        String
   issueDate     DateTime?
   dueDate       DateTime?
   net           Decimal   @default(0)
   vat           Decimal   @default(0)
   gross         Decimal   @default(0)
-  status        String    @default("Open")
+  status        String    @default("RECEIVED") // "RECEIVED" | "MATCHED" | "APPROVED" | "PAID" | "DISPUTED" | "CANCELLED"
   // Additive finance fields
   documentId    BigInt?
   ocrStatus     String?
@@ -1597,6 +1617,15 @@ model Invoice {
   packageId     Int?
   contractId    Int?
   contract      Contract? @relation(fields: [contractId], references: [id])
+  // CVR: Enhanced workflow tracking
+  receivedDate  DateTime?
+  matchedDate   DateTime?
+  approvedDate  DateTime?
+  approvedBy    Int?
+  paidDate      DateTime?
+  paidAmount    Decimal? @db.Decimal(18, 2)
+  paymentRef    String? // Bank transfer reference
+  disputeReason String? @db.Text
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -1607,6 +1636,7 @@ model Invoice {
   @@index([tenantId, contractId])
   @@index([tenantId, projectId, dueDate])
   @@index([tenantId, projectId, source])
+  @@index([tenantId, budgetLineId])
 }
 
 /// Finance: Invoice line items (additive)
@@ -4738,4 +4768,99 @@ model ApprovalHistory {
   @@index([tenantId, createdAt])
   @@index([userId])
   @@map("approval_history")
+}
+
+// ============================================
+// CVR (COST VALUE RECONCILIATION) SYSTEM
+// ============================================
+
+/// CVRCommitment - Links budget lines to financial commitments
+/// Tracks: Contract awards, Variation approvals, PO issues
+/// Purpose: Know what we've committed to spend against each budget line
+model CVRCommitment {
+  id       Int    @id @default(autoincrement())
+  tenantId String
+
+  // Link to budget
+  projectId    Int
+  project      Project     @relation(fields: [projectId], references: [id])
+  budgetLineId Int?
+  budgetLine   BudgetLine? @relation(fields: [budgetLineId], references: [id])
+
+  // Source of commitment
+  sourceType String // "CONTRACT" | "VARIATION" | "PURCHASE_ORDER"
+  sourceId   Int // contractId, variationId, or poId
+
+  // Financial
+  amount   Decimal  @db.Decimal(18, 2)
+  currency String   @default("GBP")
+  status   String // "PENDING" | "COMMITTED" | "SUPERSEDED" | "CANCELLED"
+
+  // Metadata
+  description String?
+  reference   String? // Contract ref, variation number, PO code
+  costCode    String?
+
+  // Dates
+  commitmentDate DateTime @default(now())
+  effectiveDate  DateTime? // When commitment takes effect
+  cancelledDate  DateTime?
+
+  // Audit
+  createdBy Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, budgetLineId])
+  @@index([tenantId, sourceType, sourceId])
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, costCode])
+  @@map("cvr_commitments")
+}
+
+/// CVRActual - Links budget lines to actual costs incurred
+/// Tracks: Invoice receipts, Payment applications, Actual payments
+/// Purpose: Know what we've actually spent against each budget line
+model CVRActual {
+  id       Int    @id @default(autoincrement())
+  tenantId String
+
+  // Link to budget
+  projectId    Int
+  project      Project     @relation(fields: [projectId], references: [id])
+  budgetLineId Int?
+  budgetLine   BudgetLine? @relation(fields: [budgetLineId], references: [id])
+
+  // Source of actual cost
+  sourceType String // "INVOICE" | "PAYMENT_APPLICATION" | "DIRECT_COST"
+  sourceId   Int // invoiceId, applicationId, or other ID
+
+  // Financial
+  amount   Decimal  @db.Decimal(18, 2)
+  currency String   @default("GBP")
+  status   String // "RECORDED" | "CERTIFIED" | "PAID" | "REVERSED"
+
+  // Metadata
+  description String?
+  reference   String? // Invoice number, APP number
+  costCode    String?
+
+  // Dates
+  incurredDate DateTime @default(now())
+  certifiedDate DateTime?
+  paidDate     DateTime?
+
+  // Audit
+  createdBy Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, budgetLineId])
+  @@index([tenantId, sourceType, sourceId])
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, costCode])
+  @@index([tenantId, incurredDate])
+  @@map("cvr_actuals")
 }

@@ -1,0 +1,1 @@
+-- No-op: Columns and indexes already present from baseline migration.

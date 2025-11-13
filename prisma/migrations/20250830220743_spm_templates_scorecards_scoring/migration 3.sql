@@ -1,0 +1,1 @@
+-- No-op: SPM tables and index already present in baseline migration.
