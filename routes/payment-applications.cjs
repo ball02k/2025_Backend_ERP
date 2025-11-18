@@ -748,12 +748,14 @@ router.post('/applications/:id/certify', async (req, res, next) => {
       }
     }
 
-    // Build certification notes with QS name/title if provided
+    // TASK 6: Auto-populate QS name from logged-in user (SECURITY: Don't trust frontend)
+    const qsName = req.user?.name || req.user?.email || 'Unknown QS';
+    const qsRole = req.user?.role || 'Quantity Surveyor';
+
+    // Build certification notes with QS name/title
     let fullNotes = req.body.certificationNotes || '';
-    if (req.body.qsName || req.body.qsTitle) {
-      const qsInfo = [req.body.qsTitle, req.body.qsName].filter(Boolean).join(': ');
-      fullNotes = qsInfo ? `${qsInfo}\n\n${fullNotes}` : fullNotes;
-    }
+    const qsInfo = `${qsRole}: ${qsName}`;
+    fullNotes = qsInfo ? `${qsInfo}\n\n${fullNotes}` : fullNotes;
 
     const updated = await prisma.applicationForPayment.update({
       where: { id },
@@ -807,7 +809,52 @@ router.post('/applications/:id/certify', async (req, res, next) => {
       console.log(`[Certification] Updated contract ${application.contractId} totalCertifiedToDate by £${req.body.certifiedThisPeriod}`);
     }
 
-    const result = safeJson(updated);
+    // TASK 7: Auto-issue payment notice after certification (UK Construction Act compliance)
+    const certifiedAmount = Number(req.body.certifiedGrossValue || 0);
+    const claimedAmount = Number(application.claimedGrossValue || 0);
+    const now = new Date();
+
+    // Determine notice type: Payment Notice (standard) or Pay-Less Notice (if reduced)
+    const isPayLessNotice = certifiedAmount < claimedAmount && variance < 0;
+    const noticeStatus = isPayLessNotice ? 'PAY_LESS_ISSUED' : 'PAYMENT_NOTICE_SENT';
+    const noticeType = isPayLessNotice ? 'Pay-Less Notice' : 'Payment Notice';
+
+    // Helper function to format currency
+    const fmt = (val) => `£${Number(val || 0).toFixed(2)}`;
+
+    // Auto-issue payment notice
+    const finalUpdated = await prisma.applicationForPayment.update({
+      where: { id },
+      data: {
+        status: noticeStatus,
+        paymentNoticeSent: true,
+        paymentNoticeSentAt: now,
+        paymentNoticeAmount: Number(req.body.certifiedThisPeriod || 0),
+        paymentNoticeIssuedAt: now,
+        isActCompliant: true, // Issued immediately after certification
+        ...(isPayLessNotice && {
+          payLessNoticeSent: true,
+          payLessNoticeIssuedAt: now,
+          payLessNoticeAmount: Number(req.body.certifiedThisPeriod || 0),
+          payLessNoticeReason: `Certified amount (${fmt(certifiedAmount)}) differs from claimed amount (${fmt(claimedAmount)}). Variance: ${fmt(variance)} (${variancePercentage.toFixed(2)}%)`,
+        }),
+      },
+      include: {
+        supplier: { select: { id: true, name: true } },
+        contract: { select: { id: true, title: true } },
+      },
+    });
+
+    console.log(`✅ [Auto-Issued ${noticeType}] ${application.applicationNo}:`, {
+      certifiedAmount: fmt(certifiedAmount),
+      claimedAmount: fmt(claimedAmount),
+      variance: fmt(variance),
+      variancePercentage: variancePercentage.toFixed(2) + '%',
+      noticeType,
+      status: noticeStatus,
+    });
+
+    const result = safeJson(finalUpdated);
     result.links = buildLinks('applicationForPayment', result);
 
     res.json(result);

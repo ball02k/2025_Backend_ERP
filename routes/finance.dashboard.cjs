@@ -72,7 +72,7 @@ router.get('/finance/dashboard-summary', async (req, res) => {
       by: ['status'],
       where: { tenantId },
       _sum: {
-        certifiedNetPayable: true,
+        certifiedNetValue: true,
       },
       _count: true,
     });
@@ -81,7 +81,7 @@ router.get('/finance/dashboard-summary', async (req, res) => {
     const paymentStatusBreakdown = statusBreakdown.map(item => ({
       status: item.status,
       count: item._count,
-      amount: Number(item._sum.certifiedNetPayable || 0),
+      amount: Number(item._sum.certifiedNetValue || 0),
     }));
 
     // Get this month's cash flow
@@ -128,9 +128,9 @@ router.get('/finance/dashboard-summary', async (req, res) => {
     );
 
     // Calculate payment status amounts
-    const readyToPay = statusBreakdown.find(s => s.status === 'APPROVED')?._sum.certifiedNetPayable || 0;
-    const awaitingApproval = statusBreakdown.find(s => s.status === 'CERTIFIED')?._sum.certifiedNetPayable || 0;
-    const underReview = statusBreakdown.find(s => s.status === 'UNDER_REVIEW')?._sum.certifiedNetPayable || 0;
+    const readyToPay = statusBreakdown.find(s => s.status === 'APPROVED')?._sum.certifiedNetValue || 0;
+    const awaitingApproval = statusBreakdown.find(s => s.status === 'CERTIFIED')?._sum.certifiedNetValue || 0;
+    const underReview = statusBreakdown.find(s => s.status === 'UNDER_REVIEW')?._sum.certifiedNetValue || 0;
 
     // Count of active contracts
     const activeContracts = contracts.length;
@@ -236,19 +236,21 @@ router.get('/finance/payment-applications', async (req, res) => {
       where: { tenantId },
       select: {
         certifiedThisPeriod: true,
+        claimedThisPeriod: true,
         amountPaid: true,
         status: true,
-        retentionThisPeriod: true,
+        certifiedRetention: true,
+        claimedRetention: true,
       },
     });
 
     const totalCount = allApplications.length;
-    const totalCertified = allApplications.reduce((sum, a) => sum + Number(a.certifiedThisPeriod || 0), 0);
+    const totalCertified = allApplications.reduce((sum, a) => sum + Number(a.certifiedThisPeriod || a.claimedThisPeriod || 0), 0);
     const totalPaid = allApplications.reduce((sum, a) => sum + Number(a.amountPaid || 0), 0);
     const awaitingPayment = allApplications
       .filter(a => ['CERTIFIED', 'APPROVED', 'PAYMENT_NOTICE_SENT'].includes(a.status))
-      .reduce((sum, a) => sum + Number(a.certifiedThisPeriod || 0) - Number(a.amountPaid || 0), 0);
-    const retentionHeld = allApplications.reduce((sum, a) => sum + Number(a.retentionThisPeriod || 0), 0);
+      .reduce((sum, a) => sum + Number(a.certifiedThisPeriod || a.claimedThisPeriod || 0) - Number(a.amountPaid || 0), 0);
+    const retentionHeld = allApplications.reduce((sum, a) => sum + Number(a.certifiedRetention || a.claimedRetention || 0), 0);
 
     // Get unique projects for filter
     const projects = await prisma.project.findMany({
@@ -294,6 +296,144 @@ router.get('/finance/payment-applications', async (req, res) => {
     });
   } catch (error) {
     console.error('[Finance Payment Applications] Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/finance/payment-applications/export
+ * Export payment applications to CSV
+ * Respects same filters as list endpoint
+ */
+router.get('/finance/payment-applications/export', async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const { status, projectId, contractId, packageId, supplierId, search, dateFrom, dateTo } = req.query;
+
+    // Build where clause (same as list endpoint, plus additional filters)
+    const where = { tenantId };
+
+    if (status && status !== 'ALL') {
+      where.status = status;
+    }
+    if (projectId && projectId !== 'ALL') {
+      where.projectId = Number(projectId);
+    }
+    if (contractId && contractId !== 'ALL') {
+      where.contractId = Number(contractId);
+    }
+    if (packageId && packageId !== 'ALL') {
+      where.packageId = Number(packageId);
+    }
+    if (supplierId && supplierId !== 'ALL') {
+      where.supplierId = Number(supplierId);
+    }
+    if (search) {
+      where.applicationNo = { contains: search };
+    }
+    if (dateFrom || dateTo) {
+      where.periodStart = {};
+      if (dateFrom) where.periodStart.gte = new Date(dateFrom);
+      if (dateTo) where.periodStart.lte = new Date(dateTo);
+    }
+
+    // Get applications with all necessary relations
+    const applications = await prisma.applicationForPayment.findMany({
+      where,
+      include: {
+        project: { select: { name: true } },
+        contract: { select: { contractRef: true, title: true } },
+        package: { select: { code: true, name: true } },
+        supplier: { select: { name: true } },
+        certifiedByUser: { select: { name: true, email: true } },
+      },
+      orderBy: [
+        { applicationDate: 'desc' },
+      ],
+    });
+
+    // Build CSV rows
+    const csvRows = [];
+
+    // Header row
+    csvRows.push([
+      'Application Number',
+      'Contract Number',
+      'Contract Name',
+      'Package Code',
+      'Package Name',
+      'Supplier Name',
+      'Period Start',
+      'Period End',
+      'Gross Value Applied (£)',
+      'Less Previous Applications (£)',
+      'This Application (£)',
+      'Certified Value (£)',
+      'Retention %',
+      'Retention Amount (£)',
+      'Net Payable (£)',
+      'Status',
+      'Submitted Date',
+      'Certified Date',
+      'Payment Due Date',
+      'Certified By',
+    ].join(','));
+
+    // Data rows
+    for (const app of applications) {
+      const grossValue = Number(app.certifiedGrossValue || app.claimedGrossValue || 0);
+      const lessPrevious = Number(app.certifiedPreviouslyPaid || app.claimedPreviouslyPaid || 0);
+      const thisApplication = grossValue - lessPrevious;
+      const certifiedValue = Number(app.certifiedThisPeriod || app.claimedThisPeriod || 0);
+      const retentionPct = Number(app.retentionPercentage || 0);
+      const retentionAmount = Number(app.certifiedRetention || app.claimedRetention || 0);
+      const netPayable = certifiedValue - retentionAmount;
+
+      const row = [
+        app.applicationNo || `APP-${app.id}`,
+        app.contract?.contractRef || '',
+        app.contract?.title || '',
+        app.package?.code || '',
+        app.package?.name || '',
+        app.supplier?.name || '',
+        app.periodStart ? new Date(app.periodStart).toISOString().split('T')[0] : '',
+        app.periodEnd ? new Date(app.periodEnd).toISOString().split('T')[0] : '',
+        grossValue.toFixed(2),
+        lessPrevious.toFixed(2),
+        thisApplication.toFixed(2),
+        certifiedValue.toFixed(2),
+        retentionPct.toFixed(2),
+        retentionAmount.toFixed(2),
+        netPayable.toFixed(2),
+        app.status,
+        app.applicationDate ? new Date(app.applicationDate).toISOString().split('T')[0] : '',
+        app.certifiedDate ? new Date(app.certifiedDate).toISOString().split('T')[0] : '',
+        app.dueDate ? new Date(app.dueDate).toISOString().split('T')[0] : '',
+        app.certifiedByUser ? (app.certifiedByUser.name || app.certifiedByUser.email) : '',
+      ];
+
+      // Escape fields containing commas or quotes
+      const escapedRow = row.map(field => {
+        const str = String(field);
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      });
+
+      csvRows.push(escapedRow.join(','));
+    }
+
+    // Create CSV content
+    const csvContent = csvRows.join('\n');
+
+    // Set headers for CSV download
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="payment_applications_export.csv"');
+    res.send(csvContent);
+
+  } catch (error) {
+    console.error('[Finance Payment Applications Export] Error:', error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -7,11 +7,11 @@ const requireAuth = require('../middleware/requireAuth.cjs') || { requireAuth: (
 
 // Read-only Suppliers API (tenant-scoped)
 
-// GET /api/suppliers?q=&status=&limit=&offset=
+// GET /api/suppliers?q=&status=&limit=&offset=&projectId=&hasContracts=
 router.get('/', async (req, res, next) => {
   try {
     const tenantId = req.user.tenantId;
-    const { q, status, approved, capability } = req.query;
+    const { q, status, approved, capability, projectId, hasContracts } = req.query;
     const where = { tenantId };
 
     if (status) where.status = String(status);
@@ -25,6 +25,21 @@ router.get('/', async (req, res, next) => {
       if (tags.length) {
         where.capabilities = { some: { tag: { in: tags } } };
       }
+    }
+
+    // Filter by project - only return suppliers with contracts on this project
+    if (projectId) {
+      where.contracts = {
+        some: {
+          projectId: Number(projectId),
+          status: { in: ['active', 'ACTIVE', 'signed', 'SIGNED'] }, // Active or signed contracts
+        },
+      };
+    } else if (hasContracts === 'true') {
+      // If no projectId but hasContracts is true, return suppliers with any contracts
+      where.contracts = {
+        some: {},
+      };
     }
 
     if (q) {
