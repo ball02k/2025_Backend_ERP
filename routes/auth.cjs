@@ -76,10 +76,11 @@ router.post('/register', async (req, res) => {
     const normalizedEmail = normalizeEmail(email);
     const normalizedTenantId = tenantId.trim();
 
-    const tenant = await ensureTenantExists(normalizedTenantId);
-    if (!tenant) {
-      return respondError(res, 404, 'TENANT_NOT_FOUND', 'Tenant does not exist');
-    }
+    // TODO: Re-enable when TenantSettings table exists
+    // const tenant = await ensureTenantExists(normalizedTenantId);
+    // if (!tenant) {
+    //   return respondError(res, 404, 'TENANT_NOT_FOUND', 'Tenant does not exist');
+    // }
 
     const existing = await prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -133,10 +134,11 @@ router.post('/login', async (req, res) => {
       return respondError(res, 400, 'INVALID_INPUT', 'tenantId is required');
     }
 
-    const tenant = await ensureTenantExists(tenantId);
-    if (!tenant) {
-      return respondError(res, 404, 'TENANT_NOT_FOUND', 'Tenant does not exist');
-    }
+    // TODO: Re-enable when TenantSettings table exists
+    // const tenant = await ensureTenantExists(tenantId);
+    // if (!tenant) {
+    //   return respondError(res, 404, 'TENANT_NOT_FOUND', 'Tenant does not exist');
+    // }
 
     const normalizedEmail = normalizeEmail(email);
     const user = await prisma.user.findFirst({

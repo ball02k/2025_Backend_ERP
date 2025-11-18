@@ -277,6 +277,33 @@ router.post('/contracts/:contractId/applications', async (req, res, next) => {
 
     const { dueDate, finalPaymentDate } = calculatePaymentDates(valuationDate, contract);
 
+    // Calculate payment values automatically (backend handles cumulative tracking)
+    const claimedGrossValue = Number(req.body.claimedGrossValue || 0);
+    const retentionPercentage = Number(contract.retentionPercentage || 5.0);
+    const claimedRetention = (claimedGrossValue * retentionPercentage) / 100;
+    const claimedNetValue = claimedGrossValue - claimedRetention;
+
+    // Get all previous non-cancelled applications for this contract
+    const previousApplications = await prisma.applicationForPayment.findMany({
+      where: {
+        contractId,
+        tenantId,
+        status: { not: 'CANCELLED' },
+      },
+      select: {
+        claimedNetValue: true,
+      },
+    });
+
+    // Calculate cumulative previously paid amount
+    const claimedPreviouslyPaid = previousApplications.reduce(
+      (sum, app) => sum + Number(app.claimedNetValue || 0),
+      0
+    );
+
+    // Calculate this period's net claim
+    const claimedThisPeriod = claimedNetValue - claimedPreviouslyPaid;
+
     // Create application
     const application = await prisma.applicationForPayment.create({
       data: {
@@ -303,12 +330,12 @@ router.post('/contracts/:contractId/applications', async (req, res, next) => {
         status: 'DRAFT',
         currency: req.body.currency || contract.currency || 'GBP',
 
-        // Claimed values
-        claimedGrossValue: req.body.claimedGrossValue || 0,
-        claimedRetention: req.body.claimedRetention || 0,
-        claimedNetValue: req.body.claimedNetValue || 0,
-        claimedPreviouslyPaid: req.body.claimedPreviouslyPaid || 0,
-        claimedThisPeriod: req.body.claimedThisPeriod || 0,
+        // Claimed values (auto-calculated by backend)
+        claimedGrossValue,
+        claimedRetention,
+        claimedNetValue,
+        claimedPreviouslyPaid,
+        claimedThisPeriod,
 
         // Legacy fields
         grossToDate: req.body.grossToDate || 0,
@@ -423,8 +450,6 @@ router.patch('/applications/:id', async (req, res, next) => {
     // Allowed fields for update
     const allowedFields = [
       'title', 'reference', 'valuationDate', 'periodStart', 'periodEnd',
-      'claimedGrossValue', 'claimedRetention', 'claimedNetValue',
-      'claimedPreviouslyPaid', 'claimedThisPeriod',
       'grossToDate', 'variationsValue', 'prelimsValue', 'retentionValue',
       'mosValue', 'offsiteValue', 'deductionsValue', 'netClaimed',
       'contractorNotes', 'internalNotes',
@@ -436,6 +461,49 @@ router.patch('/applications/:id', async (req, res, next) => {
         updateData[field] = req.body[field];
       }
     });
+
+    // Auto-calculate claimed values if claimedGrossValue is being updated
+    if (req.body.claimedGrossValue !== undefined) {
+      const contract = await prisma.contract.findUnique({
+        where: { id: existing.contractId },
+      });
+
+      if (contract) {
+        const claimedGrossValue = Number(req.body.claimedGrossValue || 0);
+        const retentionPercentage = Number(contract.retentionPercentage || 5.0);
+        const claimedRetention = (claimedGrossValue * retentionPercentage) / 100;
+        const claimedNetValue = claimedGrossValue - claimedRetention;
+
+        // Get all previous non-cancelled applications for this contract (excluding current one)
+        const previousApplications = await prisma.applicationForPayment.findMany({
+          where: {
+            contractId: existing.contractId,
+            tenantId,
+            status: { not: 'CANCELLED' },
+            id: { not: existing.id }, // Exclude current application
+          },
+          select: {
+            claimedNetValue: true,
+          },
+        });
+
+        // Calculate cumulative previously paid amount
+        const claimedPreviouslyPaid = previousApplications.reduce(
+          (sum, app) => sum + Number(app.claimedNetValue || 0),
+          0
+        );
+
+        // Calculate this period's net claim
+        const claimedThisPeriod = claimedNetValue - claimedPreviouslyPaid;
+
+        // Update all calculated fields
+        updateData.claimedGrossValue = claimedGrossValue;
+        updateData.claimedRetention = claimedRetention;
+        updateData.claimedNetValue = claimedNetValue;
+        updateData.claimedPreviouslyPaid = claimedPreviouslyPaid;
+        updateData.claimedThisPeriod = claimedThisPeriod;
+      }
+    }
 
     // Recalculate dates if valuationDate changed
     if (req.body.valuationDate && existing.contractId) {
