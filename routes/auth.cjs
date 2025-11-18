@@ -1,235 +1,102 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const prisma = require('../lib/prisma.cjs');
+const { z } = require('zod');
+const { prisma } = require('../utils/prisma.cjs');
 
 const router = express.Router();
 
-// JWT configuration
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
-const JWT_EXPIRES_IN = '7d'; // 7 day expiry
-const BCRYPT_SALT_ROUNDS = 10;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+const BCRYPT_SALT_ROUNDS = Number(process.env.BCRYPT_SALT_ROUNDS || 12);
+const TENANT_DEFAULT = process.env.TENANT_DEFAULT || 'demo';
 
-// Email validation regex
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const registerSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8, 'Password must be at least 8 characters long'),
+  name: z.string().min(1, 'Name is required'),
+  tenantId: z.string().min(1, 'tenantId is required'),
+});
 
-// POST /register - Register new user with bcrypt password hashing
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8, 'Password must be at least 8 characters long'),
+  tenantId: z.string().min(1).optional(),
+});
+
+function normalizeEmail(email) {
+  return email.trim().toLowerCase();
+}
+
+function sanitizeUser(user) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    tenantId: user.tenantId,
+    isActive: user.isActive,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
+
+function respondError(res, status, error, message) {
+  const payload = { error };
+  if (message) payload.message = message;
+  return res.status(status).json(payload);
+}
+
+async function ensureTenantExists(tenantId) {
+  return prisma.tenantSettings.findFirst({ where: { tenantId } });
+}
+
+function issueToken(user) {
+  return jwt.sign(
+    {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      tenantId: user.tenantId,
+    },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN },
+  );
+}
+
 router.post('/register', async (req, res) => {
+  const parsed = registerSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const message = parsed.error.errors[0]?.message || 'Invalid input';
+    return respondError(res, 400, 'INVALID_INPUT', message);
+  }
+
   try {
-    const { email, password, name, tenantId } = req.body || {};
+    const { email, password, name, tenantId } = parsed.data;
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedTenantId = tenantId.trim();
 
-    // Input validation
-    if (!email || !password || !name) {
-      return res.status(400).json({
-        error: 'Email, password, and name are required'
-      });
+    const tenant = await ensureTenantExists(normalizedTenantId);
+    if (!tenant) {
+      return respondError(res, 404, 'TENANT_NOT_FOUND', 'Tenant does not exist');
     }
 
-    // Validate email format
-    if (!EMAIL_REGEX.test(email)) {
-      return res.status(400).json({
-        error: 'Invalid email format'
-      });
-    }
-
-    // Validate password length (minimum 8 characters)
-    if (password.length < 8) {
-      return res.status(400).json({
-        error: 'Password must be at least 8 characters long'
-      });
-    }
-
-    // Use provided tenantId or default to 'demo'
-    const userTenantId = tenantId || 'demo';
-
-    // Check if user already exists
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        email: email.toLowerCase(),
-        tenantId: userTenantId
-      }
+    const existing = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
     });
-
-    if (existingUser) {
-      return res.status(400).json({
-        error: 'User with this email already exists'
-      });
+    if (existing) {
+      return respondError(res, 409, 'USER_EXISTS', 'User already registered');
     }
 
-    // Hash password with bcrypt (salt rounds >= 10)
     const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
-
-    // Create new user with default role 'dev' (SUPERADMIN - full access)
-    const newUser = await prisma.user.create({
+    const created = await prisma.user.create({
       data: {
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         name: name.trim(),
-        passwordSHA: passwordHash, // Using passwordSHA field as specified
-        role: 'dev', // Default role for new registrations - SUPERADMIN with full access
-        tenantId: userTenantId,
-        isActive: true
-      },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        tenantId: true,
-        createdAt: true
-      }
-    });
-
-    // Generate JWT token with userId, email, role
-    const token = jwt.sign(
-      {
-        sub: newUser.id,
-        email: newUser.email,
-        role: newUser.role,
-        tenantId: newUser.tenantId
-      },
-      JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN }
-    );
-
-    // Return 201 Created with user data and token
-    return res.status(201).json({
-      message: 'User registered successfully',
-      token,
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
-        role: newUser.role,
-        tenantId: newUser.tenantId
-      }
-    });
-
-  } catch (error) {
-    console.error('Registration error:', error);
-    return res.status(500).json({
-      error: 'Registration failed. Please try again.'
-    });
-  }
-});
-
-// POST /login - Login with email/password, return JWT token
-router.post('/login', async (req, res) => {
-  try {
-    const { email, password, tenantId } = req.body || {};
-
-    // Input validation
-    if (!email || !password) {
-      return res.status(400).json({
-        error: 'Email and password are required'
-      });
-    }
-
-    // Use provided tenantId or default to 'demo'
-    const userTenantId = tenantId || 'demo';
-
-    // Find user by email and tenantId
-    const user = await prisma.user.findFirst({
-      where: {
-        email: email.toLowerCase(),
-        tenantId: userTenantId,
-        isActive: true
-      },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        passwordSHA: true,
-        role: true,
-        tenantId: true
-      }
-    });
-
-    // Check if user exists
-    if (!user) {
-      return res.status(401).json({
-        error: 'Invalid credentials'
-      });
-    }
-
-    // Compare password with bcrypt hash
-    const isPasswordValid = await bcrypt.compare(password, user.passwordSHA);
-
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        error: 'Invalid credentials'
-      });
-    }
-
-    // Generate JWT token with 7 day expiry
-    const token = jwt.sign(
-      {
-        sub: user.id,
-        email: user.email,
-        role: user.role,
-        tenantId: user.tenantId
-      },
-      JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN }
-    );
-
-    // Return 200 OK with token and user data
-    return res.status(200).json({
-      message: 'Login successful',
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        tenantId: user.tenantId
-      }
-    });
-
-  } catch (error) {
-    console.error('Login error:', error);
-    return res.status(500).json({
-      error: 'Login failed. Please try again.'
-    });
-  }
-});
-
-// GET /me - Get current user info (requires JWT auth)
-router.get('/me', async (req, res) => {
-  try {
-    // Extract token from Authorization header
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
-        error: 'Authorization token required'
-      });
-    }
-
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-
-    // Verify JWT token
-    let decoded;
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-    } catch (jwtError) {
-      return res.status(401).json({
-        error: 'Invalid or expired token'
-      });
-    }
-
-    // Extract userId from token payload
-    const userId = decoded.userId || decoded.sub || decoded.id;
-
-    if (!userId) {
-      return res.status(401).json({
-        error: 'Invalid token payload'
-      });
-    }
-
-    // Fetch current user from database
-    const user = await prisma.user.findUnique({
-      where: {
-        id: Number(userId)
+        passwordSHA: passwordHash,
+        tenantId: normalizedTenantId,
+        role: 'user',
+        isActive: true,
       },
       select: {
         id: true,
@@ -239,42 +106,112 @@ router.get('/me', async (req, res) => {
         tenantId: true,
         isActive: true,
         createdAt: true,
-        updatedAt: true
-      }
+        updatedAt: true,
+      },
     });
 
-    // Check if user exists and is active
+    const token = issueToken(created);
+    return res.status(201).json({ token, user: sanitizeUser(created) });
+  } catch (error) {
+    console.error('[auth.register] unexpected error', error);
+    return respondError(res, 500, 'REGISTRATION_FAILED', 'Registration failed. Please try again.');
+  }
+});
+
+router.post('/login', async (req, res) => {
+  const parsed = loginSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const message = parsed.error.errors[0]?.message || 'Invalid input';
+    return respondError(res, 400, 'INVALID_INPUT', message);
+  }
+
+  try {
+    const { email, password } = parsed.data;
+    const tenantId = (parsed.data.tenantId || TENANT_DEFAULT).trim();
+
+    if (!tenantId) {
+      return respondError(res, 400, 'INVALID_INPUT', 'tenantId is required');
+    }
+
+    const tenant = await ensureTenantExists(tenantId);
+    if (!tenant) {
+      return respondError(res, 404, 'TENANT_NOT_FOUND', 'Tenant does not exist');
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+    const user = await prisma.user.findFirst({
+      where: {
+        email: normalizedEmail,
+        tenantId,
+        isActive: true,
+      },
+    });
+
     if (!user) {
-      return res.status(404).json({
-        error: 'User not found'
-      });
+      return respondError(res, 401, 'INVALID_CREDENTIALS', 'Invalid credentials');
+    }
+
+    const validPassword = await bcrypt.compare(password, user.passwordSHA || '');
+    if (!validPassword) {
+      return respondError(res, 401, 'INVALID_CREDENTIALS', 'Invalid credentials');
+    }
+
+    const token = issueToken(user);
+    const safeUser = sanitizeUser(user);
+    return res.json({ token, user: safeUser });
+  } catch (error) {
+    console.error('[auth.login] unexpected error', error);
+    return respondError(res, 500, 'LOGIN_FAILED', 'Login failed. Please try again.');
+  }
+});
+
+router.get('/me', async (req, res) => {
+  try {
+    let userId = req.user?.id;
+    if (!userId) {
+      const authHeader = req.headers.authorization || '';
+      if (!authHeader.startsWith('Bearer ')) {
+        return respondError(res, 401, 'UNAUTHORIZED', 'Authorization token required');
+      }
+      const token = authHeader.slice(7);
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        userId = decoded.sub || decoded.userId || decoded.id;
+      } catch (_) {
+        return respondError(res, 401, 'INVALID_TOKEN', 'Invalid or expired token');
+      }
+    }
+
+    if (!userId) {
+      return respondError(res, 401, 'UNAUTHORIZED', 'Authorization token required');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: Number(userId) },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        tenantId: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!user) {
+      return respondError(res, 404, 'USER_NOT_FOUND', 'User not found');
     }
 
     if (!user.isActive) {
-      return res.status(401).json({
-        error: 'User account is inactive'
-      });
+      return respondError(res, 401, 'USER_INACTIVE', 'User account is inactive');
     }
 
-    // Return user information
-    return res.status(200).json({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        tenantId: user.tenantId,
-        isActive: user.isActive,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt
-      }
-    });
-
+    return res.json({ user: sanitizeUser(user) });
   } catch (error) {
-    console.error('Get current user error:', error);
-    return res.status(500).json({
-      error: 'Failed to fetch user information'
-    });
+    console.error('[auth.me] unexpected error', error);
+    return respondError(res, 500, 'FETCH_USER_FAILED', 'Failed to fetch user information');
   }
 });
 

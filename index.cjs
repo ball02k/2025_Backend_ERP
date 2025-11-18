@@ -246,6 +246,7 @@ app.get('/openapi-lite.json', (req, res) => {
 
 app.use(devDeltaRoutes);
 
+app.use('/auth', authRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/me', meRouter);
 
