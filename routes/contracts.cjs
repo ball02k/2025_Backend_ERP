@@ -236,6 +236,44 @@ async function ensureSupplier(tenantId, supplierId) {
   return supplier;
 }
 
+// GET /api/contracts - List contracts with optional filters
+router.get('/contracts', async (req, res) => {
+  let tenantId;
+  try {
+    tenantId = requireTenant(req);
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message || 'Tenant context required' });
+  }
+
+  try {
+    const { projectId, supplierId, status } = req.query;
+    const where = { tenantId };
+
+    // Optional filters
+    if (projectId) {
+      where.projectId = Number(projectId);
+    }
+    if (supplierId) {
+      where.supplierId = Number(supplierId);
+    }
+    if (status) {
+      // Support comma-separated status values
+      const statuses = status.split(',').map(s => s.trim());
+      where.status = statuses.length === 1 ? statuses[0] : { in: statuses };
+    }
+
+    const contracts = await prisma.contract.findMany({
+      where,
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      include: contractInclude,
+    });
+    res.json({ items: contracts.map(mapContract) });
+  } catch (err) {
+    console.error('[contracts.list] failed', err);
+    res.status(500).json({ error: 'Failed to list contracts' });
+  }
+});
+
 router.get('/projects/:projectId/contracts', async (req, res) => {
   let tenantId;
   try {

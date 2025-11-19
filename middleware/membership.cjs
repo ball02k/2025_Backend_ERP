@@ -26,13 +26,13 @@ async function requireProjectMember(req, res, next) {
       req.params?.id ?? req.query?.projectId ?? req.body?.projectId
     );
 
-    // Admins bypass membership
+    // Admins and dev (superadmin) bypass membership
     const roles = Array.isArray(req.user?.roles)
       ? req.user.roles
       : req.user?.role
       ? [req.user.role]
       : [];
-    const isAdmin = roles.includes('admin');
+    const isAdmin = roles.includes('dev') || roles.includes('admin');
 
     if (isAdmin) return next();
 

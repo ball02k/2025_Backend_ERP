@@ -1283,6 +1283,65 @@ router.post('/applications/:id/withdraw', async (req, res, next) => {
 });
 
 /**
+ * POST /api/applications/:id/cancel
+ * Cancel application from any status with reason
+ */
+router.post('/applications/:id/cancel', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const tenantId = req.user?.tenantId || 'demo';
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+
+    const application = await prisma.applicationForPayment.findFirst({
+      where: { id, tenantId },
+    });
+
+    if (!application) {
+      return res.status(404).json({ error: 'Payment application not found' });
+    }
+
+    // Already cancelled
+    if (application.status === 'CANCELLED') {
+      return res.status(400).json({
+        error: 'Application is already cancelled',
+        currentStatus: application.status,
+      });
+    }
+
+    // Require cancellation reason
+    if (!req.body.reason || !req.body.reason.trim()) {
+      return res.status(400).json({ error: 'Cancellation reason is required' });
+    }
+
+    const updated = await prisma.applicationForPayment.update({
+      where: { id },
+      data: {
+        status: 'CANCELLED',
+        cancelledBy: userId,
+        cancelledAt: new Date(),
+        cancellationReason: req.body.reason.trim(),
+      },
+      include: {
+        supplier: { select: { id: true, name: true } },
+        contract: { select: { id: true, title: true } },
+      },
+    });
+
+    const result = safeJson(updated);
+    result.links = buildLinks('applicationForPayment', result);
+
+    res.json(result);
+  } catch (e) {
+    console.error('[payment-applications] Cancel error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
  * POST /api/applications/:id/raise-dispute
  * Raise dispute on pay-less notice (PAY_LESS_ISSUED -> DISPUTED)
  */

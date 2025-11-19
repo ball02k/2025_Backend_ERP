@@ -48,6 +48,7 @@ enum PaymentApplicationStatus {
   DISPUTED
   REJECTED
   WITHDRAWN
+  CANCELLED
 }
 
 enum RetentionReleaseType {
@@ -1854,6 +1855,11 @@ model ApplicationForPayment {
   reviewedAt  DateTime?
   approvedBy  Int? // Finance/PM approval
   approvedAt  DateTime?
+
+  // Cancellation Tracking
+  cancelledBy     Int? // User who cancelled
+  cancelledAt     DateTime?
+  cancellationReason String? @db.Text
 
   // Payment Notice Tracking
   paymentNoticeSent     Boolean   @default(false)

@@ -193,15 +193,33 @@ router.get('/finance/dashboard-summary', async (req, res) => {
 router.get('/finance/payment-applications', async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const { status, projectId } = req.query;
+    const { status, projectId, contractId, packageId, supplierId, search, dateFrom, dateTo } = req.query;
 
-    // Build where clause
+    // Build where clause - support ALL filters
     const where = { tenantId };
+
     if (status && status !== 'ALL') {
       where.status = status;
     }
     if (projectId && projectId !== 'ALL') {
       where.projectId = Number(projectId);
+    }
+    if (contractId && contractId !== 'ALL') {
+      where.contractId = Number(contractId);
+    }
+    if (packageId && packageId !== 'ALL') {
+      where.packageId = Number(packageId);
+    }
+    if (supplierId && supplierId !== 'ALL') {
+      where.supplierId = Number(supplierId);
+    }
+    if (search) {
+      where.applicationNo = { contains: search };
+    }
+    if (dateFrom || dateTo) {
+      where.periodStart = {};
+      if (dateFrom) where.periodStart.gte = new Date(dateFrom);
+      if (dateTo) where.periodStart.lte = new Date(dateTo);
     }
 
     // Get applications
@@ -216,11 +234,14 @@ router.get('/finance/payment-applications', async (req, res) => {
         },
         contract: {
           select: {
+            id: true,
             contractRef: true,
+            title: true,
           },
         },
         supplier: {
           select: {
+            id: true,
             name: true,
           },
         },
@@ -343,7 +364,6 @@ router.get('/finance/payment-applications/export', async (req, res) => {
       include: {
         project: { select: { name: true } },
         contract: { select: { contractRef: true, title: true } },
-        package: { select: { code: true, name: true } },
         supplier: { select: { name: true } },
         certifiedByUser: { select: { name: true, email: true } },
       },
