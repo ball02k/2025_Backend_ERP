@@ -109,6 +109,7 @@ const directAwardRouter = require('./routes/packages.directAward.cjs');
 const contractsReadRouter = require('./routes/contracts.read.cjs');
 const contractsGenerateDocRouter = require('./routes/contracts.generateDoc.cjs');
 const contractsStatusRouter = require('./routes/contracts.status.cjs');
+const invoiceMatchingRouter = require('./routes/invoiceMatching.cjs');
 const contractsOnlyOfficeRouter = require('./routes/contracts.onlyoffice.cjs');
 const settingsV1Router = require('./routes/settings.v1.cjs');
 const contractTemplatesRouter = require('./routes/contract.templates.cjs');
@@ -414,6 +415,7 @@ app.use('/api', directAwardRouter);
 app.use('/api', contractsReadRouter);
 app.use('/api', contractsGenerateDocRouter);
 app.use('/api', contractsStatusRouter);
+app.use('/api', invoiceMatchingRouter); // Invoice-PO matching, call-off POs
 app.use('/api', contractsOnlyOfficeRouter);
 app.use('/api', contractsRouter);
 app.use('/api', contractTemplatesRouter);

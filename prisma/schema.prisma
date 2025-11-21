@@ -1045,11 +1045,39 @@ model PurchaseOrder {
   issuedDate    DateTime?
   cancelledDate DateTime?
   cancelReason  String?
+
+  // NEW: PO Strategy & Milestone Support
+  poType               String?   @default("FULL_CONTRACT") // "FULL_CONTRACT" | "MILESTONE" | "CALL_OFF"
+  milestoneId          Int?
+  milestoneNumber      Int?      // Which milestone (1, 2, 3...)
+
+  // NEW: Package linking
+  packageId            Int?
+
+  // NEW: Payment Application linking
+  paymentApplicationId Int?
+
+  // NEW: PDF tracking
+  pdfUrl               String?   // Link to generated PDF
+  pdfGeneratedAt       DateTime?
+
+  // NEW: Delivery tracking
+  expectedDeliveryDate DateTime?
+  actualDeliveryDate   DateTime?
+  deliveryStatus       String?   @default("PENDING") // "PENDING" | "PARTIAL" | "COMPLETE"
+
+  // NEW: Enhanced notes
+  internalNotes        String?   @db.Text
+  supplierNotes        String?   @db.Text
+
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
   project       Project     @relation(fields: [projectId], references: [id])
   contract      Contract?   @relation(fields: [contractId], references: [id])
   budgetLine    BudgetLine? @relation(fields: [budgetLineId], references: [id])
+  package       Package?    @relation(fields: [packageId], references: [id])
+  milestone     PackageMilestone? @relation(fields: [milestoneId], references: [id])
+  paymentApplication ApplicationForPayment? @relation(fields: [paymentApplicationId], references: [id])
   lines         POLine[]
   deliveries    Delivery[]
 
@@ -1928,6 +1956,7 @@ model ApplicationForPayment {
   // Relations
   attachments     AfpAttachment[]
   lineItemDetails PaymentApplicationLineItem[]
+  purchaseOrders  PurchaseOrder[]
 
   @@unique([tenantId, applicationNo])
   @@index([contractId, applicationNumber])
@@ -2087,6 +2116,12 @@ model Package {
   budgetValue        Decimal? // Approved budget for this package
   createdBy          Int? // User who created the package
 
+  // NEW: PO Strategy configuration
+  poStrategy         String?  // "SINGLE_ON_AWARD" | "MILESTONE_BASED" | "CALL_OFF"
+
+  // NEW: Contract Type linking
+  contractTypeId     String?
+
   submissions         Submission[]         @relation("PackageSubmissions")
   invites             TenderInvite[]       @relation("PackageInvites")
   contracts           Contract[]
@@ -2102,9 +2137,45 @@ model Package {
   awards              Award[]
   packageResponses    PackageResponse[]
 
+  // NEW: Contract Type and PO relations
+  contractType        ContractType?        @relation(fields: [contractTypeId], references: [id])
+  purchaseOrders      PurchaseOrder[]
+  milestones          PackageMilestone[]
+
   @@index([projectId])
   @@index([projectId, costCodeId])
   @@index([projectId, status])
+}
+
+// NEW: Package Milestones for phased delivery
+model PackageMilestone {
+  id              Int       @id @default(autoincrement())
+  tenantId        String    @default("demo")
+  packageId       Int
+  milestoneNumber Int       // 1, 2, 3, etc.
+  description     String?   @db.Text
+  targetValue     Decimal?  @db.Decimal(18, 2)
+  targetDate      DateTime?
+  sequence        Int       @default(1) // Order for display
+  status          String    @default("PENDING") // "PENDING" | "ISSUED" | "COMPLETE"
+
+  // Link to optional contract (if milestone is tied to specific contract clause)
+  contractId      Int?
+  contract        Contract? @relation(fields: [contractId], references: [id])
+
+  // User who created this milestone
+  createdBy       Int?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  package         Package   @relation(fields: [packageId], references: [id])
+  purchaseOrders  PurchaseOrder[]
+
+  @@unique([packageId, milestoneNumber, tenantId])
+  @@index([packageId])
+  @@index([tenantId])
+  @@index([status])
 }
 
 // Join model linking packages to budget lines
@@ -2568,6 +2639,35 @@ model Award {
   @@index([tenantId, packageId])
 }
 
+// NEW: Contract Type definitions for standardizing contract terms
+model ContractType {
+  id                  String    @id @default(cuid())
+  tenantId            String    @default("demo")
+  name                String    // "NEC4 ECC Option A", "JCT D&B 2016"
+  framework           String?   // "NEC4" | "JCT" | "FIDIC" | "BESPOKE"
+  category            String?   // "PRICED_CONTRACT" | "TARGET_COST" | "COST_REIMBURSABLE" | "MANAGEMENT"
+  description         String?   @db.Text
+
+  // Payment characteristics
+  paymentBasis        String?   // "LUMP_SUM" | "REMEASUREMENT" | "COST_PLUS" | "MILESTONE"
+  retentionRate       Decimal?  @db.Decimal(5, 2) // e.g. 5.00 for 5%
+  paymentTerms        String?   @db.Text          // "Net 30 days from valuation"
+
+  // PO Strategy suggestion
+  suggestedPOStrategy String?   // "SINGLE_ON_AWARD" | "MILESTONE_BASED" | "CALL_OFF"
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  packages            Package[]
+  contracts           Contract[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([framework])
+}
+
 model Contract {
   id              Int       @id @default(autoincrement())
   projectId       Int
@@ -2591,6 +2691,10 @@ model Contract {
   managedByUserId Int?
   pdfUrl          String?
   tenantId        String?
+
+  // NEW: Contract Type linking
+  contractTypeId  String?
+
   rfxId           Int?      @unique
   awardId         Int?      @unique
   draftCreatedAt  DateTime?
@@ -2630,6 +2734,10 @@ model Contract {
   files              ContractFile[]
   retentionReleases  RetentionRelease[]
   contractValuations ContractValuation[]     @relation("ContractValuations")
+
+  // NEW: Contract Type and Milestone relations
+  contractType       ContractType?           @relation(fields: [contractTypeId], references: [id])
+  milestones         PackageMilestone[]
 
   @@index([projectId])
   @@index([supplierId])

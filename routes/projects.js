@@ -307,7 +307,11 @@ module.exports = (prisma) => {
   router.post('/:projectId/packages', requireProjectMember, async (req, res) => {
     try {
       const projectId = Number(req.params.projectId);
-      const { name, description, scope, trade, tradeCategory, budget, attachments, costCodeId, budgetIds } = req.body || {};
+      const { name, description, scope, trade, tradeCategory, budget, attachments, costCodeId, budgetIds, budgetLineIds } = req.body || {};
+      // Accept both budgetIds and budgetLineIds for compatibility
+      const effectiveBudgetIds = Array.isArray(budgetLineIds) && budgetLineIds.length > 0
+        ? budgetLineIds
+        : (Array.isArray(budgetIds) ? budgetIds : []);
       if (!name) return res.status(400).json({ error: 'Name is required' });
       const pkg = await prisma.package.create({
         data: {
@@ -337,8 +341,18 @@ module.exports = (prisma) => {
         },
       });
       // Link budget lines if table exists
-      if (Array.isArray(budgetIds) && budgetIds.length) {
-        try { await prisma.packageItem.createMany({ data: budgetIds.map((id) => ({ packageId: pkg.id, budgetLineId: Number(id) })) }); } catch (_) {}
+      if (effectiveBudgetIds.length > 0) {
+        try {
+          await prisma.packageItem.createMany({
+            data: effectiveBudgetIds.map((id) => ({
+              packageId: pkg.id,
+              budgetLineId: Number(id),
+              tenantId: req.user?.tenantId || req.tenantId || null
+            }))
+          });
+        } catch (err) {
+          console.error('[projects.js] Failed to link budget lines:', err.message);
+        }
       }
       res.status(201).json({ ...pkg, scope: pkg.scopeSummary ?? null });
     } catch (err) {

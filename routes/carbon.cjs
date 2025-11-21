@@ -9,6 +9,59 @@ function getPaging(req) {
   return { page, pageSize, skip: (page - 1) * pageSize, take: pageSize };
 }
 
+// GET /api/carbon/project/:projectId/summary
+router.get('/project/:projectId/summary', async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, tenantId },
+      select: { name: true, code: true, carbonTarget: true, carbonBudget: true },
+    });
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Get all emissions for this project
+    const entries = await prisma.carbonEntry.findMany({
+      where: { projectId, tenantId, isDeleted: false },
+      select: { scope: true, category: true, calculatedKgCO2e: true, activityDate: true },
+    });
+
+    const totalEmissions = entries.reduce((sum, e) => sum + Number(e.calculatedKgCO2e || 0), 0) / 1000; // Convert to tonnes
+    const byScope = {};
+    const byCategory = {};
+
+    entries.forEach(e => {
+      const scope = e.scope || 'Unknown';
+      const cat = e.category || 'Unknown';
+      byScope[scope] = (byScope[scope] || 0) + Number(e.calculatedKgCO2e || 0) / 1000;
+      byCategory[cat] = (byCategory[cat] || 0) + Number(e.calculatedKgCO2e || 0) / 1000;
+    });
+
+    const target = Number(project.carbonTarget || 0);
+    const status = target > 0 && totalEmissions <= target ? 'ON_TRACK' : target > 0 ? 'EXCEEDING' : 'NO_TARGET';
+
+    res.json({
+      project: project.name,
+      projectCode: project.code,
+      target,
+      budget: Number(project.carbonBudget || 0),
+      totalEmissions: parseFloat(totalEmissions.toFixed(2)),
+      netEmissions: parseFloat(totalEmissions.toFixed(2)),
+      status,
+      byScope,
+      byCategory,
+      entryCount: entries.length,
+    });
+  } catch (err) {
+    console.error('Carbon summary error:', err);
+    res.status(500).json({ error: 'Failed to fetch carbon summary' });
+  }
+});
+
 // GET /api/carbon/entries
 router.get('/entries', async (req, res) => {
   try {

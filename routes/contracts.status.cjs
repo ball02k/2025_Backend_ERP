@@ -1,6 +1,8 @@
 const router = require('express').Router();
 const { prisma } = require('../utils/prisma.cjs');
 const requireAuth = require('../middleware/requireAuth.cjs');
+const cvrService = require('../services/cvr.cjs');
+const poGeneration = require('../services/poGeneration.cjs');
 
 /**
  * POST /contracts/:id/status
@@ -69,6 +71,86 @@ router.post('/contracts/:id/status', requireAuth, async (req, res) => {
       }
     }
 
+    // When contract is signed, create CVR commitment records
+    let cvrCommitments = [];
+    if (status === 'signed' && oldStatus !== 'signed') {
+      try {
+        // Get contract with line items to create commitments
+        const contractWithLines = await prisma.contract.findUnique({
+          where: { id: contractId },
+          include: {
+            lineItems: true,
+          },
+        });
+
+        if (contractWithLines && contractWithLines.lineItems?.length > 0) {
+          // Create CVR commitment for each line item with budget line
+          for (const line of contractWithLines.lineItems) {
+            if (line.budgetLineId && line.total) {
+              const commitment = await cvrService.createCommitment({
+                tenantId,
+                projectId: contractWithLines.projectId,
+                budgetLineId: line.budgetLineId,
+                sourceType: 'CONTRACT',
+                sourceId: contractId,
+                amount: Number(line.total),
+                description: `Contract ${contractWithLines.contractRef}: ${line.description}`,
+                reference: contractWithLines.contractRef,
+                costCode: line.costCode,
+                effectiveDate: new Date(),
+                createdBy: userId,
+              });
+              cvrCommitments.push(commitment);
+            }
+          }
+        } else if (contractWithLines && contractWithLines.value) {
+          // No line items - create single commitment for contract value
+          // Try to find associated budget line from package
+          let budgetLineId = null;
+          if (contractWithLines.packageId) {
+            const packageItem = await prisma.packageItem.findFirst({
+              where: { packageId: contractWithLines.packageId },
+              select: { budgetLineId: true },
+            });
+            budgetLineId = packageItem?.budgetLineId;
+          }
+
+          if (budgetLineId) {
+            const commitment = await cvrService.createCommitment({
+              tenantId,
+              projectId: contractWithLines.projectId,
+              budgetLineId,
+              sourceType: 'CONTRACT',
+              sourceId: contractId,
+              amount: Number(contractWithLines.value),
+              description: `Contract ${contractWithLines.contractRef}: ${contractWithLines.title}`,
+              reference: contractWithLines.contractRef,
+              effectiveDate: new Date(),
+              createdBy: userId,
+            });
+            cvrCommitments.push(commitment);
+          }
+        }
+      } catch (cvrError) {
+        console.error('Error creating CVR commitments:', cvrError);
+        // Don't fail the status change - CVR is supplementary
+      }
+    }
+
+    // Generate POs based on package strategy when contract is signed
+    let purchaseOrders = [];
+    if (status === 'signed' && oldStatus !== 'signed') {
+      try {
+        const result = await poGeneration.generateFromContract(contractId, userId, tenantId);
+        if (result) {
+          purchaseOrders = Array.isArray(result) ? result : [result];
+        }
+      } catch (poError) {
+        console.error('Error generating POs:', poError);
+        // Don't fail the status change - PO generation is supplementary
+      }
+    }
+
     // Log audit
     await prisma.auditLog.create({
       data: {
@@ -80,6 +162,7 @@ router.post('/contracts/:id/status', requireAuth, async (req, res) => {
           oldStatus,
           newStatus: status,
           approvalWorkflowCreated: status === 'internalReview' && Array.isArray(approvalWorkflow),
+          cvrCommitmentsCreated: cvrCommitments.length,
         },
       },
     });
@@ -88,6 +171,15 @@ router.post('/contracts/:id/status', requireAuth, async (req, res) => {
       id: updated.id,
       status: updated.status,
       previousStatus: oldStatus,
+      cvrCommitmentsCreated: cvrCommitments.length,
+      purchaseOrdersGenerated: purchaseOrders.length,
+      purchaseOrders: purchaseOrders.map(po => ({
+        id: po.id,
+        code: po.code,
+        total: po.total,
+        status: po.status,
+        poType: po.poType,
+      })),
     });
   } catch (error) {
     console.error('contracts.status error', error);

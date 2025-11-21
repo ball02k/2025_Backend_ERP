@@ -9,6 +9,67 @@ function getPaging(req) {
   return { page, pageSize, skip: (page - 1) * pageSize, take: pageSize };
 }
 
+// GET /api/hs/project/:projectId/summary
+router.get('/project/:projectId/summary', async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, tenantId },
+      select: { name: true, code: true },
+    });
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const events = await prisma.hsEvent.findMany({
+      where: { projectId, tenantId, isDeleted: false },
+      select: { type: true, status: true, severity: true, eventDate: true, isRIDDOR: true, lostTimeHours: true },
+      orderBy: { eventDate: 'desc' },
+    });
+
+    const byType = {};
+    const bySeverity = {};
+    let riddorCount = 0;
+    let totalLostTimeHours = 0;
+
+    events.forEach(e => {
+      const type = e.type || 'Unknown';
+      const severity = e.severity || 'Unknown';
+      byType[type] = (byType[type] || 0) + 1;
+      bySeverity[severity] = (bySeverity[severity] || 0) + 1;
+      if (e.isRIDDOR) riddorCount++;
+      if (e.lostTimeHours) totalLostTimeHours += Number(e.lostTimeHours);
+    });
+
+    // Calculate days without incident
+    const lastIncident = events.find(e => e.type === 'incident' || e.type === 'accident');
+    let daysSinceLastIncident = null;
+    if (lastIncident && lastIncident.eventDate) {
+      const diffMs = Date.now() - new Date(lastIncident.eventDate).getTime();
+      daysSinceLastIncident = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    }
+
+    res.json({
+      project: project.name,
+      projectCode: project.code,
+      totalEvents: events.length,
+      daysSinceLastIncident,
+      byType,
+      bySeverity,
+      riddorCount,
+      totalLostTimeHours,
+      openEvents: events.filter(e => e.status === 'open').length,
+      closedEvents: events.filter(e => e.status === 'closed').length,
+    });
+  } catch (err) {
+    console.error('H&S summary error:', err);
+    res.status(500).json({ error: 'Failed to fetch H&S summary' });
+  }
+});
+
 // GET /api/hs/events
 router.get('/events', async (req, res) => {
   try {

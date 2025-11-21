@@ -298,9 +298,13 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
       targetAwardDate, requiredOnSite, leadTimeWeeks, contractForm, retentionPct, paymentTerms, currency,
       ownerUserId, buyerUserId, draftEntityId } = req.body || {};
     // Accept both budgetIds and budgetLineIds for compatibility
+    console.log('[projects.packages.create] req.body keys:', Object.keys(req.body || {}));
+    console.log('[projects.packages.create] budgetLineIds from req.body:', req.body?.budgetLineIds);
+    console.log('[projects.packages.create] budgetIds from req.body:', req.body?.budgetIds);
     const budgetLineIds = Array.isArray(req.body?.budgetLineIds)
       ? req.body.budgetLineIds.map(Number).filter(Number.isFinite)
       : (Array.isArray(req.body?.budgetIds) ? req.body.budgetIds.map(Number).filter(Number.isFinite) : []);
+    console.log('[projects.packages.create] Extracted budgetLineIds:', budgetLineIds);
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
     // Guard: prevent mixing awarded/contracted links
@@ -348,11 +352,16 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
       },
       select: packageSelect,
     });
-    // Try to attach budget lines if table exists (ignore on failure)
+    // Try to attach budget lines if table exists (log on failure)
     if (Array.isArray(budgetLineIds) && budgetLineIds.length > 0) {
       try {
+        console.log('[projects.packages.create] Linking budget lines:', { packageId: created.id, budgetLineIds, tenantId });
         await prisma.packageItem.createMany({ data: budgetLineIds.map((id) => ({ tenantId, packageId: created.id, budgetLineId: Number(id) })) });
-      } catch (_) {}
+        console.log('[projects.packages.create] Successfully linked budget lines');
+      } catch (err) {
+        console.error('[projects.packages.create] Failed to link budget lines:', err.message);
+        console.error('[projects.packages.create] Error details:', err);
+      }
     }
     // If a draft document entityId was provided, relink draft document links to this package id
     try {
@@ -619,6 +628,61 @@ router.post('/projects/:projectId/packages/:packageId/create-tender', async (req
     await prisma.package.update({ where: { id: pkg.id }, data: { status: 'Tender' } }).catch(() => {});
     res.status(201).json({ requestId: rfx.id, title: rfx.title, tenderId: tender?.id || null });
   } catch (e) { next(e); }
+});
+
+// DELETE /api/projects/:projectId/packages/:packageId — delete a package
+router.delete('/projects/:projectId/packages/:packageId', async (req, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId || req.tenantId;
+    const projectId = Number(req.params.projectId);
+    const packageId = Number(req.params.packageId);
+
+    if (!Number.isFinite(packageId)) {
+      return res.status(400).json({ error: 'INVALID_PACKAGE_ID' });
+    }
+
+    if (!Number.isFinite(projectId)) {
+      return res.status(400).json({ error: 'INVALID_PROJECT_ID' });
+    }
+
+    // Verify package exists and belongs to this project/tenant
+    const pkg = await prisma.package.findFirst({
+      where: { id: packageId, projectId },
+      include: { project: { select: { tenantId: true } } }
+    });
+
+    if (!pkg) {
+      return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
+    }
+
+    if (pkg.project.tenantId !== tenantId) {
+      return res.status(403).json({ error: 'ACCESS_DENIED' });
+    }
+
+    // Check for blockers
+    if (pkg.awardedToSupplierId) {
+      return res.status(409).json({ error: 'Cannot delete: package has been awarded' });
+    }
+
+    const rfxCount = await prisma.request.count({ where: { tenantId, packageId } }).catch(() => 0);
+    if (rfxCount > 0) {
+      return res.status(409).json({ error: 'Cannot delete: RFx exists for this package' });
+    }
+
+    // Delete package items first (cascade may not be configured)
+    try {
+      await prisma.packageItem.deleteMany({ where: { packageId } });
+    } catch (err) {
+      console.warn('[projects.packages.delete] PackageItem cleanup skipped', err?.message || err);
+    }
+
+    // Delete the package
+    await prisma.package.delete({ where: { id: packageId } });
+
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
 });
 
 module.exports = router;

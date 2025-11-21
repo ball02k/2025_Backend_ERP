@@ -830,6 +830,32 @@ async function updateContractStatus(req, res, status) {
 
     const updated = await prisma.contract.update({ where: { id }, data: { status }, include: contractWithLinesInclude });
 
+    // Create CVR Commitment when contract is signed (awarded)
+    if (status === 'signed' && contract.status !== 'signed' && updated.value && updated.projectId) {
+      try {
+        await prisma.cVRCommitment.create({
+          data: {
+            tenantId,
+            projectId: updated.projectId,
+            budgetLineId: null, // Could be enhanced to link to specific budget line
+            allocationId: null,
+            sourceType: 'CONTRACT',
+            sourceId: updated.id,
+            amount: Number(updated.value),
+            currency: updated.currency || 'GBP',
+            status: 'COMMITTED',
+            description: `Contract: ${updated.contractRef || updated.title}`,
+            reference: updated.contractRef,
+            committedDate: new Date(),
+          },
+        });
+        console.log(`[CVR] Created commitment for contract ${updated.id}: £${Number(updated.value).toFixed(2)}`);
+      } catch (cvrErr) {
+        console.error('[CVR] Error creating commitment:', cvrErr.message);
+        // Don't fail the status update if CVR creation fails
+      }
+    }
+
     await writeAudit({
       prisma,
       req,

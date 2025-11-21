@@ -146,14 +146,16 @@ async function updateCVRFromPayment(application, amountPaid) {
  */
 async function updateBudgetActuals(application, amountPaid) {
   try {
-    if (!application.contractId) {
+    if (!application.contractId || !application.projectId) {
       return;
     }
+
+    const tenantId = application.tenantId || 'demo';
 
     // Get contract with package info
     const contract = await prisma.contract.findUnique({
       where: { id: application.contractId },
-      select: { packageId: true },
+      select: { packageId: true, projectId: true },
     });
 
     if (!contract?.packageId) {
@@ -161,17 +163,34 @@ async function updateBudgetActuals(application, amountPaid) {
       return;
     }
 
-    // Update package actual cost
-    await prisma.package.update({
-      where: { id: contract.packageId },
-      data: {
-        actualCost: {
-          increment: Number(amountPaid),
-        },
-      },
-    });
+    // Create CVRActual record for tracking actual costs
+    // Check if CVRActual model exists first
+    const hasCVRActual = await prisma.$queryRaw`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'CVRActual'
+      );
+    `.catch(() => ({ exists: false }));
 
-    console.log(`[Budget] Updated package ${contract.packageId} actuals by £${amountPaid}`);
+    if (hasCVRActual?.exists) {
+      await prisma.cVRActual.create({
+        data: {
+          tenantId,
+          projectId: contract.projectId,
+          budgetLineId: null, // Could be enhanced to link to specific budget line
+          allocationId: null,
+          sourceType: 'PAYMENT_APPLICATION',
+          sourceId: application.id,
+          amount: Number(amountPaid),
+          currency: 'GBP',
+          status: 'PAID',
+          paidDate: new Date(),
+        },
+      });
+      console.log(`[CVR] Created CVRActual record for application ${application.id}: £${amountPaid}`);
+    } else {
+      console.log('[CVR] CVRActual table not found - skipping CVR actual record creation');
+    }
   } catch (error) {
     console.error('[Budget] Error updating budget actuals:', error.message);
     // Don't throw - budget update failure shouldn't block payment recording

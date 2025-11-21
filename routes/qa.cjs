@@ -9,6 +9,68 @@ function getPaging(req) {
   return { page, pageSize, skip: (page - 1) * pageSize, take: pageSize };
 }
 
+// GET /api/qa/project/:projectId/summary
+router.get('/project/:projectId/summary', async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.projectId);
+
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, tenantId },
+      select: { name: true, code: true },
+    });
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const records = await prisma.qaRecord.findMany({
+      where: { projectId, tenantId, isDeleted: false },
+      select: { type: true, status: true },
+    });
+
+    const byType = {};
+    const byStatus = {};
+    let openNCRs = 0;
+    let closedNCRs = 0;
+
+    records.forEach(r => {
+      const type = r.type || 'Unknown';
+      const status = r.status || 'Unknown';
+      byType[type] = (byType[type] || 0) + 1;
+      byStatus[status] = (byStatus[status] || 0) + 1;
+      if (type === 'ncr' || type === 'NCR') {
+        if (status === 'open') openNCRs++;
+        else if (status === 'closed') closedNCRs++;
+      }
+    });
+
+    const passedInspections = records.filter(r => r.type === 'inspection' && r.status === 'passed').length;
+    const failedInspections = records.filter(r => r.type === 'inspection' && r.status === 'failed').length;
+
+    res.json({
+      project: project.name,
+      projectCode: project.code,
+      totalRecords: records.length,
+      byType,
+      byStatus,
+      inspections: {
+        passed: passedInspections,
+        failed: failedInspections,
+        total: passedInspections + failedInspections,
+      },
+      ncrs: {
+        open: openNCRs,
+        closed: closedNCRs,
+        total: openNCRs + closedNCRs,
+      },
+    });
+  } catch (err) {
+    console.error('QA summary error:', err);
+    res.status(500).json({ error: 'Failed to fetch QA summary' });
+  }
+});
+
 // GET /api/qa/records
 router.get('/records', async (req, res) => {
   try {

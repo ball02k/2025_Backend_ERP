@@ -40,6 +40,19 @@ async function createPurchaseOrder({
   orderDate,
   lines,
   createdBy,
+  // NEW: Enhanced fields for contract type integration
+  poType,
+  milestoneId,
+  milestoneNumber,
+  packageId,
+  paymentApplicationId,
+  pdfUrl,
+  pdfGeneratedAt,
+  expectedDeliveryDate,
+  actualDeliveryDate,
+  deliveryStatus,
+  internalNotes,
+  supplierNotes,
 }) {
   // Generate code if not provided
   if (!code) {
@@ -61,6 +74,19 @@ async function createPurchaseOrder({
       status: 'DRAFT',
       orderDate: orderDate || new Date(),
       total,
+      // NEW: Enhanced fields (all optional)
+      poType,
+      milestoneId,
+      milestoneNumber,
+      packageId,
+      paymentApplicationId,
+      pdfUrl,
+      pdfGeneratedAt,
+      expectedDeliveryDate,
+      actualDeliveryDate,
+      deliveryStatus,
+      internalNotes,
+      supplierNotes,
       lines: {
         create: lines.map((line) => ({
           tenantId,
@@ -72,7 +98,12 @@ async function createPurchaseOrder({
         })),
       },
     },
-    include: { lines: true },
+    include: {
+      lines: true,
+      package: true,
+      milestone: true,
+      paymentApplication: true,
+    },
   });
 
   return po;
@@ -93,7 +124,12 @@ async function updatePurchaseOrder(id, tenantId, updates) {
   const po = await prisma.purchaseOrder.update({
     where: { id },
     data: poUpdates,
-    include: { lines: true },
+    include: {
+      lines: true,
+      package: true,
+      milestone: true,
+      paymentApplication: true,
+    },
   });
 
   // Update lines if provided
@@ -117,7 +153,12 @@ async function updatePurchaseOrder(id, tenantId, updates) {
 
   return await prisma.purchaseOrder.findUnique({
     where: { id },
-    include: { lines: true },
+    include: {
+      lines: true,
+      package: true,
+      milestone: true,
+      paymentApplication: true,
+    },
   });
 }
 
@@ -301,6 +342,9 @@ async function getPurchaseOrders(tenantId, filters = {}) {
         project: { select: { code: true, name: true } },
         contract: { select: { id: true, title: true } },
         budgetLine: { select: { id: true, code: true, description: true } },
+        package: { select: { id: true, name: true, poStrategy: true } },
+        milestone: { select: { id: true, milestoneNumber: true, description: true } },
+        paymentApplication: { select: { id: true, applicationNumber: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -323,6 +367,9 @@ async function getPurchaseOrderById(id, tenantId) {
       project: { select: { code: true, name: true } },
       contract: { select: { id: true, title: true } },
       budgetLine: { select: { id: true, code: true, description: true } },
+      package: { select: { id: true, code: true, name: true, poStrategy: true } },
+      milestone: { select: { id: true, milestoneNumber: true, description: true } },
+      paymentApplication: { select: { id: true, applicationNumber: true } },
     },
   });
 }

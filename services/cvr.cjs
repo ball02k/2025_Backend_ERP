@@ -59,8 +59,8 @@ async function getCVRSummary(tenantId, projectId, budgetLineId = null) {
   // Calculate remaining and variance
   const remaining = totalBudget - totalCommitted - totalActuals;
   const variance = totalBudget - totalCommitted;
-  const percentCommitted = totalBudget > 0 ? (totalCommitted / totalBudget) * 100 : 0;
-  const percentActual = totalBudget > 0 ? (totalActuals / totalBudget) * 100 : 0;
+  const percentCommitted = totalBudget > 0 ? (totalCommitted / totalBudget) : 0;
+  const percentActual = totalBudget > 0 ? (totalActuals / totalBudget) : 0;
 
   return {
     budget: totalBudget,
@@ -283,8 +283,8 @@ async function getCVRByBudgetLine(tenantId, projectId) {
         actual,
         remaining,
         variance: budget - committed,
-        percentCommitted: budget > 0 ? (committed / budget) * 100 : 0,
-        percentActual: budget > 0 ? (actual / budget) * 100 : 0,
+        percentCommitted: budget > 0 ? (committed / budget) : 0,
+        percentActual: budget > 0 ? (actual / budget) : 0,
         // Forecast fields
         forecastFinal,
         forecastVariance,

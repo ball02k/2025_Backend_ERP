@@ -1,5 +1,6 @@
 const express = require('express');
 const { requireProjectMember } = require('../middleware/membership.cjs');
+const cvrService = require('../services/cvr.cjs');
 
 module.exports = (prisma) => {
   const router = express.Router();
@@ -262,8 +263,52 @@ module.exports = (prisma) => {
         },
       });
       try { const { recomputeActualsForProject } = require('./hooks.recompute.cjs'); await recomputeActualsForProject(tenantId, projectId); } catch (_e) {}
+
+      // Create CVR Actual record for the invoice
+      let cvrActual = null;
+      try {
+        // Find budget line from contract or package
+        let budgetLineId = null;
+
+        if (created.contractId) {
+          // Try to get budget line from contract line items
+          const contractLine = await prisma.contractLineItem.findFirst({
+            where: { contractId: created.contractId, budgetLineId: { not: null } },
+            select: { budgetLineId: true },
+          });
+          budgetLineId = contractLine?.budgetLineId;
+        }
+
+        if (!budgetLineId && created.packageId) {
+          // Try to get budget line from package items
+          const packageItem = await prisma.packageItem.findFirst({
+            where: { packageId: created.packageId },
+            select: { budgetLineId: true },
+          });
+          budgetLineId = packageItem?.budgetLineId;
+        }
+
+        if (budgetLineId && created.net) {
+          cvrActual = await cvrService.createActual({
+            tenantId,
+            projectId,
+            budgetLineId,
+            sourceType: 'INVOICE',
+            sourceId: created.id,
+            amount: Number(created.net),
+            description: `Invoice ${created.number}`,
+            reference: created.number,
+            incurredDate: created.issueDate || new Date(),
+            createdBy: req.user?.id,
+          });
+        }
+      } catch (cvrError) {
+        console.error('Error creating CVR actual for invoice:', cvrError);
+        // Don't fail the invoice creation - CVR is supplementary
+      }
+
       const { buildLinks } = require('../lib/buildLinks.cjs');
-      const row = { ...created, projectId };
+      const row = { ...created, projectId, cvrActualCreated: !!cvrActual };
       row.links = buildLinks('invoice', row);
       return res.status(201).json(row);
     } catch (err) {

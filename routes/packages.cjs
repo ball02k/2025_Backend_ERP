@@ -394,4 +394,123 @@ router.get(
   }),
 );
 
+/**
+ * GET /api/packages/:id/milestones
+ * Get all milestones for a package
+ */
+router.get(
+  '/packages/:id/milestones',
+  wrap(async (req, res) => {
+    const tenantId = resolveTenantId(req);
+    if (!tenantId) {
+      res.status(401).json({ error: 'UNAUTHENTICATED' });
+      return;
+    }
+
+    const packageId = toInt(req.params.id);
+    if (!Number.isFinite(packageId)) {
+      res.status(400).json({ error: 'INVALID_PACKAGE_ID' });
+      return;
+    }
+
+    // Verify package exists and belongs to tenant
+    const pkg = await findPackageForTenant(packageId, tenantId);
+    if (!pkg) {
+      res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
+      return;
+    }
+
+    // Fetch milestones ordered by sequence
+    const milestones = await prisma.packageMilestone.findMany({
+      where: {
+        packageId,
+        tenantId,
+      },
+      orderBy: { sequence: 'asc' },
+    });
+
+    res.json({ milestones });
+  }),
+);
+
+/**
+ * POST /api/packages/:id/milestones
+ * Save/replace all milestones for a package
+ */
+router.post(
+  '/packages/:id/milestones',
+  wrap(async (req, res) => {
+    const tenantId = resolveTenantId(req);
+    if (!tenantId) {
+      res.status(401).json({ error: 'UNAUTHENTICATED' });
+      return;
+    }
+
+    const packageId = toInt(req.params.id);
+    if (!Number.isFinite(packageId)) {
+      res.status(400).json({ error: 'INVALID_PACKAGE_ID' });
+      return;
+    }
+
+    // Verify package exists and belongs to tenant
+    const pkg = await findPackageForTenant(packageId, tenantId);
+    if (!pkg) {
+      res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
+      return;
+    }
+
+    const { milestones = [] } = req.body;
+
+    // Validate milestones array
+    if (!Array.isArray(milestones)) {
+      res.status(400).json({ error: 'INVALID_MILESTONES_FORMAT' });
+      return;
+    }
+
+    // Use transaction to delete old and create new milestones
+    const result = await prisma.$transaction(async (tx) => {
+      // Delete existing milestones
+      await tx.packageMilestone.deleteMany({
+        where: {
+          packageId,
+          tenantId,
+        },
+      });
+
+      // Create new milestones if any provided
+      if (milestones.length > 0) {
+        const created = await tx.packageMilestone.createMany({
+          data: milestones.map((m, idx) => ({
+            tenantId,
+            packageId,
+            milestoneNumber: m.milestoneNumber ?? idx + 1,
+            description: m.description || null,
+            targetValue: m.targetValue ? Number(m.targetValue) : null,
+            targetDate: m.targetDate ? new Date(m.targetDate) : null,
+            sequence: m.sequence ?? idx + 1,
+            status: m.status || 'PENDING',
+            contractId: m.contractId ? Number(m.contractId) : null,
+            createdBy: m.createdBy ? Number(m.createdBy) : null,
+          })),
+        });
+
+        // Fetch and return created milestones
+        const saved = await tx.packageMilestone.findMany({
+          where: {
+            packageId,
+            tenantId,
+          },
+          orderBy: { sequence: 'asc' },
+        });
+
+        return { milestones: saved, count: created.count };
+      }
+
+      return { milestones: [], count: 0 };
+    });
+
+    res.json(result);
+  }),
+);
+
 module.exports = router;
