@@ -109,6 +109,7 @@ const directAwardRouter = require('./routes/packages.directAward.cjs');
 const contractsReadRouter = require('./routes/contracts.read.cjs');
 const contractsGenerateDocRouter = require('./routes/contracts.generateDoc.cjs');
 const contractsStatusRouter = require('./routes/contracts.status.cjs');
+const contractsDocumentsRouter = require('./routes/contracts.documents.cjs');
 const invoiceMatchingRouter = require('./routes/invoiceMatching.cjs');
 const contractsOnlyOfficeRouter = require('./routes/contracts.onlyoffice.cjs');
 const settingsV1Router = require('./routes/settings.v1.cjs');
@@ -375,6 +376,7 @@ app.use('/api/rfis', requireAuth, rfisRouter);
 app.use('/api/qa', requireAuth, qaRouter);
 app.use('/api/hs', requireAuth, hsRouter);
 app.use('/api/carbon', requireAuth, carbonRouter);
+app.use('/api', require('./routes/budgetCategories.seed.cjs')); // Seed endpoint
 app.use('/api/budget-categories', requireAuth, require('./routes/budgetCategories.cjs'));
 app.use('/api/analytics', requireAuth, analyticsRouter(prisma));
 app.use('/api', homeRoutes(prisma, { requireAuth }));
@@ -415,6 +417,7 @@ app.use('/api', directAwardRouter);
 app.use('/api', contractsReadRouter);
 app.use('/api', contractsGenerateDocRouter);
 app.use('/api', contractsStatusRouter);
+app.use('/api', contractsDocumentsRouter); // Contract document upload & OCR
 app.use('/api', invoiceMatchingRouter); // Invoice-PO matching, call-off POs
 app.use('/api', contractsOnlyOfficeRouter);
 app.use('/api', contractsRouter);
