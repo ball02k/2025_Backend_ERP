@@ -27,6 +27,10 @@ const packageSelect = {
   costCodeId: true,
   ownerUserId: true,
   buyerUserId: true,
+  // NEW: PO Strategy and Contract Type
+  poStrategy: true,
+  contractTypeId: true,
+  procurementType: true,
 };
 
 function decimalToNumber(value) {
@@ -438,6 +442,19 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
           },
           lineItems: { select: { id: true, budgetLineItemId: true } },
           tenders: { select: { id: true, status: true, title: true } },
+          purchaseOrders: {
+            where: { status: { notIn: ['CANCELLED', 'VOID'] } },
+            orderBy: { orderDate: 'desc' },
+            select: {
+              id: true,
+              code: true,
+              status: true,
+              total: true,
+              poType: true,
+              milestoneNumber: true,
+              orderDate: true,
+            },
+          },
         },
       });
     } catch (_e) {
@@ -541,6 +558,10 @@ router.patch('/projects/:projectId/packages/:packageId', async (req, res, next) 
     if (body.buyerUserId !== undefined) data.buyerUserId = body.buyerUserId == null || body.buyerUserId === '' ? null : Number(body.buyerUserId);
     // costCodeId passthrough when provided (optional)
     if (body.costCodeId !== undefined) data.costCodeId = body.costCodeId == null ? null : Number(body.costCodeId);
+    // NEW: PO Strategy and Contract Type
+    if (body.poStrategy !== undefined) data.poStrategy = body.poStrategy == null || body.poStrategy === '' ? null : String(body.poStrategy);
+    if (body.contractTypeId !== undefined) data.contractTypeId = body.contractTypeId == null || body.contractTypeId === '' ? null : String(body.contractTypeId);
+    if (body.procurementType !== undefined) data.procurementType = body.procurementType == null ? null : String(body.procurementType);
 
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'NO_FIELDS_TO_UPDATE' });
 
