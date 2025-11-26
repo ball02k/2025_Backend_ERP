@@ -1,111 +1,157 @@
+#!/usr/bin/env node
 /**
- * Seed Budget Categories for All Tenants
- *
- * This script creates UK standard construction categories
- * for all existing tenants in the system.
+ * Seed default budget categories for all tenants
+ * Run with: node prisma/seed-budget-categories.cjs
  */
 
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-const UK_BUDGET_CATEGORIES = [
-  { code: 'PREL', name: 'Preliminaries', description: 'Site setup, welfare, management, temporary works', color: '#64748b', sortOrder: 1 },
-  { code: 'SUBS', name: 'Substructure', description: 'Foundations, basements, ground works, piling', color: '#92400e', sortOrder: 2 },
-  { code: 'SUPS', name: 'Superstructure', description: 'Frame, upper floors, roof structure, stairs', color: '#ea580c', sortOrder: 3 },
-  { code: 'INTW', name: 'Internal Walls & Partitions', description: 'Blockwork, stud walls, glazed partitions', color: '#d97706', sortOrder: 4 },
-  { code: 'INTF', name: 'Internal Finishes', description: 'Plaster, decoration, floor finishes, wall finishes', color: '#65a30d', sortOrder: 5 },
-  { code: 'FITT', name: 'Fittings & Furniture', description: 'Built-in furniture, fixtures, joinery, signage', color: '#0891b2', sortOrder: 6 },
-  { code: 'MECH', name: 'Mechanical Services', description: 'Heating, ventilation, plumbing, drainage', color: '#7c3aed', sortOrder: 7 },
-  { code: 'ELEC', name: 'Electrical Services', description: 'Power distribution, lighting, data, fire alarms', color: '#c026d3', sortOrder: 8 },
-  { code: 'EXTW', name: 'External Works', description: 'Landscaping, paving, external drainage, fencing', color: '#059669', sortOrder: 9 },
-  { code: 'CONT', name: 'Contingency', description: 'Risk allowance, provisional sums', color: '#dc2626', sortOrder: 10 }
+const DEFAULT_CATEGORIES = [
+  {
+    id: 'cat-prelim',
+    code: 'PRELIM',
+    name: 'Preliminaries',
+    description: 'Site setup, welfare, management, and enabling works',
+    color: '#8b5cf6',
+    sortOrder: 1,
+  },
+  {
+    id: 'cat-subst',
+    code: 'SUBST',
+    name: 'Substructure',
+    description: 'Foundations, basements, and ground works',
+    color: '#3b82f6',
+    sortOrder: 2,
+  },
+  {
+    id: 'cat-supst',
+    code: 'SUPST',
+    name: 'Superstructure',
+    description: 'Frame, upper floors, roof, stairs, external walls',
+    color: '#10b981',
+    sortOrder: 3,
+  },
+  {
+    id: 'cat-int-fin',
+    code: 'INT-FIN',
+    name: 'Internal Finishes',
+    description: 'Wall, floor, and ceiling finishes',
+    color: '#f59e0b',
+    sortOrder: 4,
+  },
+  {
+    id: 'cat-fittings',
+    code: 'FITTINGS',
+    name: 'Fittings & Furnishings',
+    description: 'Built-in furniture, fittings, and equipment',
+    color: '#ec4899',
+    sortOrder: 5,
+  },
+  {
+    id: 'cat-services',
+    code: 'SERVICES',
+    name: 'Building Services',
+    description: 'Mechanical, electrical, plumbing, HVAC',
+    color: '#ef4444',
+    sortOrder: 6,
+  },
+  {
+    id: 'cat-external',
+    code: 'EXTERNAL',
+    name: 'External Works',
+    description: 'Landscaping, drainage, external paving',
+    color: '#14b8a6',
+    sortOrder: 7,
+  },
+  {
+    id: 'cat-cont',
+    code: 'CONT',
+    name: 'Contingency',
+    description: 'Risk allowance and contingency funds',
+    color: '#64748b',
+    sortOrder: 8,
+  },
 ];
 
 async function seedBudgetCategories() {
-  console.log('\n🌱 Seeding UK budget categories for all tenants...\n');
+  console.log('🌱 Seeding budget categories...');
 
   try {
-    // Get all unique tenants from users table
-    const tenants = await prisma.user.findMany({
+    // Get all unique tenants
+    const tenants = await prisma.project.findMany({
+      select: { tenantId: true },
       distinct: ['tenantId'],
-      select: {
-        tenantId: true,
-        id: true
-      }
     });
 
     if (tenants.length === 0) {
-      console.error('❌ No tenants found');
-      return;
-    }
-
-    console.log(`Found ${tenants.length} tenant(s)\n`);
-
-    for (const tenant of tenants) {
-      console.log(`📊 Processing tenant: ${tenant.tenantId}`);
-
-      let created = 0;
-      let skipped = 0;
-
-      for (const cat of UK_BUDGET_CATEGORIES) {
-        const existing = await prisma.budgetCategory.findUnique({
-          where: {
-            tenantId_code: {
-              tenantId: tenant.tenantId,
-              code: cat.code
-            }
-          }
-        });
-
-        if (!existing) {
-          await prisma.budgetCategory.create({
-            data: {
-              tenantId: tenant.tenantId,
-              code: cat.code,
-              name: cat.name,
-              description: cat.description,
-              color: cat.color,
-              sortOrder: cat.sortOrder,
-              isActive: true,
-              isDefault: true,
-              createdBy: tenant.id.toString()
-            }
-          });
-          created++;
-          console.log(`  ✅ Created: ${cat.code} - ${cat.name}`);
-        } else {
-          skipped++;
-          console.log(`  ↷ Skipped: ${cat.code} - ${cat.name} (already exists)`);
+      console.log('⚠️  No tenants found. Seeding for demo tenant only.');
+      const demoTenant = 'demo';
+      await seedForTenant(demoTenant);
+    } else {
+      console.log(`Found ${tenants.length} tenant(s)`);
+      for (const { tenantId } of tenants) {
+        if (tenantId) {
+          await seedForTenant(tenantId);
         }
       }
-
-      console.log(`  📊 Summary: ${created} created, ${skipped} skipped\n`);
     }
 
-    // Show final statistics
-    const totalCategories = await prisma.budgetCategory.count();
-    console.log('✨ Done!');
-    console.log(`\n📈 Total budget categories in system: ${totalCategories}`);
-    console.log(`   Tenants processed: ${tenants.length}`);
-    console.log(`   Expected total: ${tenants.length * UK_BUDGET_CATEGORIES.length}\n`);
-
+    console.log('✅ Budget categories seeded successfully!');
   } catch (error) {
-    console.error('\n❌ Error seeding budget categories:', error.message);
-    console.error(error);
+    console.error('❌ Error seeding budget categories:', error);
     throw error;
+  } finally {
+    await prisma.$disconnect();
   }
 }
 
-// Main execution
-async function main() {
-  await seedBudgetCategories();
+async function seedForTenant(tenantId) {
+  console.log(`   Seeding categories for tenant: ${tenantId}`);
+
+  for (const category of DEFAULT_CATEGORIES) {
+    try {
+      await prisma.budgetCategory.upsert({
+        where: {
+          tenantId_code: {
+            tenantId,
+            code: category.code,
+          },
+        },
+        update: {
+          name: category.name,
+          description: category.description,
+          color: category.color,
+          sortOrder: category.sortOrder,
+        },
+        create: {
+          id: `${category.id}-${tenantId}`,
+          tenantId,
+          code: category.code,
+          name: category.name,
+          description: category.description,
+          color: category.color,
+          sortOrder: category.sortOrder,
+          isActive: true,
+          isDefault: true,
+          createdBy: 'system',
+        },
+      });
+      console.log(`      ✓ ${category.code} - ${category.name}`);
+    } catch (error) {
+      console.log(`      ✗ Failed to seed ${category.code}: ${error.message}`);
+    }
+  }
 }
 
-main()
-  .catch((e) => {
-    console.error('❌ FAILED:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+// Run the seeder
+if (require.main === module) {
+  seedBudgetCategories()
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error(error);
+      process.exit(1);
+    });
+}
+
+module.exports = { seedBudgetCategories, DEFAULT_CATEGORIES };
