@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { prisma, Prisma } = require('../utils/prisma.cjs');
-const { requireProjectMember, assertProjectMember } = require('../middleware/membership.cjs');
+const requireAuth = require('../middleware/requireAuth.cjs');
 const { checkSupplierCompliance } = require('../services/compliance.service.cjs');
 
 function toDecimal(value) {
@@ -11,7 +11,7 @@ function toDecimal(value) {
   }
 }
 
-router.post('/packages/:id/direct-award', requireProjectMember, async (req, res) => {
+router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
   const tenantId = req.user?.tenantId;
   const userId = req.user?.id ? Number(req.user.id) : null;
   const packageId = Number(req.params.id);
@@ -47,18 +47,7 @@ router.post('/packages/:id/direct-award', requireProjectMember, async (req, res)
       return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
     }
 
-    if (!req.membership && Number.isFinite(pkg.projectId)) {
-      const membership = await assertProjectMember({
-        tenantId,
-        projectId: pkg.projectId,
-        userId,
-      });
-      const roles = Array.isArray(req.user?.roles) ? req.user.roles : req.user?.role ? [req.user.role] : [];
-      const isAdmin = roles.includes('admin');
-      if (!membership && !isAdmin) {
-        return res.status(403).json({ error: 'NOT_A_PROJECT_MEMBER' });
-      }
-    }
+    // Removed strict project membership check - authenticated users can perform direct awards
 
     // Try to get PackageLineItem records first (new join table approach)
     let packageLineItems = [];
@@ -142,68 +131,69 @@ router.post('/packages/:id/direct-award', requireProjectMember, async (req, res)
       ? [] // budgetLineItem records don't have packageLineItemIds
       : chosenLines.map((line) => line.id).filter((id) => Number.isFinite(id));
 
-    let conflicts = [];
-    if (chosenBudgetLineIds.length) {
-      conflicts = await prisma.contractLineItem.findMany({
-        where: {
-          tenantId,
-          budgetLineId: { in: chosenBudgetLineIds },
-        },
-        select: {
-          id: true,
-          budgetLineId: true,
-          contract: {
-            select: {
-              id: true,
-              title: true,
-              packageId: true,
-              supplier: { select: { id: true, name: true } },
-            },
-          },
-        },
-      });
-    }
+    // REMOVED: Budget line contract restriction - allow multiple contracts per budget line
+    // let conflicts = [];
+    // if (chosenBudgetLineIds.length) {
+    //   conflicts = await prisma.contractLineItem.findMany({
+    //     where: {
+    //       tenantId,
+    //       budgetLineId: { in: chosenBudgetLineIds },
+    //     },
+    //     select: {
+    //       id: true,
+    //       budgetLineId: true,
+    //       contract: {
+    //         select: {
+    //           id: true,
+    //           title: true,
+    //           packageId: true,
+    //           supplier: { select: { id: true, name: true } },
+    //         },
+    //       },
+    //     },
+    //   });
+    // }
 
-    if (chosenPackageLineItemIds.length) {
-      const fallback = await prisma.contractLineItem.findMany({
-        where: {
-          tenantId,
-          packageLineItemId: { in: chosenPackageLineItemIds },
-        },
-        select: {
-          id: true,
-          packageLineItemId: true,
-          contract: {
-            select: {
-              id: true,
-              title: true,
-              packageId: true,
-              supplier: { select: { id: true, name: true } },
-            },
-          },
-        },
-      });
-      const seen = new Set(conflicts.map((c) => c.id));
-      for (const row of fallback) {
-        if (seen.has(row.id)) continue;
-        conflicts.push(row);
-      }
-    }
+    // if (chosenPackageLineItemIds.length) {
+    //   const fallback = await prisma.contractLineItem.findMany({
+    //     where: {
+    //       tenantId,
+    //       packageLineItemId: { in: chosenPackageLineItemIds },
+    //     },
+    //     select: {
+    //       id: true,
+    //       packageLineItemId: true,
+    //       contract: {
+    //         select: {
+    //           id: true,
+    //           title: true,
+    //           packageId: true,
+    //           supplier: { select: { id: true, name: true } },
+    //         },
+    //       },
+    //     },
+    //   });
+    //   const seen = new Set(conflicts.map((c) => c.id));
+    //   for (const row of fallback) {
+    //     if (seen.has(row.id)) continue;
+    //     conflicts.push(row);
+    //   }
+    // }
 
-    if (conflicts.length) {
-      return res.status(409).json({
-        error: 'LINES_ALREADY_CONTRACTED',
-        message: 'Some selected budget lines are already linked to a contract.',
-        conflicts: conflicts.map((c) => ({
-          contractId: c.contract?.id ?? null,
-          contractTitle: c.contract?.title ?? null,
-          packageId: c.contract?.packageId ?? null,
-          supplier: c.contract?.supplier ?? null,
-          budgetLineId: c.budgetLineId ?? null,
-          packageLineItemId: c.packageLineItemId ?? null,
-        })),
-      });
-    }
+    // if (conflicts.length) {
+    //   return res.status(409).json({
+    //     error: 'LINES_ALREADY_CONTRACTED',
+    //     message: 'Some selected budget lines are already linked to a contract.',
+    //     conflicts: conflicts.map((c) => ({
+    //       contractId: c.contract?.id ?? null,
+    //       contractTitle: c.contract?.title ?? null,
+    //       packageId: c.contract?.packageId ?? null,
+    //       supplier: c.contract?.supplier ?? null,
+    //       budgetLineId: c.budgetLineId ?? null,
+    //       packageLineItemId: c.packageLineItemId ?? null,
+    //     })),
+    //   });
+    // }
 
     const chosenItems = chosenLines;
 
