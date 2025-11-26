@@ -30,7 +30,6 @@ const packageSelect = {
   // NEW: PO Strategy and Contract Type
   poStrategy: true,
   contractTypeId: true,
-  procurementType: true,
 };
 
 function decimalToNumber(value) {
@@ -561,7 +560,6 @@ router.patch('/projects/:projectId/packages/:packageId', async (req, res, next) 
     // NEW: PO Strategy and Contract Type
     if (body.poStrategy !== undefined) data.poStrategy = body.poStrategy == null || body.poStrategy === '' ? null : String(body.poStrategy);
     if (body.contractTypeId !== undefined) data.contractTypeId = body.contractTypeId == null || body.contractTypeId === '' ? null : String(body.contractTypeId);
-    if (body.procurementType !== undefined) data.procurementType = body.procurementType == null ? null : String(body.procurementType);
 
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'NO_FIELDS_TO_UPDATE' });
 
