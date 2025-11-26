@@ -1,8 +1,21 @@
 const express = require('express');
 const router = express.Router();
 const { prisma, toInt, assertProjectTenant } = require('../lib/safety.cjs');
+const { Prisma } = require('@prisma/client');
 const { isPackageSourced } = require('../lib/sourcing.cjs');
 const { getTenantId } = require('../middleware/tenant.cjs');
+const { writeAudit } = require('../lib/audit.cjs');
+
+function toDecimal(value, options = {}) {
+  const { fallback = null, allowNull = false } = options;
+  if (value == null) return allowNull ? null : new Prisma.Decimal(fallback ?? 0);
+  if (value instanceof Prisma.Decimal) return value;
+  try {
+    return new Prisma.Decimal(value);
+  } catch (_) {
+    return allowNull ? null : new Prisma.Decimal(fallback ?? 0);
+  }
+}
 
 function getContext(req) {
   return {
@@ -512,5 +525,133 @@ router.post(
     res.json(result);
   }),
 );
+
+// POST /packages/:packageId/add-budget-lines - Add budget lines to a package
+router.post('/packages/:packageId/add-budget-lines', async (req, res, next) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const userId = req.user?.id;
+    const packageId = Number(req.params.packageId);
+    if (!Number.isFinite(packageId)) return res.status(400).json({ error: 'Invalid package id' });
+
+    const rawIds =
+      (Array.isArray(req.body?.lineItemIds) && req.body.lineItemIds) ||
+      (Array.isArray(req.body?.budgetLineIds) && req.body.budgetLineIds) ||
+      [];
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      return res.status(400).json({ error: 'lineItemIds array required' });
+    }
+
+    const ids = rawIds
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value));
+    if (!ids.length) return res.status(400).json({ error: 'lineItemIds must contain numbers' });
+
+    const pkg = await prisma.package.findFirst({
+      where: { id: packageId, project: { tenantId } },
+      select: { id: true, projectId: true },
+    });
+    if (!pkg) return res.status(404).json({ error: 'Package not found' });
+
+    const budgetLines = await prisma.budgetLine.findMany({
+      where: {
+        id: { in: ids },
+        tenantId,
+        projectId: pkg.projectId,
+      },
+    });
+    if (!budgetLines.length) {
+      return res.status(404).json({ error: 'Budget lines not found for package/project' });
+    }
+    const missing = ids.filter((id) => !budgetLines.some((line) => line.id === id));
+    if (missing.length) {
+      return res.status(404).json({ error: 'Some budget lines not found', missing });
+    }
+
+    const existingSnapshots = await prisma.packageLineItem.findMany({
+      where: {
+        tenantId,
+        packageId: pkg.id,
+        budgetLineItemId: { in: ids },
+      },
+      select: { budgetLineItemId: true },
+    });
+    const existingSet = new Set(existingSnapshots.map((row) => row.budgetLineItemId));
+
+    const existingLegacy = await prisma.packageItem.findMany({
+      where: {
+        tenantId,
+        packageId: pkg.id,
+        budgetLineId: { in: ids },
+      },
+      select: { budgetLineId: true },
+    });
+    const legacySet = new Set(existingLegacy.map((row) => row.budgetLineId));
+
+    const linesToAdd = budgetLines.filter((line) => !existingSet.has(line.id));
+    if (!linesToAdd.length) {
+      return res.status(200).json({
+        added: 0,
+        skipped: ids.length,
+        existing: Array.from(new Set([...existingSet, ...legacySet])),
+      });
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
+      const items = [];
+      for (const line of linesToAdd) {
+        const qty = toDecimal(line.qty ?? 0);
+        const rate = toDecimal(line.rate ?? 0, { fallback: 0 });
+        let total = line.total instanceof Prisma.Decimal ? line.total : null;
+        if (!total) {
+          try {
+            total = qty.mul(rate);
+          } catch (_) {
+            total = new Prisma.Decimal(0);
+          }
+        }
+        const description = line.description || line.code || `Budget Line ${line.id}`;
+        const item = await tx.packageLineItem.create({
+          data: {
+            tenantId,
+            packageId: pkg.id,
+            budgetLineItemId: line.id,
+            description,
+            qty,
+            rate,
+            total,
+            costCode: line.code || null,
+          },
+        });
+        if (!legacySet.has(line.id)) {
+          await tx.packageItem.create({
+            data: {
+              tenantId,
+              packageId: pkg.id,
+              budgetLineId: line.id,
+            },
+          });
+          legacySet.add(line.id);
+        }
+        items.push(item);
+      }
+      return items;
+    });
+
+    await writeAudit({
+      prisma,
+      req,
+      userId,
+      entity: 'Package',
+      entityId: pkg.id,
+      action: 'bulk_add_from_budget',
+      changes: { budgetLineIds: created.map((item) => item.budgetLineItemId) },
+    });
+
+    res.status(201).json({ added: created.length, items: created, skipped: Array.from(existingSet) });
+  } catch (err) {
+    next(err);
+  }
+});
 
 module.exports = router;
