@@ -1,0 +1,134 @@
+
+> 2025_backend_erp@1.0.0 start
+> node index.cjs
+
+[API Catalog] hash: 35bdbe1fc841351bca677f24f4c6aa46ba5561b4
+FRONTEND_DELTA_PROMPT
+--------------------------------
+You are syncing the FRONTEND after backend API changes.
+
+API CHANGES:
+- POST /api/requests/:id/award now requires permission `procurement:award` and returns 403 { error:{ code:'FORBIDDEN', message:'Missing permission: procurement:award' } } when absent.
+
+UPDATE THESE CALLS/COMPONENTS:
+- Procurement.jsx and RFxCompare.jsx: check user permission before calling award endpoint and handle 403 errors.
+
+TEST UPDATES:
+- Add tests covering missing permission on RFx award.
+
+After applying, bump localStorage.lastSeenCatalogHash to "<CURRENT_HASH>".
+--------------------------------
+/END FRONTEND_DELTA_PROMPT
+
+[EmailService] Email transport configured successfully
+[LLM] Initialized with provider: ollama (No OpenAI key)
+📁 Initializing LOCAL storage...
+📄 [ContractOCR] Initialized with PDF.js (free, opensource)
+📁 Serving static files from: /Users/Baller/Documents/2025_ERP/2025_Backend_ERP/uploads
+API on 0.0.0.0:3001
+2025-11-27T16:58:41.972Z [REQ 012efdb0] GET /api/finance/payment-applications?projectId=37
+2025-11-27T16:58:41.984Z [REQ 36dbbff7] GET /api/suppliers
+[0mGET /api/suppliers [36m304[0m 100.449 ms - -[0m
+2025-11-27T16:58:42.088Z [RES 36dbbff7] 304 GET /api/suppliers
+2025-11-27T16:58:42.092Z [REQ 0df5ab91] GET /api/suppliers
+2025-11-27T16:58:42.095Z [REQ b271faa6] GET /api/projects/37/contracts
+[0mGET /api/finance/payment-applications?projectId=37 [36m304[0m 163.740 ms - -[0m
+2025-11-27T16:58:42.136Z [RES 012efdb0] 304 GET /api/finance/payment-applications?projectId=37
+2025-11-27T16:58:42.139Z [REQ d08b5bcc] GET /api/finance/payment-applications?projectId=37
+[0mGET /api/suppliers [36m304[0m 55.718 ms - -[0m
+2025-11-27T16:58:42.148Z [RES 0df5ab91] 304 GET /api/suppliers
+[0mGET /api/finance/payment-applications?projectId=37 [36m304[0m 43.309 ms - -[0m
+2025-11-27T16:58:42.183Z [RES d08b5bcc] 304 GET /api/finance/payment-applications?projectId=37
+[0mGET /api/projects/37/contracts [36m304[0m 136.255 ms - -[0m
+2025-11-27T16:58:42.232Z [RES b271faa6] 304 GET /api/projects/37/contracts
+2025-11-27T16:58:42.236Z [REQ 2167e0a4] GET /api/projects/37/contracts
+2025-11-27T16:58:42.238Z [REQ 54291f23] GET /api/projects/37/packages
+[0mGET /api/projects/37/contracts [36m304[0m 53.167 ms - -[0m
+2025-11-27T16:58:42.289Z [RES 2167e0a4] 304 GET /api/projects/37/contracts
+[projects.js] Checking for tenders: {
+  tenantId: 'demo',
+  projectId: 37,
+  packageIds: [
+    83, 61, 88, 89, 87, 85,
+    64, 63, 60, 90, 86, 62,
+    84, 82, 81
+  ]
+}
+[projects.js] Found tenders: [
+  { id: 11, packageId: 61, status: 'issued' },
+  { id: 29, packageId: 64, status: 'draft' },
+  { id: 32, packageId: 62, status: 'draft' }
+]
+[projects.js] First package sourcing: {
+  packageId: 83,
+  packageName: 'Civils & Groundworks',
+  sourcingStatus: null,
+  tenderId: null,
+  contractId: null,
+  hasContracts: 0
+}
+[projects.js] Returning 15 packages
+[0mGET /api/projects/37/packages [36m304[0m 131.970 ms - -[0m
+2025-11-27T16:58:42.370Z [RES 54291f23] 304 GET /api/projects/37/packages
+2025-11-27T16:58:42.373Z [REQ c51daee2] GET /api/projects/37/packages
+[projects.js] Checking for tenders: {
+  tenantId: 'demo',
+  projectId: 37,
+  packageIds: [
+    83, 61, 88, 89, 87, 85,
+    64, 63, 60, 90, 86, 62,
+    84, 82, 81
+  ]
+}
+[projects.js] Found tenders: [
+  { id: 11, packageId: 61, status: 'issued' },
+  { id: 29, packageId: 64, status: 'draft' },
+  { id: 32, packageId: 62, status: 'draft' }
+]
+[projects.js] First package sourcing: {
+  packageId: 83,
+  packageName: 'Civils & Groundworks',
+  sourcingStatus: null,
+  tenderId: null,
+  contractId: null,
+  hasContracts: 0
+}
+[projects.js] Returning 15 packages
+[0mGET /api/projects/37/packages [36m304[0m 66.109 ms - -[0m
+2025-11-27T16:58:42.440Z [RES c51daee2] 304 GET /api/projects/37/packages
+2025-11-27T16:58:44.820Z [REQ d81aa25d] GET /api/applications/30/invoices
+2025-11-27T16:58:44.821Z [REQ 1c99a4ec] GET /api/applications/30
+[0mGET /api/applications/30/invoices [33m404[0m 58.641 ms - 167[0m
+2025-11-27T16:58:44.880Z [RES d81aa25d] 404 GET /api/applications/30/invoices
+2025-11-27T16:58:44.882Z [REQ d929a850] GET /api/applications/30/invoices
+[0mGET /api/applications/30 [32m200[0m 85.473 ms - 3511[0m
+2025-11-27T16:58:44.907Z [RES 1c99a4ec] 200 GET /api/applications/30
+2025-11-27T16:58:44.911Z [REQ 9dba6478] GET /api/applications/30
+[0mGET /api/applications/30/invoices [33m404[0m 51.755 ms - 167[0m
+2025-11-27T16:58:44.934Z [RES d929a850] 404 GET /api/applications/30/invoices
+[0mGET /api/applications/30 [36m304[0m 63.754 ms - -[0m
+2025-11-27T16:58:44.975Z [RES 9dba6478] 304 GET /api/applications/30
+2025-11-27T16:58:47.938Z [REQ 8f7d847d] GET /api/applications/30/certificate/download
+[0mGET /api/applications/30/certificate/download [32m200[0m 147.442 ms - 3720[0m
+2025-11-27T16:58:48.086Z [RES 8f7d847d] 200 GET /api/applications/30/certificate/download
+2025-11-27T16:58:51.407Z [REQ 0732b111] GET /api/applications/30
+[0mGET /api/applications/30 [32m200[0m 90.795 ms - 3539[0m
+2025-11-27T16:58:51.499Z [RES 0732b111] 200 GET /api/applications/30
+2025-11-27T18:10:00.971Z [REQ c2402a5d] GET /api/auth/me
+[0mGET /api/auth/me [32m200[0m 146.378 ms - 182[0m
+2025-11-27T18:10:01.117Z [RES c2402a5d] 200 GET /api/auth/me
+2025-11-27T18:10:01.134Z [REQ bcdda2dc] GET /api/auth/me
+[0mGET /api/auth/me [32m200[0m 74.324 ms - 182[0m
+2025-11-27T18:10:01.208Z [RES bcdda2dc] 200 GET /api/auth/me
+2025-11-27T18:10:02.106Z [REQ b34c9563] GET /api/applications/30/invoices
+2025-11-27T18:10:02.107Z [REQ 445a12e7] GET /api/applications/30
+[0mGET /api/applications/30/invoices [33m404[0m 28.494 ms - 167[0m
+2025-11-27T18:10:02.134Z [RES b34c9563] 404 GET /api/applications/30/invoices
+2025-11-27T18:10:02.137Z [REQ b67d6f4d] GET /api/applications/30/invoices
+[0mGET /api/applications/30/invoices [33m404[0m 47.508 ms - 167[0m
+2025-11-27T18:10:02.185Z [RES b67d6f4d] 404 GET /api/applications/30/invoices
+[0mGET /api/applications/30 [36m304[0m 164.944 ms - -[0m
+2025-11-27T18:10:02.272Z [RES 445a12e7] 304 GET /api/applications/30
+2025-11-27T18:10:02.275Z [REQ 75a9966f] GET /api/applications/30
+[0mGET /api/applications/30 [36m304[0m 11.407 ms - -[0m
+2025-11-27T18:10:02.286Z [RES 75a9966f] 304 GET /api/applications/30

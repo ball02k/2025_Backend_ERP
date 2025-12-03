@@ -307,7 +307,9 @@ module.exports = (prisma) => {
   router.post('/:projectId/packages', requireProjectMember, async (req, res) => {
     try {
       const projectId = Number(req.params.projectId);
-      const { name, description, scope, trade, tradeCategory, budget, attachments, costCodeId, budgetIds, budgetLineIds } = req.body || {};
+      const { name, description, scope, trade, tradeCategory, budget, attachments, costCodeId, budgetIds, budgetLineIds, contractTypeId, poStrategy } = req.body || {};
+      console.log('[projects.js:/:projectId/packages] contractTypeId:', contractTypeId);
+      console.log('[projects.js:/:projectId/packages] poStrategy:', poStrategy);
       // Accept both budgetIds and budgetLineIds for compatibility
       const effectiveBudgetIds = Array.isArray(budgetLineIds) && budgetLineIds.length > 0
         ? budgetLineIds
@@ -323,6 +325,8 @@ module.exports = (prisma) => {
           status: 'Draft',
           budgetEstimate: budget ?? null,
           costCodeId: costCodeId ?? null,
+          contractTypeId: contractTypeId ?? null,
+          poStrategy: poStrategy ?? null,
         },
         select: {
           id: true,
@@ -338,6 +342,8 @@ module.exports = (prisma) => {
           createdAt: true,
           updatedAt: true,
           costCodeId: true,
+          contractTypeId: true,
+          poStrategy: true,
         },
       });
       // Link budget lines if table exists

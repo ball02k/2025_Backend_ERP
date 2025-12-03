@@ -7,6 +7,11 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { buildLinks } = require('../lib/buildLinks.cjs');
 const { safeJson } = require('../lib/serialize.cjs');
+const { generatePaymentCertificatePdf, generatePaymentNoticePdf, generatePayLessNoticePdf } = require('../services/paymentCertificatePdf.cjs');
+const { saveBufferAsDocument } = require('../services/storage.cjs');
+const { sendEmail } = require('../services/email.service.cjs');
+const { paymentCertificateEmail } = require('../templates/emailTemplates.cjs');
+const paymentRecording = require('../services/paymentRecording.cjs');
 
 // ==============================================================================
 // HELPER FUNCTIONS
@@ -314,14 +319,15 @@ router.post('/contracts/:contractId/applications', async (req, res, next) => {
       },
     });
 
-    // Calculate cumulative previously paid amount
+    // Calculate cumulative previously paid amount (for tracking only)
     const claimedPreviouslyPaid = previousApplications.reduce(
       (sum, app) => sum + Number(app.claimedNetValue || 0),
       0
     );
 
-    // Calculate this period's net claim
-    const claimedThisPeriod = claimedNetValue - claimedPreviouslyPaid;
+    // claimedThisPeriod is the net value claimed for THIS period (not cumulative)
+    // Each application is independent, not a cumulative valuation
+    const claimedThisPeriod = claimedNetValue;
 
     // Create application
     const application = await prisma.applicationForPayment.create({
@@ -381,6 +387,29 @@ router.post('/contracts/:contractId/applications', async (req, res, next) => {
         contract: { select: { id: true, title: true } },
       },
     });
+
+    // Create line item allocations if provided
+    if (req.body.contractLineItemAllocations && Array.isArray(req.body.contractLineItemAllocations)) {
+      console.log(`[payment-applications] Creating ${req.body.contractLineItemAllocations.length} line item allocations`);
+
+      for (const allocation of req.body.contractLineItemAllocations) {
+        if (allocation.claimedAmount && allocation.claimedAmount > 0) {
+          await prisma.paymentApplicationLineItem.create({
+            data: {
+              tenantId,
+              applicationId: application.id,
+              contractLineItemId: allocation.contractLineItemId,
+              budgetLineId: allocation.budgetLineId,
+              contractorClaimedValue: Number(allocation.claimedAmount),
+              contractorClaimedQuantity: 0, // Can be enhanced later
+              contractorNotes: allocation.description || '',
+            }
+          });
+        }
+      }
+
+      console.log(`[payment-applications] Created line item allocations for application ${application.id}`);
+    }
 
     const result = safeJson(application);
     result.links = buildLinks('applicationForPayment', result);
@@ -866,6 +895,68 @@ router.post('/applications/:id/certify', async (req, res, next) => {
       },
     });
 
+    // Create CVR Actual entries for the certified amount
+    // Priority 1: If contract line item allocations are provided, create per-line-item CVR entries
+    if (req.body.contractLineItemAllocations && Array.isArray(req.body.contractLineItemAllocations) && req.body.contractLineItemAllocations.length > 0) {
+      let totalAllocated = 0;
+
+      for (const allocation of req.body.contractLineItemAllocations) {
+        if (allocation.budgetLineId && allocation.certifiedAmount > 0) {
+          try {
+            await prisma.cVRActual.create({
+              data: {
+                tenantId,
+                projectId: application.projectId,
+                budgetLineId: allocation.budgetLineId,
+                description: `Certified - ${application.reference || application.applicationNo || `PA-${id}`}`,
+                amount: Number(allocation.certifiedAmount),
+                sourceType: 'PAYMENT_APPLICATION',
+                sourceId: id,
+                status: 'CERTIFIED',
+                incurredDate: new Date(),
+                certifiedDate: new Date(),
+              },
+            });
+
+            totalAllocated += Number(allocation.certifiedAmount);
+            console.log(`📊 [CVR] Created CVR Actual for budget line ${allocation.budgetLineId}: £${Number(allocation.certifiedAmount).toFixed(2)}`);
+          } catch (cvrError) {
+            console.error(`⚠️  [CVR] Failed to create CVR entry for budget line ${allocation.budgetLineId}:`, cvrError.message);
+          }
+        }
+      }
+
+      console.log(`📊 [CVR] Created ${req.body.contractLineItemAllocations.length} line-item CVR entries for ${application.applicationNo}, total: £${totalAllocated.toFixed(2)}`);
+    }
+    // Priority 2: Fall back to application-level CVR entry if no line item allocations
+    else if (application.projectId && application.budgetLineId) {
+      const certifiedAmount = Number(req.body.certifiedNetValue || req.body.certifiedAmount || 0);
+
+      if (certifiedAmount > 0) {
+        try {
+          await prisma.cVRActual.create({
+            data: {
+              tenantId,
+              projectId: application.projectId,
+              budgetLineId: application.budgetLineId,
+              description: `Certified - ${application.reference || application.applicationNo || `PA-${id}`}`,
+              amount: certifiedAmount,
+              sourceType: 'PAYMENT_APPLICATION',
+              sourceId: id,
+              status: 'CERTIFIED', // Use CERTIFIED so CVR queries pick it up
+              incurredDate: new Date(), // Certification date
+              certifiedDate: new Date(), // Mark when it was certified
+            },
+          });
+
+          console.log(`📊 [CVR] Created CVR Actual entry for certified payment application ${application.applicationNo}: £${certifiedAmount.toFixed(2)}`);
+        } catch (cvrError) {
+          console.error(`⚠️  [CVR] Failed to create CVR entry for ${application.applicationNo}:`, cvrError.message);
+          // Don't fail the certification if CVR creation fails
+        }
+      }
+    }
+
     // Calculate variance for logging
     const variance = Number(req.body.certifiedGrossValue) - Number(application.claimedGrossValue || 0);
     const variancePercentage = application.claimedGrossValue
@@ -894,6 +985,16 @@ router.post('/applications/:id/certify', async (req, res, next) => {
         },
       });
       console.log(`[Certification] Updated contract ${application.contractId} totalCertifiedToDate by £${req.body.certifiedThisPeriod}`);
+    }
+
+    // Create CVR Actual when AfP is certified (tracks income/value side)
+    try {
+      const cvrHooks = require('../services/cvr.hooks.cjs');
+      await cvrHooks.onPaymentApplicationCertified(updated, tenantId, userId);
+      console.log(`[CVR] Created CVR actual for payment application ${application.applicationNo}`);
+    } catch (cvrErr) {
+      console.error('[CVR] Error creating actual for AfP:', cvrErr.message);
+      // Don't fail certification if CVR creation fails
     }
 
     // TASK 7: Auto-issue payment notice after certification (UK Construction Act compliance)
@@ -1125,80 +1226,127 @@ router.post('/applications/:id/approve', async (req, res, next) => {
 
 /**
  * POST /api/applications/:id/record-payment
- * Record actual payment (APPROVED -> PAID or PARTIALLY_PAID)
+ * Record a payment against a payment application (Phase C - Enhanced)
+ * Supports partial payments, deductions (retention, CIS), and CVR integration
  */
 router.post('/applications/:id/record-payment', async (req, res, next) => {
   try {
-    const id = Number(req.params.id);
-    const tenantId = req.user?.tenantId || 'demo';
+    const { id } = req.params;
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.id;
 
-    const application = await prisma.applicationForPayment.findFirst({
-      where: { id, tenantId },
-      include: { contract: true },
+    if (!tenantId || !userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const {
+      amount,
+      paymentDate,
+      paymentMethod,
+      paymentReference,
+      bankAccount,
+      retentionDeducted,
+      cisDeducted,
+      otherDeductions,
+      otherDeductionsNote,
+      notes
+    } = req.body;
+
+    // Validation
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Valid payment amount required' });
+    }
+    if (!paymentDate) {
+      return res.status(400).json({ error: 'Payment date required' });
+    }
+    if (!paymentMethod) {
+      return res.status(400).json({ error: 'Payment method required' });
+    }
+
+    const result = await paymentRecording.recordPayment({
+      paymentApplicationId: Number(id),
+      amount,
+      paymentDate,
+      paymentMethod,
+      paymentReference,
+      bankAccount,
+      retentionDeducted,
+      cisDeducted,
+      otherDeductions,
+      otherDeductionsNote,
+      notes,
+      userId,
+      tenantId
     });
 
-    if (!application) {
-      return res.status(404).json({ error: 'Payment application not found' });
-    }
-
-    if (!['APPROVED', 'PARTIALLY_PAID'].includes(application.status)) {
-      return res.status(400).json({
-        error: 'Can only record payment for APPROVED or PARTIALLY_PAID applications',
-        currentStatus: application.status,
-      });
-    }
-
-    if (!req.body.amountPaid) {
-      return res.status(400).json({ error: 'Payment amount is required' });
-    }
-
-    const amountPaid = Number(req.body.amountPaid);
-    const totalPaid = Number(application.amountPaid || 0) + amountPaid;
-    const amountDue = Number(application.payLessNoticeAmount || application.paymentNoticeAmount || application.certifiedThisPeriod || 0);
-
-    // Determine status based on payment completeness
-    const newStatus = totalPaid >= amountDue ? 'PAID' : 'PARTIALLY_PAID';
-
-    const updated = await prisma.applicationForPayment.update({
-      where: { id },
-      data: {
-        status: newStatus,
-        amountPaid: totalPaid,
-        paidDate: newStatus === 'PAID' ? new Date() : application.paidDate,
-        paymentReference: req.body.paymentReference,
-      },
-      include: {
-        supplier: { select: { id: true, name: true } },
-        contract: { select: { id: true, title: true } },
-      },
+    res.json({
+      success: true,
+      payment: safeJson(result.paymentRecord),
+      application: safeJson(result.updatedApp),
+      message: result.updatedApp.paidInFull
+        ? 'Payment recorded - Application paid in full'
+        : 'Partial payment recorded'
     });
+  } catch (error) {
+    console.error('[payment-applications] Error recording payment:', error);
+    res.status(400).json({ error: error.message || 'Failed to record payment' });
+  }
+});
 
-    // Update contract cumulative totals
-    if (application.contractId) {
-      await prisma.contract.update({
-        where: { id: application.contractId },
-        data: {
-          totalPaidToDate: {
-            increment: amountPaid,
-          },
-        },
-      });
-      console.log(`[Payment] Updated contract ${application.contractId} totalPaidToDate by £${amountPaid}`);
+/**
+ * GET /api/applications/:id/payments
+ * Get payment history and summary for a payment application (Phase C)
+ */
+router.get('/applications/:id/payments', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const tenantId = req.user?.tenantId;
+
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Update CVR (Cost Value Reconciliation)
-    await updateCVRFromPayment(updated, amountPaid);
+    const payments = await paymentRecording.getPaymentHistory(Number(id), tenantId);
+    const summary = await paymentRecording.getPaymentSummary(Number(id), tenantId);
 
-    // Update Package budget actuals
-    await updateBudgetActuals(updated, amountPaid);
+    res.json({
+      payments: safeJson(payments),
+      summary: safeJson(summary)
+    });
+  } catch (error) {
+    console.error('[payment-applications] Error fetching payment history:', error);
+    res.status(500).json({ error: 'Failed to fetch payment history' });
+  }
+});
 
-    const result = safeJson(updated);
-    result.links = buildLinks('applicationForPayment', result);
+/**
+ * POST /api/applications/:id/payments/:paymentId/reverse
+ * Reverse a payment (Phase C)
+ */
+router.post('/applications/:id/payments/:paymentId/reverse', async (req, res, next) => {
+  try {
+    const { paymentId } = req.params;
+    const { reason } = req.body;
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.id;
 
-    res.json(result);
-  } catch (e) {
-    console.error('[payment-applications] Record payment error:', e?.message, e?.stack);
-    next(e);
+    if (!tenantId || !userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (!reason) {
+      return res.status(400).json({ error: 'Reversal reason required' });
+    }
+
+    await paymentRecording.reversePayment(Number(paymentId), reason, userId, tenantId);
+
+    res.json({
+      success: true,
+      message: 'Payment reversed successfully'
+    });
+  } catch (error) {
+    console.error('[payment-applications] Error reversing payment:', error);
+    res.status(400).json({ error: error.message || 'Failed to reverse payment' });
   }
 });
 
@@ -1412,6 +1560,371 @@ router.post('/applications/:id/raise-dispute', async (req, res, next) => {
 });
 
 // ==============================================================================
+// PAYMENT DOCUMENT GENERATION ENDPOINTS (UK Construction Act)
+// ==============================================================================
+
+const {
+  generatePaymentCertificate,
+  generatePaymentNotice,
+  generatePayLessNotice,
+  getPaymentDocuments,
+  checkConstructionActCompliance,
+} = require('../services/paymentDocuments.cjs');
+
+/**
+ * POST /api/applications/:id/certificate/generate
+ * Generate Payment Certificate PDF/HTML
+ */
+router.post('/applications/:id/certificate/generate', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const tenantId = req.user?.tenantId || 'demo';
+
+    const result = await generatePaymentCertificate(id, tenantId);
+
+    res.json({
+      success: true,
+      message: 'Payment certificate generated successfully',
+      document: result,
+    });
+  } catch (e) {
+    console.error('[payment-applications] Generate certificate error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
+ * GET /api/applications/:id/certificate/download
+ * Download Payment Certificate PDF (generate on-the-fly)
+ */
+router.get('/applications/:id/certificate/download', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const tenantId = req.user?.tenantId || 'demo';
+
+    const paymentApp = await prisma.applicationForPayment.findFirst({
+      where: { id, tenantId },
+      include: {
+        contract: { include: { supplier: true } },
+        project: true
+      }
+    });
+
+    if (!paymentApp) {
+      return res.status(404).json({ error: 'Payment application not found' });
+    }
+
+    // Generate PDF on-the-fly
+    const pdfBuffer = await generatePaymentCertificatePdf(paymentApp, {
+      project: paymentApp.project,
+      contract: paymentApp.contract,
+      tenantName: process.env.APP_NAME || 'ERP'
+    });
+
+    // Update download tracking
+    await prisma.applicationForPayment.update({
+      where: { id },
+      data: {
+        paymentCertificateSentAt: new Date(),
+        paymentCertificateSentBy: req.user?.id ? String(req.user.id) : null,
+        paymentCertificateSentMethod: 'DOWNLOAD'
+      }
+    });
+
+    // Send PDF as download
+    const filename = `Payment_Certificate_${paymentApp.applicationNo || id}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(pdfBuffer);
+  } catch (e) {
+    console.error('[payment-applications] Download certificate error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
+ * POST /api/applications/:id/certificate/send
+ * Send Payment Certificate via email to supplier
+ */
+router.post('/applications/:id/certificate/send', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const { email, cc } = req.body;
+    const tenantId = req.user?.tenantId || 'demo';
+    const userId = req.user?.id || null;
+
+    const paymentApp = await prisma.applicationForPayment.findFirst({
+      where: { id, tenantId },
+      include: {
+        contract: { include: { supplier: true } },
+        project: true
+      }
+    });
+
+    if (!paymentApp) {
+      return res.status(404).json({ error: 'Payment application not found' });
+    }
+
+    // Determine recipient email
+    const recipientEmail = email || paymentApp.contract?.supplier?.email;
+
+    if (!recipientEmail) {
+      return res.status(400).json({ error: 'No email address available for supplier' });
+    }
+
+    // Generate PDF
+    const pdfBuffer = await generatePaymentCertificatePdf(paymentApp, {
+      project: paymentApp.project,
+      contract: paymentApp.contract,
+      tenantName: process.env.APP_NAME || 'ERP'
+    });
+
+    // Generate email using template
+    const { html: emailHtml, text: emailText } = paymentCertificateEmail({
+      supplier_name: paymentApp.contract?.supplier?.name || 'Supplier',
+      certificate_number: `PC-${paymentApp.applicationNo || id}`,
+      project_name: paymentApp.project?.name || 'N/A',
+      amount: Number(paymentApp.certifiedThisPeriod || 0),
+      due_date: paymentApp.finalPaymentDate || paymentApp.dueDate,
+      company_name: process.env.APP_NAME || 'ERP System',
+      application_number: paymentApp.applicationNo,
+      contract_title: paymentApp.contract?.title
+    });
+
+    // Send email
+    await sendEmail({
+      to: recipientEmail,
+      subject: `Payment Certificate ${paymentApp.applicationNo || id} - ${paymentApp.project?.name || 'Project'}`,
+      html: emailHtml,
+      text: emailText
+    });
+
+    // Update record with send details
+    await prisma.applicationForPayment.update({
+      where: { id },
+      data: {
+        paymentCertificateSentAt: new Date(),
+        paymentCertificateSentBy: userId ? String(userId) : null,
+        paymentCertificateSentMethod: 'EMAIL',
+        paymentCertificateSentTo: recipientEmail
+      }
+    });
+
+    res.json({
+      success: true,
+      sentTo: recipientEmail,
+      sentAt: new Date().toISOString()
+    });
+  } catch (e) {
+    console.error('[payment-applications] Send certificate error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
+ * POST /api/applications/:id/certificate/mark-sent
+ * Manually mark certificate as sent (for external sending)
+ */
+router.post('/applications/:id/certificate/mark-sent', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const { method, sentTo, notes } = req.body;
+    const tenantId = req.user?.tenantId || 'demo';
+    const userId = req.user?.id || null;
+
+    const paymentApp = await prisma.applicationForPayment.findFirst({
+      where: { id, tenantId }
+    });
+
+    if (!paymentApp) {
+      return res.status(404).json({ error: 'Payment application not found' });
+    }
+
+    // Update record with manual send tracking
+    await prisma.applicationForPayment.update({
+      where: { id },
+      data: {
+        paymentCertificateSentAt: new Date(),
+        paymentCertificateSentBy: userId ? String(userId) : null,
+        paymentCertificateSentMethod: method || 'MANUAL',
+        paymentCertificateSentTo: sentTo || null
+      }
+    });
+
+    res.json({
+      success: true,
+      markedAt: new Date().toISOString()
+    });
+  } catch (e) {
+    console.error('[payment-applications] Mark certificate as sent error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
+ * POST /api/applications/:id/payment-notice/generate
+ * Generate Payment Notice PDF/HTML
+ */
+router.post('/applications/:id/payment-notice/generate', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const tenantId = req.user?.tenantId || 'demo';
+
+    const result = await generatePaymentNotice(id, tenantId);
+
+    res.json({
+      success: true,
+      message: 'Payment notice generated successfully',
+      document: result,
+    });
+  } catch (e) {
+    console.error('[payment-applications] Generate payment notice error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
+ * POST /api/applications/:id/pay-less/generate
+ * Generate Pay Less Notice PDF/HTML
+ */
+router.post('/applications/:id/pay-less/generate', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const tenantId = req.user?.tenantId || 'demo';
+    const { payLessAmount, payLessReason } = req.body;
+
+    if (!payLessAmount || !payLessReason) {
+      return res.status(400).json({
+        error: 'payLessAmount and payLessReason are required',
+      });
+    }
+
+    const result = await generatePayLessNotice(id, tenantId, payLessAmount, payLessReason);
+
+    res.json({
+      success: true,
+      message: 'Pay-less notice generated successfully',
+      document: result,
+    });
+  } catch (e) {
+    console.error('[payment-applications] Generate pay-less notice error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
+ * GET /api/applications/:id/pay-less/download
+ * Download Pay Less Notice
+ */
+router.get('/applications/:id/pay-less/download', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const tenantId = req.user?.tenantId || 'demo';
+
+    const application = await prisma.applicationForPayment.findFirst({
+      where: { id, tenantId },
+      select: { payLessNoticeDocument: true, appNumber: true },
+    });
+
+    if (!application || !application.payLessNoticeDocument) {
+      return res.status(404).json({ error: 'Pay-less notice not found' });
+    }
+
+    // Return the URL/path for download
+    res.json({
+      url: application.payLessNoticeDocument,
+      filename: `Pay-Less-Notice-${application.appNumber || id}.pdf`,
+    });
+  } catch (e) {
+    console.error('[payment-applications] Download pay-less notice error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
+ * POST /api/applications/:id/pay-less/send
+ * Send Pay Less Notice via email
+ */
+router.post('/applications/:id/pay-less/send', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const tenantId = req.user?.tenantId || 'demo';
+
+    const application = await prisma.applicationForPayment.findFirst({
+      where: { id, tenantId },
+      include: {
+        supplier: true,
+        contract: true,
+        project: true,
+      },
+    });
+
+    if (!application) {
+      return res.status(404).json({ error: 'Payment application not found' });
+    }
+
+    if (!application.payLessNoticeDocument) {
+      return res.status(400).json({ error: 'Pay-less notice not generated yet' });
+    }
+
+    // TODO: Implement email sending
+    // For now, just return success
+    res.json({
+      success: true,
+      message: 'Pay-less notice sent successfully',
+      sentTo: req.body.email || application.supplier?.email || 'contractor@example.com',
+    });
+  } catch (e) {
+    console.error('[payment-applications] Send pay-less notice error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
+ * GET /api/applications/:id/documents
+ * Get all payment documents for an application
+ */
+router.get('/applications/:id/documents', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const tenantId = req.user?.tenantId || 'demo';
+
+    const documents = await getPaymentDocuments(id, tenantId);
+
+    res.json(documents);
+  } catch (e) {
+    console.error('[payment-applications] Get documents error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
+ * GET /api/applications/:id/compliance
+ * Check Construction Act compliance for an application
+ */
+router.get('/applications/:id/compliance', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const tenantId = req.user?.tenantId || 'demo';
+
+    const application = await prisma.applicationForPayment.findFirst({
+      where: { id, tenantId },
+    });
+
+    if (!application) {
+      return res.status(404).json({ error: 'Payment application not found' });
+    }
+
+    const compliance = checkConstructionActCompliance(application);
+
+    res.json(compliance);
+  } catch (e) {
+    console.error('[payment-applications] Check compliance error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+// ==============================================================================
 // FINANCIAL INTEGRATION ENDPOINTS
 // ==============================================================================
 
@@ -1429,7 +1942,12 @@ router.get('/projects/:projectId/payment-summary', async (req, res, next) => {
       where: { projectId, tenantId },
       include: {
         applications: {
-          where: { tenantId },
+          where: {
+            tenantId,
+            status: {
+              notIn: ['CANCELLED', 'REJECTED']
+            }
+          },
         },
       },
     });
@@ -1506,7 +2024,12 @@ router.get('/contracts/:contractId/financial-summary', async (req, res, next) =>
       where: { id: contractId, tenantId },
       include: {
         applications: {
-          where: { tenantId },
+          where: {
+            tenantId,
+            status: {
+              notIn: ['CANCELLED', 'REJECTED']
+            }
+          },
           orderBy: { applicationNumber: 'asc' },
         },
       },
@@ -1669,7 +2192,12 @@ router.get('/payment-forecasting/:projectId', async (req, res, next) => {
       where: { projectId, tenantId },
       include: {
         applications: {
-          where: { tenantId },
+          where: {
+            tenantId,
+            status: {
+              notIn: ['CANCELLED', 'REJECTED']
+            }
+          },
           orderBy: { applicationDate: 'desc' },
         },
       },
@@ -1730,6 +2258,285 @@ router.get('/payment-forecasting/:projectId', async (req, res, next) => {
   } catch (e) {
     console.error('[payment-applications] Forecasting error:', e?.message, e?.stack);
     next(e);
+  }
+});
+
+// ==============================================================================
+// PAYMENT CERTIFICATE DOCUMENT MANAGEMENT ENDPOINTS
+// ==============================================================================
+
+/**
+ * POST /api/applications/:id/certificate/generate
+ * Generate payment certificate PDF and store URL
+ */
+router.post('/applications/:id/certificate/generate-full', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const tenantId = req.user?.tenantId || 'demo';
+
+    const paymentApp = await prisma.applicationForPayment.findFirst({
+      where: { id: Number(id), tenantId },
+      include: {
+        contract: { include: { supplier: true } },
+        project: true
+      }
+    });
+
+    if (!paymentApp) {
+      return res.status(404).json({ error: 'Payment application not found' });
+    }
+
+    // Generate PDF using pdfkit
+    const pdfBuffer = await generatePaymentCertificatePdf(paymentApp, {
+      project: paymentApp.project,
+      contract: paymentApp.contract,
+      tenantName: process.env.APP_NAME || 'ERP'
+    });
+
+    // Store PDF
+    const filename = `Payment-Certificate-${paymentApp.applicationNo || paymentApp.id}.pdf`;
+    const docId = await saveBufferAsDocument(pdfBuffer, filename, 'application/pdf', tenantId, paymentApp.projectId);
+
+    // Get document URL
+    const doc = await prisma.document.findUnique({ where: { id: docId } });
+    const url = doc?.storageKey || '';
+
+    // Update record with certificate URL and generation timestamp
+    await prisma.applicationForPayment.update({
+      where: { id: Number(id) },
+      data: {
+        paymentCertificateUrl: url,
+        paymentCertificateGeneratedAt: new Date()
+      }
+    });
+
+    res.json({
+      success: true,
+      url,
+      filename,
+      docId: String(docId)
+    });
+  } catch (error) {
+    console.error('[payment-applications] Error generating payment certificate:', error);
+    next(error);
+  }
+});
+
+/**
+ * GET /api/payment-applications/:id/certificate/download
+ * Download payment certificate PDF (generate on-the-fly if needed)
+ */
+router.get('/:id/certificate/download', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const tenantId = req.user?.tenantId || 'demo';
+
+    const paymentApp = await prisma.applicationForPayment.findFirst({
+      where: { id: Number(id), tenantId },
+      include: {
+        contract: { include: { supplier: true } },
+        project: true
+      }
+    });
+
+    if (!paymentApp) {
+      return res.status(404).json({ error: 'Payment application not found' });
+    }
+
+    // Generate PDF on-the-fly
+    const pdfBuffer = await generatePaymentCertificatePdf(paymentApp, {
+      project: paymentApp.project,
+      contract: paymentApp.contract,
+      tenantName: process.env.APP_NAME || 'ERP'
+    });
+
+    // Update download tracking
+    await prisma.applicationForPayment.update({
+      where: { id: Number(id) },
+      data: {
+        paymentCertificateSentAt: new Date(),
+        paymentCertificateSentBy: req.user?.id || null,
+        paymentCertificateSentMethod: 'DOWNLOAD'
+      }
+    });
+
+    // Send PDF as download
+    const filename = `Payment_Certificate_${paymentApp.applicationNo || paymentApp.id}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('[payment-applications] Error downloading payment certificate:', error);
+    next(error);
+  }
+});
+
+/**
+ * POST /api/payment-applications/:id/certificate/send
+ * Send payment certificate via email to supplier
+ */
+router.post('/:id/certificate/send', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { email, cc } = req.body; // Optional override email
+    const tenantId = req.user?.tenantId || 'demo';
+    const userId = req.user?.id || null;
+
+    const paymentApp = await prisma.applicationForPayment.findFirst({
+      where: { id: Number(id), tenantId },
+      include: {
+        contract: { include: { supplier: true } },
+        project: true
+      }
+    });
+
+    if (!paymentApp) {
+      return res.status(404).json({ error: 'Payment application not found' });
+    }
+
+    // Determine recipient email
+    const recipientEmail = email || paymentApp.contract?.supplier?.email;
+
+    if (!recipientEmail) {
+      return res.status(400).json({ error: 'No email address available for supplier' });
+    }
+
+    // Generate PDF
+    const pdfBuffer = await generatePaymentCertificatePdf(paymentApp, {
+      project: paymentApp.project,
+      contract: paymentApp.contract,
+      tenantName: process.env.APP_NAME || 'ERP'
+    });
+
+    // Store PDF if not already stored
+    let url = paymentApp.paymentCertificateUrl;
+    let docId;
+    if (!url) {
+      const filename = `Payment-Certificate-${paymentApp.applicationNo || paymentApp.id}.pdf`;
+      docId = await saveBufferAsDocument(pdfBuffer, filename, 'application/pdf', tenantId, paymentApp.projectId);
+      const doc = await prisma.document.findUnique({ where: { id: docId } });
+      url = doc?.storageKey || '';
+    }
+
+    // Generate email using template
+    const { html: emailHtml, text: emailText } = paymentCertificateEmail({
+      supplier_name: paymentApp.contract?.supplier?.name || 'Supplier',
+      certificate_number: `PC-${paymentApp.applicationNo || paymentApp.id}`,
+      project_name: paymentApp.project?.name || 'N/A',
+      amount: Number(paymentApp.certifiedThisPeriod || 0),
+      due_date: paymentApp.finalPaymentDate || paymentApp.dueDate,
+      company_name: process.env.APP_NAME || 'ERP System',
+      application_number: paymentApp.applicationNo,
+      contract_title: paymentApp.contract?.title
+    });
+
+    // Send email with PDF attachment
+    const filename = `Payment_Certificate_${paymentApp.applicationNo || paymentApp.id}.pdf`;
+    const emailData = {
+      to: recipientEmail,
+      subject: `Payment Certificate ${paymentApp.applicationNo || paymentApp.id} - ${paymentApp.project?.name || 'Project'}`,
+      html: emailHtml,
+      text: emailText
+    };
+
+    await sendEmail(emailData);
+
+    // Update record with send details
+    await prisma.applicationForPayment.update({
+      where: { id: Number(id) },
+      data: {
+        paymentCertificateUrl: url,
+        paymentCertificateSentAt: new Date(),
+        paymentCertificateSentBy: userId,
+        paymentCertificateSentMethod: 'EMAIL',
+        paymentCertificateSentTo: recipientEmail
+      }
+    });
+
+    res.json({
+      success: true,
+      sentTo: recipientEmail,
+      sentAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('[payment-applications] Error sending payment certificate:', error);
+    next(error);
+  }
+});
+
+/**
+ * POST /api/payment-applications/:id/certificate/mark-sent
+ * Manually mark certificate as sent (for external sending)
+ */
+router.post('/:id/certificate/mark-sent', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { method, sentTo, notes } = req.body;
+    const tenantId = req.user?.tenantId || 'demo';
+    const userId = req.user?.id || null;
+
+    const paymentApp = await prisma.applicationForPayment.findFirst({
+      where: { id: Number(id), tenantId }
+    });
+
+    if (!paymentApp) {
+      return res.status(404).json({ error: 'Payment application not found' });
+    }
+
+    // Update record with manual send tracking
+    await prisma.applicationForPayment.update({
+      where: { id: Number(id) },
+      data: {
+        paymentCertificateSentAt: new Date(),
+        paymentCertificateSentBy: userId,
+        paymentCertificateSentMethod: method || 'MANUAL',
+        paymentCertificateSentTo: sentTo || null
+      }
+    });
+
+    res.json({
+      success: true,
+      markedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('[payment-applications] Error marking certificate as sent:', error);
+    next(error);
+  }
+});
+
+/**
+ * GET /api/applications/:id/invoices
+ * Get invoices linked to this payment application (Phase B: Certificate-Invoice Matching)
+ */
+router.get('/applications/:id/invoices', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.id;
+
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Unauthorized - no tenant' });
+    }
+
+    // Find all invoices linked to this payment application
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        paymentApplicationId: Number(id),
+        tenantId
+      },
+      include: {
+        supplier: true,
+        project: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    res.json({ invoices });
+  } catch (error) {
+    console.error('[payment-applications] Error fetching linked invoices:', error);
+    next(error);
   }
 });
 

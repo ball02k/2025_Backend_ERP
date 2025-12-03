@@ -169,6 +169,78 @@ module.exports = function purchaseOrdersRouter(prisma) {
   });
 
   /**
+   * PUT /api/purchase-orders/:id/status
+   * Update PO status manually
+   */
+  router.put('/:id/status', async (req, res, next) => {
+    try {
+      const tenantId = getTenantId(req);
+      const userId = getUserId(req);
+      const id = Number(req.params.id);
+      const { status, notes } = req.body;
+
+      const po = await poService.updatePOStatus(id, tenantId, status, notes, userId);
+      res.json(po);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/purchase-orders/:id/send
+   * Send PO to supplier (EMAIL or DOWNLOAD)
+   */
+  router.post('/:id/send', async (req, res, next) => {
+    try {
+      const tenantId = getTenantId(req);
+      const userId = getUserId(req);
+      const id = Number(req.params.id);
+      const { method, email } = req.body;
+
+      const result = await poService.sendPurchaseOrder(id, tenantId, method, email, userId);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * GET /api/purchase-orders/:id/pdf
+   * Download PO as PDF (without changing status)
+   */
+  router.get('/:id/pdf', async (req, res, next) => {
+    try {
+      const tenantId = getTenantId(req);
+      const id = Number(req.params.id);
+
+      const pdfBuffer = await poService.generatePOPdf(id, tenantId);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="PO-${id}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/purchase-orders/:id/acknowledge
+   * Mark PO as acknowledged by supplier
+   */
+  router.post('/:id/acknowledge', async (req, res, next) => {
+    try {
+      const tenantId = getTenantId(req);
+      const userId = getUserId(req);
+      const id = Number(req.params.id);
+
+      const po = await poService.acknowledgePurchaseOrder(id, tenantId, userId);
+      res.json(po);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
    * DELETE /api/purchase-orders/:id
    * Delete purchase order (and CVR commitment if exists)
    */

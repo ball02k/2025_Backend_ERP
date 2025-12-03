@@ -1027,17 +1027,17 @@ model ProjectMembership {
 }
 
 model PurchaseOrder {
-  id            Int         @id @default(autoincrement())
-  tenantId      String      @default("demo")
+  id            Int       @id @default(autoincrement())
+  tenantId      String    @default("demo")
   projectId     Int
   code          String
   supplier      String
   supplierId    Int?
   contractId    Int?
   budgetLineId  Int? // CVR: Link to budget line
-  status        String      @default("DRAFT") // "DRAFT" | "SUBMITTED" | "APPROVED" | "ISSUED" | "INVOICED" | "PAID" | "CANCELLED"
-  orderDate     DateTime    @default(now())
-  total         Decimal     @default(0)
+  status        String    @default("DRAFT") // "DRAFT" | "SUBMITTED" | "APPROVED" | "ISSUED" | "SENT" | "ACKNOWLEDGED" | "GOODS_RECEIVED" | "INVOICE_RECEIVED" | "PARTIALLY_PAID" | "PAID" | "CANCELLED"
+  orderDate     DateTime  @default(now())
+  total         Decimal   @default(0)
   // CVR: Enhanced workflow tracking
   submittedDate DateTime?
   approvedDate  DateTime?
@@ -1046,20 +1046,30 @@ model PurchaseOrder {
   cancelledDate DateTime?
   cancelReason  String?
 
+  // Supplier communication tracking
+  sentAt        DateTime?
+  sentBy        String?
+  sentMethod    String?   // "EMAIL" | "DOWNLOAD" | "MANUAL"
+  acknowledgedAt DateTime?
+
+  // Payment tracking
+  paidAt        DateTime?
+  paidAmount    Decimal?  @default(0)
+
   // NEW: PO Strategy & Milestone Support
-  poType               String?   @default("FULL_CONTRACT") // "FULL_CONTRACT" | "MILESTONE" | "CALL_OFF"
-  milestoneId          Int?
-  milestoneNumber      Int?      // Which milestone (1, 2, 3...)
+  poType          String? @default("FULL_CONTRACT") // "FULL_CONTRACT" | "MILESTONE" | "CALL_OFF"
+  milestoneId     Int?
+  milestoneNumber Int? // Which milestone (1, 2, 3...)
 
   // NEW: Package linking
-  packageId            Int?
+  packageId Int?
 
   // NEW: Payment Application linking
   paymentApplicationId Int?
 
   // NEW: PDF tracking
-  pdfUrl               String?   // Link to generated PDF
-  pdfGeneratedAt       DateTime?
+  pdfUrl         String? // Link to generated PDF
+  pdfGeneratedAt DateTime?
 
   // NEW: Delivery tracking
   expectedDeliveryDate DateTime?
@@ -1067,19 +1077,19 @@ model PurchaseOrder {
   deliveryStatus       String?   @default("PENDING") // "PENDING" | "PARTIAL" | "COMPLETE"
 
   // NEW: Enhanced notes
-  internalNotes        String?   @db.Text
-  supplierNotes        String?   @db.Text
+  internalNotes String? @db.Text
+  supplierNotes String? @db.Text
 
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  project       Project     @relation(fields: [projectId], references: [id])
-  contract      Contract?   @relation(fields: [contractId], references: [id])
-  budgetLine    BudgetLine? @relation(fields: [budgetLineId], references: [id])
-  package       Package?    @relation(fields: [packageId], references: [id])
-  milestone     PackageMilestone? @relation(fields: [milestoneId], references: [id])
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  project            Project                @relation(fields: [projectId], references: [id])
+  contract           Contract?              @relation(fields: [contractId], references: [id])
+  budgetLine         BudgetLine?            @relation(fields: [budgetLineId], references: [id])
+  package            Package?               @relation(fields: [packageId], references: [id])
+  milestone          PackageMilestone?      @relation(fields: [milestoneId], references: [id])
   paymentApplication ApplicationForPayment? @relation(fields: [paymentApplicationId], references: [id])
-  lines         POLine[]
-  deliveries    Delivery[]
+  lines              POLine[]
+  deliveries         Delivery[]
 
   @@unique([tenantId, code])
   @@index([tenantId, projectId, status])
@@ -1562,6 +1572,7 @@ model BudgetLine {
   contractValuations ContractValuation[]    @relation("BudgetLineValuations")
   purchaseOrders     PurchaseOrder[]
   invoices           Invoice[]
+  invoiceLines       InvoiceLine[]
   // Category allocations
   allocations        BudgetLineAllocation[]
 
@@ -1674,20 +1685,27 @@ model Invoice {
   budgetLineId  Int? // CVR: Link to budget line
   budgetLine    BudgetLine? @relation(fields: [budgetLineId], references: [id])
   number        String
+  supplierInvoiceRef String? // Supplier's own reference
   issueDate     DateTime?
   dueDate       DateTime?
   net           Decimal     @default(0)
   vat           Decimal     @default(0)
   gross         Decimal     @default(0)
-  status        String      @default("RECEIVED") // "RECEIVED" | "MATCHED" | "APPROVED" | "PAID" | "DISPUTED" | "CANCELLED"
+  status        String      @default("RECEIVED") // "RECEIVED" | "DRAFT" | "PENDING_REVIEW" | "PENDING_MATCH" | "MATCHED" | "APPROVED" | "PAID" | "DISPUTED" | "CANCELLED"
   // Additive finance fields
   documentId    BigInt?
-  ocrStatus     String?
+  documentUrl   String? // URL to uploaded invoice document
+  documentName  String? // Original filename
+  ocrStatus     String? // PENDING, COMPLETED, FAILED
   ocrResultJson Json?
+  ocrRawText    String?     @db.Text // Raw OCR text
+  ocrConfidence Float? // 0-1 confidence score
   poNumberRef   String?
-  matchStatus   String?
+  matchStatus   String? // UNMATCHED, PARTIAL_MATCH, FULL_MATCH, NO_PO_REQUIRED
+  matchConfidence Float? // 0-1 confidence score
   matchedPoId   Int?
-  source        String?
+  matchedBy     String? // User who confirmed the match
+  source        String? // MANUAL, PDF_OCR, CSV_IMPORT, EMAIL
   // Additive links to tie into budget/contract rollups
   packageId     Int?
   contractId    Int?
@@ -1701,8 +1719,24 @@ model Invoice {
   paidAmount    Decimal?    @db.Decimal(18, 2)
   paymentRef    String? // Bank transfer reference
   disputeReason String?     @db.Text
+  createdBy     String? // User who created/uploaded the invoice
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+
+  // Certificate matching for subcontractor invoices (Phase B)
+  paymentApplicationId Int?
+  paymentApplication   ApplicationForPayment? @relation(fields: [paymentApplicationId], references: [id])
+
+  // Match metadata
+  matchType        String? // "PO" | "CERTIFICATE" | "NONE"
+  matchConfidenceNew Decimal? @db.Decimal(5, 2) // 0-100 percentage (renamed to avoid conflict with matchConfidence Float)
+  matchedAt        DateTime?
+  matchedByUser    String? // User who confirmed the match (renamed to avoid confusion)
+  matchNotes       String? @db.Text
+
+  // For invoices that don't need matching
+  noMatchRequired Boolean @default(false)
+  noMatchReason   String? // "Utility bill", "Professional fees", etc.
 
   @@index([tenantId, projectId, status])
   @@index([tenantId, supplierId])
@@ -1716,21 +1750,29 @@ model Invoice {
 
 /// Finance: Invoice line items (additive)
 model InvoiceLine {
-  id          Int     @id @default(autoincrement())
-  tenantId    String  @default("demo")
-  invoiceId   Int
-  lineNo      Int
-  description String
-  costCode    String?
-  qty         Decimal @default(0)
-  unit        String?
-  rate        Decimal @default(0)
-  vatRatePct  Float?
-  totalExVat  Decimal @default(0)
-  totalVat    Decimal @default(0)
-  totalIncVat Decimal @default(0)
+  id              Int         @id @default(autoincrement())
+  tenantId        String      @default("demo")
+  invoiceId       Int
+  lineNo          Int
+  description     String
+  costCode        String?
+  qty             Decimal     @default(0)
+  unit            String?
+  rate            Decimal     @default(0)
+  vatRatePct      Float?
+  totalExVat      Decimal     @default(0)
+  totalVat        Decimal     @default(0)
+  totalIncVat     Decimal     @default(0)
+  // PO matching
+  poLineItemId    Int? // Matched PO line item
+  matchConfidence Float? // 0-1 confidence score for the match
+  // Budget coding
+  budgetLineId    Int?
+  budgetLine      BudgetLine? @relation(fields: [budgetLineId], references: [id])
 
   @@index([tenantId, invoiceId])
+  @@index([tenantId, poLineItemId])
+  @@index([tenantId, budgetLineId])
 }
 
 /// Finance: Matching records (additive)
@@ -1869,6 +1911,14 @@ model ApplicationForPayment {
   paymentNoticeDocument String? // Formal payment notice
   payLessNoticeDocument String? // If issuing pay-less
 
+  // Payment Certificate tracking
+  paymentCertificateUrl          String? // Payment certificate PDF
+  paymentCertificateGeneratedAt  DateTime? // When certificate was generated
+  paymentCertificateSentAt       DateTime? // When sent to subcontractor
+  paymentCertificateSentBy       String? // User who sent it
+  paymentCertificateSentMethod   String? // "EMAIL" | "MANUAL" | "DOWNLOAD"
+  paymentCertificateSentTo       String? // Email address if sent via email
+
   // Notes & Comments
   contractorNotes String? @db.Text
   qsNotes         String? @db.Text
@@ -1885,22 +1935,31 @@ model ApplicationForPayment {
   approvedAt  DateTime?
 
   // Cancellation Tracking
-  cancelledBy     Int? // User who cancelled
-  cancelledAt     DateTime?
-  cancellationReason String? @db.Text
+  cancelledBy        Int? // User who cancelled
+  cancelledAt        DateTime?
+  cancellationReason String?   @db.Text
 
   // Payment Notice Tracking
-  paymentNoticeSent     Boolean   @default(false)
-  paymentNoticeSentAt   DateTime?
-  paymentNoticeAmount   Decimal?  @db.Decimal(12, 2)
-  paymentNoticeIssuedAt DateTime? // Legacy
+  paymentNoticeSent        Boolean   @default(false)
+  paymentNoticeAmount      Decimal?  @db.Decimal(12, 2)
+  paymentNoticeIssuedAt    DateTime? // Legacy
+  paymentNoticeGeneratedAt DateTime? // When notice was generated
+  paymentNoticeSentAt      DateTime? // When sent to subcontractor
+  paymentNoticeSentBy      String? // User who sent it
+  paymentNoticeSentMethod  String? // "EMAIL" | "MANUAL" | "DOWNLOAD"
+  paymentNoticeSentTo      String? // Email address if sent via email
 
-  payLessNoticeSent     Boolean   @default(false)
-  payLessNoticeSentAt   DateTime?
-  payLessNoticeAmount   Decimal?  @db.Decimal(12, 2)
-  payLessNoticeReason   String?   @db.Text
-  payLessReason         String?   @db.Text // Legacy
-  payLessNoticeIssuedAt DateTime? // Legacy
+  // Pay-Less Notice Tracking
+  payLessNoticeSent        Boolean   @default(false)
+  payLessNoticeAmount      Decimal?  @db.Decimal(12, 2)
+  payLessNoticeReason      String?   @db.Text
+  payLessReason            String?   @db.Text // Legacy
+  payLessNoticeIssuedAt    DateTime? // Legacy
+  payLessNoticeGeneratedAt DateTime? // When notice was generated
+  payLessNoticeSentAt      DateTime? // When sent to subcontractor (overridden from boolean flag)
+  payLessNoticeSentBy      String? // User who sent it
+  payLessNoticeSentMethod  String? // "EMAIL" | "MANUAL" | "DOWNLOAD"
+  payLessNoticeSentTo      String? // Email address if sent via email
 
   // Retention Tracking
   retentionPercentage    Decimal @default(5.0) @db.Decimal(5, 2)
@@ -1957,6 +2016,18 @@ model ApplicationForPayment {
   attachments     AfpAttachment[]
   lineItemDetails PaymentApplicationLineItem[]
   purchaseOrders  PurchaseOrder[]
+  invoices        Invoice[] // Certificate-Invoice matching (Phase B)
+
+  // Invoice tracking (Phase B)
+  invoiceReceivedAt DateTime?
+  invoiceId         Int? // Primary matched invoice
+
+  // Payment tracking (Phase C)
+  payments          PaymentRecord[]
+  totalPaid         Decimal? @db.Decimal(15, 2)
+  paidInFull        Boolean  @default(false)
+  paidAt            DateTime?
+  remainingBalance  Decimal? @db.Decimal(15, 2)
 
   @@unique([tenantId, applicationNo])
   @@index([contractId, applicationNumber])
@@ -2019,6 +2090,46 @@ model PaymentApplicationLineItem {
 
   @@index([tenantId, applicationId])
   @@index([packageId])
+}
+
+// ==============================================================================
+// Payment Records - Track actual payments made (Phase C)
+// ==============================================================================
+model PaymentRecord {
+  id       Int    @id @default(autoincrement())
+  tenantId String
+
+  // Link to payment application
+  paymentApplicationId Int
+  paymentApplication   ApplicationForPayment @relation(fields: [paymentApplicationId], references: [id])
+
+  // Payment details
+  amount           Decimal  @db.Decimal(15, 2)
+  paymentDate      DateTime
+  paymentMethod    String // "BACS", "CHEQUE", "CARD", "CASH", "DIRECT_DEBIT"
+  paymentReference String? // BACS ref, cheque number, transaction ID, etc.
+
+  // Bank details (optional - for audit)
+  bankAccount String? // Which account paid from
+
+  // Deductions applied
+  retentionDeducted   Decimal? @db.Decimal(15, 2)
+  cisDeducted         Decimal? @db.Decimal(15, 2)
+  otherDeductions     Decimal? @db.Decimal(15, 2)
+  otherDeductionsNote String?
+
+  // Status
+  status String @default("COMPLETED") // "PENDING", "COMPLETED", "FAILED", "REVERSED"
+
+  // Audit
+  createdAt DateTime @default(now())
+  createdBy String
+  notes     String?
+
+  @@index([tenantId])
+  @@index([paymentApplicationId])
+  @@index([paymentDate])
+  @@index([status])
 }
 
 // ==============================================================================
@@ -2117,10 +2228,10 @@ model Package {
   createdBy          Int? // User who created the package
 
   // NEW: PO Strategy configuration
-  poStrategy         String?  // "SINGLE_ON_AWARD" | "MILESTONE_BASED" | "CALL_OFF"
+  poStrategy String? // "SINGLE_ON_AWARD" | "MILESTONE_BASED" | "CALL_OFF"
 
   // NEW: Contract Type linking
-  contractTypeId     String?
+  contractTypeId String?
 
   submissions         Submission[]         @relation("PackageSubmissions")
   invites             TenderInvite[]       @relation("PackageInvites")
@@ -2138,9 +2249,9 @@ model Package {
   packageResponses    PackageResponse[]
 
   // NEW: Contract Type and PO relations
-  contractType        ContractType?        @relation(fields: [contractTypeId], references: [id])
-  purchaseOrders      PurchaseOrder[]
-  milestones          PackageMilestone[]
+  contractType   ContractType?      @relation(fields: [contractTypeId], references: [id])
+  purchaseOrders PurchaseOrder[]
+  milestones     PackageMilestone[]
 
   @@index([projectId])
   @@index([projectId, costCodeId])
@@ -2152,7 +2263,7 @@ model PackageMilestone {
   id              Int       @id @default(autoincrement())
   tenantId        String    @default("demo")
   packageId       Int
-  milestoneNumber Int       // 1, 2, 3, etc.
+  milestoneNumber Int // 1, 2, 3, etc.
   description     String?   @db.Text
   targetValue     Decimal?  @db.Decimal(18, 2)
   targetDate      DateTime?
@@ -2160,17 +2271,17 @@ model PackageMilestone {
   status          String    @default("PENDING") // "PENDING" | "ISSUED" | "COMPLETE"
 
   // Link to optional contract (if milestone is tied to specific contract clause)
-  contractId      Int?
-  contract        Contract? @relation(fields: [contractId], references: [id])
+  contractId Int?
+  contract   Contract? @relation(fields: [contractId], references: [id])
 
   // User who created this milestone
-  createdBy       Int?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdBy Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  package         Package   @relation(fields: [packageId], references: [id])
-  purchaseOrders  PurchaseOrder[]
+  package        Package         @relation(fields: [packageId], references: [id])
+  purchaseOrders PurchaseOrder[]
 
   @@unique([packageId, milestoneNumber, tenantId])
   @@index([packageId])
@@ -2641,27 +2752,27 @@ model Award {
 
 // NEW: Contract Type definitions for standardizing contract terms
 model ContractType {
-  id                  String    @id @default(cuid())
-  tenantId            String    @default("demo")
-  name                String    // "NEC4 ECC Option A", "JCT D&B 2016"
-  framework           String?   // "NEC4" | "JCT" | "FIDIC" | "BESPOKE"
-  category            String?   // "PRICED_CONTRACT" | "TARGET_COST" | "COST_REIMBURSABLE" | "MANAGEMENT"
-  description         String?   @db.Text
+  id          String  @id @default(cuid())
+  tenantId    String  @default("demo")
+  name        String // "NEC4 ECC Option A", "JCT D&B 2016"
+  framework   String? // "NEC4" | "JCT" | "FIDIC" | "BESPOKE"
+  category    String? // "PRICED_CONTRACT" | "TARGET_COST" | "COST_REIMBURSABLE" | "MANAGEMENT"
+  description String? @db.Text
 
   // Payment characteristics
-  paymentBasis        String?   // "LUMP_SUM" | "REMEASUREMENT" | "COST_PLUS" | "MILESTONE"
-  retentionRate       Decimal?  @db.Decimal(5, 2) // e.g. 5.00 for 5%
-  paymentTerms        String?   @db.Text          // "Net 30 days from valuation"
+  paymentBasis  String? // "LUMP_SUM" | "REMEASUREMENT" | "COST_PLUS" | "MILESTONE"
+  retentionRate Decimal? @db.Decimal(5, 2) // e.g. 5.00 for 5%
+  paymentTerms  String?  @db.Text // "Net 30 days from valuation"
 
   // PO Strategy suggestion
-  suggestedPOStrategy String?   // "SINGLE_ON_AWARD" | "MILESTONE_BASED" | "CALL_OFF"
+  suggestedPOStrategy String? // "SINGLE_ON_AWARD" | "MILESTONE_BASED" | "CALL_OFF"
 
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  packages            Package[]
-  contracts           Contract[]
+  packages  Package[]
+  contracts Contract[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -2692,14 +2803,37 @@ model Contract {
   pdfUrl          String?
   tenantId        String?
 
-  // NEW: Contract Type linking
-  contractTypeId  String?
+  // Document source tracking
+  documentSource           String?   @default("NONE") // NONE | GENERATED | UPLOADED_DRAFT | UPLOADED_SIGNED
+  draftDocumentUrl         String? // URL to draft document in Oracle Cloud Storage
+  draftDocumentName        String? // Original filename
+  signedDocumentUrl        String? // URL to signed document
+  signedDocumentName       String? // Original filename
+  signedDocumentUploadedAt DateTime?
+  signedDocumentUploadedBy String?
 
-  rfxId           Int?      @unique
-  awardId         Int?      @unique
-  draftCreatedAt  DateTime?
-  lockedAt        DateTime?
-  sourceMode      String?
+  // OCR tracking (for uploaded signed contracts)
+  ocrStatus        String?   @default("NONE") // NONE | PROCESSING | COMPLETED | FAILED
+  ocrRawText       String?   @db.Text // Full extracted text from PDF
+  ocrExtractedData Json? // Parsed fields: { contractValue: { value, confidence }, ... }
+  ocrConfidence    Float? // Overall confidence score
+  ocrReviewedBy    String? // User ID who confirmed OCR data
+  ocrReviewedAt    DateTime?
+  ocrReviewNotes   String? // Any notes from reviewer
+
+  // Contract lifecycle tracking
+  issuedAt DateTime?
+  issuedBy String?
+  signedBy String?
+
+  // NEW: Contract Type linking
+  contractTypeId String?
+
+  rfxId          Int?      @unique
+  awardId        Int?      @unique
+  draftCreatedAt DateTime?
+  lockedAt       DateTime?
+  sourceMode     String?
 
   // Payment Application Settings (UK Construction Act)
   paymentFrequency    String   @default("MONTHLY") // MONTHLY, MILESTONE, STAGE
@@ -2736,8 +2870,8 @@ model Contract {
   contractValuations ContractValuation[]     @relation("ContractValuations")
 
   // NEW: Contract Type and Milestone relations
-  contractType       ContractType?           @relation(fields: [contractTypeId], references: [id])
-  milestones         PackageMilestone[]
+  contractType ContractType?      @relation(fields: [contractTypeId], references: [id])
+  milestones   PackageMilestone[]
 
   @@index([projectId])
   @@index([supplierId])

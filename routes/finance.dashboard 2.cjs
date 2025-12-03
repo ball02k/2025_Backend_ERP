@@ -72,7 +72,7 @@ router.get('/finance/dashboard-summary', async (req, res) => {
       by: ['status'],
       where: { tenantId },
       _sum: {
-        certifiedNetValue: true,
+        certifiedNetPayable: true,
       },
       _count: true,
     });
@@ -81,7 +81,7 @@ router.get('/finance/dashboard-summary', async (req, res) => {
     const paymentStatusBreakdown = statusBreakdown.map(item => ({
       status: item.status,
       count: item._count,
-      amount: Number(item._sum.certifiedNetValue || 0),
+      amount: Number(item._sum.certifiedNetPayable || 0),
     }));
 
     // Get this month's cash flow
@@ -128,9 +128,9 @@ router.get('/finance/dashboard-summary', async (req, res) => {
     );
 
     // Calculate payment status amounts
-    const readyToPay = statusBreakdown.find(s => s.status === 'APPROVED')?._sum.certifiedNetValue || 0;
-    const awaitingApproval = statusBreakdown.find(s => s.status === 'CERTIFIED')?._sum.certifiedNetValue || 0;
-    const underReview = statusBreakdown.find(s => s.status === 'UNDER_REVIEW')?._sum.certifiedNetValue || 0;
+    const readyToPay = statusBreakdown.find(s => s.status === 'APPROVED')?._sum.certifiedNetPayable || 0;
+    const awaitingApproval = statusBreakdown.find(s => s.status === 'CERTIFIED')?._sum.certifiedNetPayable || 0;
+    const underReview = statusBreakdown.find(s => s.status === 'UNDER_REVIEW')?._sum.certifiedNetPayable || 0;
 
     // Count of active contracts
     const activeContracts = contracts.length;
@@ -193,33 +193,15 @@ router.get('/finance/dashboard-summary', async (req, res) => {
 router.get('/finance/payment-applications', async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const { status, projectId, contractId, packageId, supplierId, search, dateFrom, dateTo } = req.query;
+    const { status, projectId } = req.query;
 
-    // Build where clause - support ALL filters
+    // Build where clause
     const where = { tenantId };
-
     if (status && status !== 'ALL') {
       where.status = status;
     }
     if (projectId && projectId !== 'ALL') {
       where.projectId = Number(projectId);
-    }
-    if (contractId && contractId !== 'ALL') {
-      where.contractId = Number(contractId);
-    }
-    if (packageId && packageId !== 'ALL') {
-      where.packageId = Number(packageId);
-    }
-    if (supplierId && supplierId !== 'ALL') {
-      where.supplierId = Number(supplierId);
-    }
-    if (search) {
-      where.applicationNo = { contains: search };
-    }
-    if (dateFrom || dateTo) {
-      where.periodStart = {};
-      if (dateFrom) where.periodStart.gte = new Date(dateFrom);
-      if (dateTo) where.periodStart.lte = new Date(dateTo);
     }
 
     // Get applications
@@ -234,14 +216,11 @@ router.get('/finance/payment-applications', async (req, res) => {
         },
         contract: {
           select: {
-            id: true,
             contractRef: true,
-            title: true,
           },
         },
         supplier: {
           select: {
-            id: true,
             name: true,
           },
         },
@@ -252,14 +231,9 @@ router.get('/finance/payment-applications', async (req, res) => {
       ],
     });
 
-    // Get summary data - EXCLUDE cancelled and rejected applications
+    // Get summary data
     const allApplications = await prisma.applicationForPayment.findMany({
-      where: {
-        tenantId,
-        status: {
-          notIn: ['CANCELLED', 'REJECTED']
-        }
-      },
+      where: { tenantId },
       select: {
         certifiedThisPeriod: true,
         claimedThisPeriod: true,
@@ -271,7 +245,6 @@ router.get('/finance/payment-applications', async (req, res) => {
     });
 
     const totalCount = allApplications.length;
-    const totalClaimed = allApplications.reduce((sum, a) => sum + Number(a.claimedThisPeriod || 0), 0);
     const totalCertified = allApplications.reduce((sum, a) => sum + Number(a.certifiedThisPeriod || a.claimedThisPeriod || 0), 0);
     const totalPaid = allApplications.reduce((sum, a) => sum + Number(a.amountPaid || 0), 0);
     const awaitingPayment = allApplications
@@ -314,7 +287,6 @@ router.get('/finance/payment-applications', async (req, res) => {
       })),
       summary: {
         totalCount,
-        totalClaimed,
         totalCertified,
         totalPaid,
         awaitingPayment,
@@ -371,6 +343,7 @@ router.get('/finance/payment-applications/export', async (req, res) => {
       include: {
         project: { select: { name: true } },
         contract: { select: { contractRef: true, title: true } },
+        package: { select: { code: true, name: true } },
         supplier: { select: { name: true } },
         certifiedByUser: { select: { name: true, email: true } },
       },
@@ -408,12 +381,12 @@ router.get('/finance/payment-applications/export', async (req, res) => {
 
     // Data rows
     for (const app of applications) {
-      const grossValue = Number(app.certifiedGrossValue || app.claimedGrossValue || 0);
-      const lessPrevious = Number(app.certifiedPreviouslyPaid || app.claimedPreviouslyPaid || 0);
+      const grossValue = Number(app.grossValueThisPeriod || 0);
+      const lessPrevious = Number(app.lessPreviousApplications || 0);
       const thisApplication = grossValue - lessPrevious;
-      const certifiedValue = Number(app.certifiedThisPeriod || app.claimedThisPeriod || 0);
+      const certifiedValue = Number(app.certifiedThisPeriod || 0);
       const retentionPct = Number(app.retentionPercentage || 0);
-      const retentionAmount = Number(app.certifiedRetention || app.claimedRetention || 0);
+      const retentionAmount = Number(app.retentionThisPeriod || 0);
       const netPayable = certifiedValue - retentionAmount;
 
       const row = [

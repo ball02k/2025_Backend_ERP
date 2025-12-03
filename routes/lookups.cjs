@@ -60,4 +60,17 @@ router.get('/lookups/projects', async (req, res) => {
   }
 });
 
+// GET /api/contract-types -> list of all contract types
+router.get('/contract-types', async (req, res) => {
+  try {
+    const types = await prisma.contractType.findMany({
+      orderBy: { name: 'asc' },
+    });
+    res.json(types);
+  } catch (e) {
+    console.error('[lookups] Failed to load contract types:', e);
+    res.status(500).json({ error: 'Failed to load contract types' });
+  }
+});
+
 module.exports = router;

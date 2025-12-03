@@ -95,6 +95,18 @@ function mapContract(contract) {
     draftCreatedAt: contract.draftCreatedAt,
     lockedAt: contract.lockedAt,
     sourceMode: contract.sourceMode,
+    // Document fields
+    documentSource: contract.documentSource,
+    draftDocumentUrl: contract.draftDocumentUrl,
+    draftDocumentName: contract.draftDocumentName,
+    signedDocumentUrl: contract.signedDocumentUrl,
+    signedDocumentName: contract.signedDocumentName,
+    signedDocumentUploadedAt: contract.signedDocumentUploadedAt,
+    signedDocumentUploadedBy: contract.signedDocumentUploadedBy,
+    ocrStatus: contract.ocrStatus,
+    ocrExtractedData: contract.ocrExtractedData,
+    ocrConfidence: contract.ocrConfidence,
+    // Relations
     supplier: contract.supplier || null,
     package: contract.package || null,
     project: contract.project || null,
@@ -139,14 +151,84 @@ function mapContract(contract) {
     }));
   }
 
+  // Add contractType if present
+  if (contract.contractType) {
+    mapped.contractType = contract.contractType;
+  }
+
+  // Add contractTypeId
+  if (contract.contractTypeId) {
+    mapped.contractTypeId = contract.contractTypeId;
+  }
+
+  // Add retentionPercentage (in addition to retentionPct for compatibility)
+  if (contract.retentionPercentage) {
+    mapped.retentionPercentage = contract.retentionPercentage instanceof Prisma.Decimal ? Number(contract.retentionPercentage) : contract.retentionPercentage;
+  }
+
+  // Add helpful flags for UI to show package defaults and overrides
+  if (contract.package) {
+    // Get default values from Package or ContractType
+    const packageRetention = contract.package.retentionPct instanceof Prisma.Decimal
+      ? Number(contract.package.retentionPct)
+      : (contract.package.contractType?.retentionRate instanceof Prisma.Decimal
+          ? Number(contract.package.contractType.retentionRate)
+          : 5.0);
+
+    const packagePaymentTerms = contract.package.paymentTerms || contract.package.contractType?.paymentTerms || null;
+
+    // Contract's actual values
+    const contractRetention = contract.retentionPercentage instanceof Prisma.Decimal
+      ? Number(contract.retentionPercentage)
+      : (contract.retentionPct instanceof Prisma.Decimal
+          ? Number(contract.retentionPct)
+          : null);
+
+    mapped._packageDefaults = {
+      contractType: contract.package.contractType || null,
+      contractTypeId: contract.package.contractTypeId || null,
+      retentionPercentage: packageRetention,
+      paymentTerms: packagePaymentTerms,
+    };
+
+    mapped._overrides = {
+      retentionOverridden: contractRetention != null && Math.abs(contractRetention - packageRetention) > 0.01,
+      paymentTermsOverridden: contract.paymentTerms != null && contract.paymentTerms !== packagePaymentTerms,
+    };
+  }
+
   return mapped;
 }
 
 const contractInclude = {
   supplier: { select: { id: true, name: true } },
-  package: { select: { id: true, name: true } },
+  package: {
+    select: {
+      id: true,
+      name: true,
+      retentionPct: true,
+      paymentTerms: true,
+      contractTypeId: true,
+      contractType: {
+        select: {
+          id: true,
+          name: true,
+          retentionRate: true,
+          paymentTerms: true,
+        }
+      }
+    }
+  },
   project: { select: { id: true, name: true, code: true } },
   rfx: { select: { id: true, title: true } },
+  contractType: {
+    select: {
+      id: true,
+      name: true,
+      framework: true,
+      category: true,
+    }
+  },
 };
 
 const contractWithLinesInclude = {
@@ -318,6 +400,101 @@ router.get('/contracts/:id', async (req, res) => {
   }
 });
 
+// GET /api/contracts/:id/line-items-summary
+// Get contract line items with previously certified amounts
+router.get('/contracts/:id/line-items-summary', async (req, res) => {
+  let tenantId;
+  try {
+    tenantId = requireTenant(req);
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message || 'Tenant context required' });
+  }
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid contract id' });
+
+  try {
+    // Get contract with line items
+    const contract = await prisma.contract.findFirst({
+      where: { id, tenantId },
+      include: {
+        lineItems: {
+          orderBy: { id: 'asc' },
+          include: {
+            budgetLine: {
+              select: { id: true, name: true }
+            }
+          }
+        }
+      }
+    });
+
+    if (!contract) {
+      return res.status(404).json({ error: 'Contract not found' });
+    }
+
+    // Get certified amounts per line item from all certified payment applications
+    const certifiedLineItems = await prisma.paymentApplicationLineItem.findMany({
+      where: {
+        tenantId,
+        contractLineItemId: { in: contract.lineItems.map(li => li.id) },
+        paymentApplication: {
+          status: { in: ['CERTIFIED', 'PAYMENT_NOTICE_SENT', 'APPROVED', 'PAID', 'PARTIALLY_PAID'] }
+        }
+      },
+      select: {
+        contractLineItemId: true,
+        qsCertifiedValue: true,
+      }
+    });
+
+    // Calculate previously certified per line item
+    const certifiedByLineItem = {};
+    certifiedLineItems.forEach(item => {
+      const lineItemId = item.contractLineItemId;
+      if (!certifiedByLineItem[lineItemId]) {
+        certifiedByLineItem[lineItemId] = 0;
+      }
+      certifiedByLineItem[lineItemId] += Number(item.qsCertifiedValue || 0);
+    });
+
+    // Map to contract line items with progress
+    const lineItemsWithProgress = contract.lineItems.map(item => {
+      const contractValue = item.total instanceof Prisma.Decimal ? Number(item.total) : Number(item.total || 0);
+      const previouslyCertified = certifiedByLineItem[item.id] || 0;
+      const remainingValue = contractValue - previouslyCertified;
+
+      return {
+        id: item.id,
+        description: item.description,
+        qty: item.qty instanceof Prisma.Decimal ? Number(item.qty) : Number(item.qty || 0),
+        rate: item.rate instanceof Prisma.Decimal ? Number(item.rate) : Number(item.rate || 0),
+        total: contractValue,
+        budgetLineId: item.budgetLineId,
+        budgetLineName: item.budgetLine?.name || null,
+        costCode: item.costCode,
+        contractValue,
+        previouslyCertified,
+        remainingValue
+      };
+    });
+
+    const totals = lineItemsWithProgress.reduce((acc, item) => ({
+      contractValue: acc.contractValue + item.contractValue,
+      previouslyCertified: acc.previouslyCertified + item.previouslyCertified,
+      remainingValue: acc.remainingValue + item.remainingValue
+    }), { contractValue: 0, previouslyCertified: 0, remainingValue: 0 });
+
+    res.json({
+      contractId: id,
+      lineItems: lineItemsWithProgress,
+      totals
+    });
+  } catch (err) {
+    console.error('[contracts.line-items-summary] failed', err);
+    res.status(500).json({ error: 'Failed to load line items summary' });
+  }
+});
+
 router.post('/contracts', async (req, res) => {
   let tenantId;
   try {
@@ -348,7 +525,10 @@ router.post('/contracts', async (req, res) => {
     if (packageId) {
       pkg = await prisma.package.findFirst({
         where: { id: packageId, project: { tenantId } },
-        include: { project: { select: { id: true, code: true, name: true } } },
+        include: {
+          project: { select: { id: true, code: true, name: true } },
+          contractType: true  // Include contractType to inherit defaults
+        },
       });
       if (!pkg) return res.status(404).json({ error: 'Package not found' });
       project = pkg.project;
@@ -382,8 +562,43 @@ router.post('/contracts', async (req, res) => {
       : `${project.name} Contract`);
 
     const valueDecimal = body.value != null ? toDecimal(body.value, { allowNull: true }) : null;
-    const retention = body.retentionPct != null ? toDecimal(body.retentionPct, { allowNull: true }) : null;
     const now = new Date();
+
+    // ===== INHERIT CONTRACT DEFAULTS FROM PACKAGE =====
+    // Contract Type: inherited from Package (read-only on Contract)
+    const contractTypeId = pkg?.contractTypeId || null;
+
+    // Retention Percentage: inherit from Package or ContractType, allow override
+    let retentionPercentage;
+    if (body.retentionPercentage !== undefined || body.retentionPct !== undefined) {
+      // User explicitly provided retention - use it
+      retentionPercentage = toDecimal(body.retentionPercentage ?? body.retentionPct, { allowNull: true });
+    } else if (pkg?.retentionPct != null) {
+      // Inherit from Package
+      retentionPercentage = pkg.retentionPct;
+    } else if (pkg?.contractType?.retentionRate != null) {
+      // Inherit from ContractType
+      retentionPercentage = pkg.contractType.retentionRate;
+    } else {
+      // Default to 5%
+      retentionPercentage = new Prisma.Decimal(5.0);
+    }
+
+    // Payment Terms: inherit from Package or ContractType, allow override
+    let paymentTerms;
+    if (body.paymentTerms !== undefined) {
+      // User explicitly provided payment terms - use it
+      paymentTerms = body.paymentTerms;
+    } else if (pkg?.paymentTerms) {
+      // Inherit from Package
+      paymentTerms = pkg.paymentTerms;
+    } else if (pkg?.contractType?.paymentTerms) {
+      // Inherit from ContractType
+      paymentTerms = pkg.contractType.paymentTerms;
+    } else {
+      // Default to null (will be prompted later)
+      paymentTerms = null;
+    }
 
     const contractData = {
       tenantId,
@@ -397,8 +612,14 @@ router.post('/contracts', async (req, res) => {
       status: 'draft',
       startDate: body.startDate ? new Date(body.startDate) : null,
       endDate: body.endDate ? new Date(body.endDate) : null,
-      retentionPct: retention,
-      paymentTerms: body.paymentTerms || null,
+
+      // Use both old and new retention fields for compatibility
+      retentionPct: retentionPercentage,
+      retentionPercentage: retentionPercentage,
+
+      paymentTerms: paymentTerms,
+      contractTypeId: contractTypeId,
+
       notes: body.notes || null,
       sourceMode,
       draftCreatedAt: now,
@@ -443,6 +664,26 @@ router.put('/contracts/:id', async (req, res) => {
     const existing = await fetchContract(tenantId, id, false);
     if (!existing) return res.status(404).json({ error: 'Contract not found' });
 
+    // NEVER allow contractType or contractTypeId to be changed - it comes from Package
+    if (body.contractType !== undefined || body.contractTypeId !== undefined) {
+      const attemptedField = body.contractType !== undefined ? 'contractType' : 'contractTypeId';
+      const reason = `Contract Type cannot be changed. It is inherited from the Package and is read-only on contracts.`;
+      await auditReject(
+        req.user?.id,
+        tenantId,
+        'Contract',
+        id,
+        'UPDATE',
+        reason,
+        { attemptedField, attemptedValue: body[attemptedField] }
+      );
+      return res.status(400).json({
+        code: 'CONTRACT_TYPE_READ_ONLY',
+        message: reason,
+        field: attemptedField,
+      });
+    }
+
     // Lock validation: if draftCreatedAt exists, block packageId mutations
     if (existing.draftCreatedAt && body.packageId !== undefined) {
       const reason = 'Package is locked after draft creation. Raise a variation instead.';
@@ -459,6 +700,59 @@ router.put('/contracts/:id', async (req, res) => {
         code: 'CONTRACT_LOCKED_AFTER_DRAFT',
         message: reason,
       });
+    }
+
+    // Lock validation: if contract is signed, block changes to critical fields
+    const isContractSigned = existing.status === 'signed' || existing.signedAt;
+    if (isContractSigned) {
+      const LOCKED_FIELDS_AFTER_SIGNING = [
+        'value',
+        'supplierId',
+        'contractTypeId',
+        'paymentTerms',
+        'retentionPct',
+        'retentionPercentage'
+      ];
+
+      const attemptedLockedChanges = LOCKED_FIELDS_AFTER_SIGNING.filter(field => {
+        if (body[field] === undefined) return false; // Field not being changed
+
+        // Compare current value with attempted new value
+        const currentValue = existing[field];
+        const newValue = body[field];
+
+        // Handle null/undefined comparison
+        if (currentValue == null && newValue == null) return false;
+        if (currentValue == null || newValue == null) return true;
+
+        // For Decimal values, convert to number for comparison
+        const current = typeof currentValue === 'object' && currentValue.toNumber
+          ? currentValue.toNumber()
+          : currentValue;
+        const attempted = typeof newValue === 'object' && newValue.toNumber
+          ? newValue.toNumber()
+          : newValue;
+
+        return current !== attempted;
+      });
+
+      if (attemptedLockedChanges.length > 0) {
+        const reason = `Cannot modify locked fields on a signed contract. These fields require a formal contract variation: ${attemptedLockedChanges.join(', ')}`;
+        await auditReject(
+          req.user?.id,
+          tenantId,
+          'Contract',
+          id,
+          'UPDATE',
+          reason,
+          { attemptedChanges: attemptedLockedChanges }
+        );
+        return res.status(409).json({
+          code: 'CONTRACT_LOCKED_AFTER_SIGNING',
+          message: reason,
+          lockedFields: attemptedLockedChanges,
+        });
+      }
     }
 
     const patch = {};
@@ -853,6 +1147,20 @@ async function updateContractStatus(req, res, status) {
       } catch (cvrErr) {
         console.error('[CVR] Error creating commitment:', cvrErr.message);
         // Don't fail the status update if CVR creation fails
+      }
+
+      // Trigger PO generation when contract is signed
+      try {
+        const poGeneration = require('../services/poGeneration.cjs');
+        const userId = req.user?.id ? Number(req.user.id) : null;
+        const result = await poGeneration.generateFromContract(updated.id, userId, tenantId);
+        if (result) {
+          const poCount = Array.isArray(result) ? result.length : 1;
+          console.log(`[PO] Generated ${poCount} PO(s) for contract ${updated.id}`);
+        }
+      } catch (poErr) {
+        console.error('[PO] Error generating purchase order:', poErr.message);
+        // Don't fail the status update if PO generation fails
       }
     }
 

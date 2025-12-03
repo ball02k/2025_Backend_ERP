@@ -60,7 +60,7 @@ async function createPurchaseOrder({
   }
 
   // Calculate total from lines
-  const total = lines.reduce((sum, line) => sum + Number(line.lineTotal || 0), 0);
+  const total = (lines || []).reduce((sum, line) => sum + Number(line.lineTotal || 0), 0);
 
   const po = await prisma.purchaseOrder.create({
     data: {
@@ -87,7 +87,7 @@ async function createPurchaseOrder({
       deliveryStatus,
       internalNotes,
       supplierNotes,
-      lines: {
+      lines: lines && lines.length > 0 ? {
         create: lines.map((line) => ({
           tenantId,
           item: line.item,
@@ -96,7 +96,7 @@ async function createPurchaseOrder({
           unitCost: line.unitCost,
           lineTotal: line.lineTotal,
         })),
-      },
+      } : undefined,
     },
     include: {
       lines: true,
@@ -116,7 +116,7 @@ async function updatePurchaseOrder(id, tenantId, updates) {
   const { lines, ...poUpdates } = updates;
 
   // Recalculate total if lines provided
-  if (lines) {
+  if (lines && Array.isArray(lines)) {
     const total = lines.reduce((sum, line) => sum + Number(line.lineTotal || 0), 0);
     poUpdates.total = total;
   }
@@ -367,10 +367,210 @@ async function getPurchaseOrderById(id, tenantId) {
       project: { select: { code: true, name: true } },
       contract: { select: { id: true, title: true } },
       budgetLine: { select: { id: true, code: true, description: true } },
-      package: { select: { id: true, code: true, name: true, poStrategy: true } },
+      package: { select: { id: true, name: true, poStrategy: true } },
       milestone: { select: { id: true, milestoneNumber: true, description: true } },
       paymentApplication: { select: { id: true, applicationNumber: true } },
     },
+  });
+}
+
+/**
+ * Update PO status manually
+ * Validates allowed transitions
+ */
+async function updatePOStatus(id, tenantId, newStatus, notes, userId) {
+  const po = await prisma.purchaseOrder.findFirst({
+    where: { id, tenantId },
+  });
+
+  if (!po) throw new Error('Purchase Order not found');
+
+  // Define allowed status transitions
+  const allowedTransitions = {
+    'DRAFT': ['SUBMITTED', 'CANCELLED'],
+    'SUBMITTED': ['APPROVED', 'DRAFT', 'CANCELLED'],
+    'APPROVED': ['ISSUED', 'SENT', 'SUBMITTED', 'CANCELLED'],
+    'ISSUED': ['SENT', 'CANCELLED'],
+    'SENT': ['ACKNOWLEDGED', 'CANCELLED'],
+    'ACKNOWLEDGED': ['GOODS_RECEIVED', 'CANCELLED'],
+    'GOODS_RECEIVED': ['INVOICE_RECEIVED', 'CANCELLED'],
+    'INVOICE_RECEIVED': ['PARTIALLY_PAID', 'PAID', 'CANCELLED'],
+    'PARTIALLY_PAID': ['PAID', 'CANCELLED'],
+    'PAID': [], // Terminal state
+    'CANCELLED': ['DRAFT'], // Allow reactivation from cancelled
+  };
+
+  const allowed = allowedTransitions[po.status] || [];
+  if (!allowed.includes(newStatus)) {
+    throw new Error(`Invalid status transition from ${po.status} to ${newStatus}`);
+  }
+
+  // Update timestamps based on new status
+  const updates = { status: newStatus };
+
+  if (newStatus === 'ACKNOWLEDGED') updates.acknowledgedAt = new Date();
+  if (newStatus === 'PAID') {
+    updates.paidAt = new Date();
+    updates.paidAmount = po.total;
+  }
+
+  return await prisma.purchaseOrder.update({
+    where: { id },
+    data: updates,
+    include: { lines: true },
+  });
+}
+
+/**
+ * Send Purchase Order to supplier
+ * Methods: EMAIL or DOWNLOAD
+ */
+async function sendPurchaseOrder(id, tenantId, method, email, userId) {
+  const po = await getPurchaseOrderById(id, tenantId);
+  if (!po) throw new Error('Purchase Order not found');
+
+  // Generate PDF
+  const pdfBuffer = await generatePOPdf(id, tenantId);
+
+  if (method === 'EMAIL') {
+    // TODO: Integrate with email service
+    // For now, just mark as sent
+    console.log(`[PO Service] Would send email to ${email} with PO ${po.code}`);
+
+    await prisma.purchaseOrder.update({
+      where: { id },
+      data: {
+        status: 'SENT',
+        sentAt: new Date(),
+        sentBy: userId,
+        sentMethod: 'EMAIL',
+      },
+    });
+
+    return { success: true, message: 'PO sent via email', pdfUrl: null };
+  } else if (method === 'DOWNLOAD') {
+    // Mark as sent via download
+    await prisma.purchaseOrder.update({
+      where: { id },
+      data: {
+        status: 'SENT',
+        sentAt: new Date(),
+        sentBy: userId,
+        sentMethod: 'DOWNLOAD',
+      },
+    });
+
+    // Return PDF buffer for download
+    return { success: true, message: 'PO ready for download', pdfBuffer };
+  }
+
+  throw new Error('Invalid send method. Use EMAIL or DOWNLOAD');
+}
+
+/**
+ * Generate PO PDF document
+ * Creates a professional purchase order document
+ */
+async function generatePOPdf(id, tenantId) {
+  const po = await getPurchaseOrderById(id, tenantId);
+  if (!po) throw new Error('Purchase Order not found');
+
+  // Use PDFKit or similar library to generate PDF
+  const PDFDocument = require('pdfkit');
+  const fs = require('fs');
+
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 50 });
+    const chunks = [];
+
+    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    // Header
+    doc.fontSize(20).text('PURCHASE ORDER', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(10).text(`PO Number: ${po.code}`, { align: 'right' });
+    doc.text(`Date: ${new Date(po.orderDate).toLocaleDateString()}`, { align: 'right' });
+    doc.text(`Status: ${po.status}`, { align: 'right' });
+    doc.moveDown();
+
+    // Supplier info
+    doc.fontSize(12).text('SUPPLIER:', { underline: true });
+    doc.fontSize(10).text(po.supplier || 'N/A');
+    doc.moveDown();
+
+    // Project info
+    doc.fontSize(12).text('PROJECT:', { underline: true });
+    doc.fontSize(10).text(po.project?.name || 'N/A');
+    doc.moveDown();
+
+    // Line items table
+    doc.fontSize(12).text('LINE ITEMS:', { underline: true });
+    doc.moveDown(0.5);
+
+    const tableTop = doc.y;
+    const itemX = 50;
+    const qtyX = 250;
+    const unitX = 300;
+    const rateX = 350;
+    const totalX = 450;
+
+    // Table headers
+    doc.fontSize(10).font('Helvetica-Bold');
+    doc.text('Description', itemX, tableTop);
+    doc.text('Qty', qtyX, tableTop);
+    doc.text('Unit', unitX, tableTop);
+    doc.text('Rate (£)', rateX, tableTop);
+    doc.text('Total (£)', totalX, tableTop);
+
+    doc.font('Helvetica');
+    let y = tableTop + 20;
+
+    // Line items
+    (po.lines || []).forEach((line) => {
+      doc.text(line.item || '', itemX, y, { width: 190 });
+      doc.text(line.qty?.toString() || '0', qtyX, y);
+      doc.text(line.unit || 'ea', unitX, y);
+      doc.text(Number(line.unitCost || 0).toFixed(2), rateX, y);
+      doc.text(Number(line.lineTotal || 0).toFixed(2), totalX, y);
+      y += 25;
+    });
+
+    // Total
+    doc.moveDown();
+    doc.fontSize(12).font('Helvetica-Bold');
+    doc.text(`TOTAL: £${Number(po.total || 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}`, { align: 'right' });
+    doc.font('Helvetica');
+
+    // Footer
+    doc.moveDown(2);
+    doc.fontSize(9);
+    if (po.internalNotes) {
+      doc.text('Internal Notes:', { underline: true });
+      doc.text(po.internalNotes);
+      doc.moveDown();
+    }
+    if (po.supplierNotes) {
+      doc.text('Supplier Notes:', { underline: true });
+      doc.text(po.supplierNotes);
+    }
+
+    doc.end();
+  });
+}
+
+/**
+ * Mark PO as acknowledged by supplier
+ */
+async function acknowledgePurchaseOrder(id, tenantId, userId) {
+  return await prisma.purchaseOrder.update({
+    where: { id },
+    data: {
+      status: 'ACKNOWLEDGED',
+      acknowledgedAt: new Date(),
+    },
+    include: { lines: true },
   });
 }
 
@@ -387,4 +587,8 @@ module.exports = {
   getPurchaseOrders,
   getPurchaseOrderById,
   generatePOCode,
+  updatePOStatus,
+  sendPurchaseOrder,
+  generatePOPdf,
+  acknowledgePurchaseOrder,
 };

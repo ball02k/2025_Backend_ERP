@@ -255,9 +255,20 @@ async function buildProjectOverview(prisma, { tenantId, projectId }) {
     variationsOpen,
     posRecent,
   ] = await Promise.all([
-    safeAgg(prisma.budgetLine.aggregate({ _sum: { amount: true }, where: { tenantId, projectId } }), 'amount').catch(() => 0),
-    safeAgg(prisma.commitment.aggregate({ _sum: { amount: true }, where: { tenantId, projectId } }), 'amount').catch(() => 0),
-    safeAgg(prisma.actualCost.aggregate({ _sum: { amount: true }, where: { tenantId, projectId } }), 'amount').catch(() => 0),
+    // FIXED: Use 'total' field (not 'amount') to match Budget page
+    safeAgg(prisma.budgetLine.aggregate({ _sum: { total: true }, where: { tenantId, projectId } }), 'total').catch(() => 0),
+    // FIXED: Use active/signed contracts for committed (same as CVR)
+    safeAgg(prisma.contract.aggregate({ _sum: { value: true }, where: { tenantId, projectId, status: { in: ['active', 'signed'] } } }), 'value').catch(() => 0),
+    // FIXED: Use payment applications (excluding cancelled/rejected) for actual (same as CVR)
+    (async () => {
+      try {
+        const apps = await prisma.applicationForPayment.findMany({
+          where: { tenantId, projectId, status: { notIn: ['CANCELLED', 'REJECTED'] } },
+          select: { certifiedThisPeriod: true, claimedThisPeriod: true }
+        });
+        return apps.reduce((sum, app) => sum + Number(app.certifiedThisPeriod || app.claimedThisPeriod || 0), 0);
+      } catch { return 0; }
+    })(),
     safeAgg(prisma.forecast.aggregate({ _sum: { amount: true }, where: { tenantId, projectId } }), 'amount').catch(() => 0),
     prisma.rfi
       .findMany({ where: { tenantId, projectId }, orderBy: { updatedAt: 'desc' }, take: 5 })

@@ -4,6 +4,8 @@ const prisma = new PrismaClient();
 const { buildLinks } = require('../lib/buildLinks.cjs');
 const { safeJson } = require('../lib/serialize.cjs');
 
+console.log('===== [projects.packages.cjs] MODULE LOADED AT', new Date().toISOString(), '=====');
+
 const packageSelect = {
   id: true,
   projectId: true,
@@ -299,9 +301,11 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
     const tenantId = req.user?.tenantId || req.tenantId || 'demo';
     const { name, description, scope, tradeCategory, trade, costCodeId, attachments,
       targetAwardDate, requiredOnSite, leadTimeWeeks, contractForm, retentionPct, paymentTerms, currency,
-      ownerUserId, buyerUserId, draftEntityId } = req.body || {};
+      ownerUserId, buyerUserId, draftEntityId, contractTypeId, poStrategy, milestones } = req.body || {};
     // Accept both budgetIds and budgetLineIds for compatibility
     console.log('[projects.packages.create] req.body keys:', Object.keys(req.body || {}));
+    console.log('[projects.packages.create] contractTypeId from req.body:', contractTypeId);
+    console.log('[projects.packages.create] poStrategy from req.body:', poStrategy);
     console.log('[projects.packages.create] budgetLineIds from req.body:', req.body?.budgetLineIds);
     console.log('[projects.packages.create] budgetIds from req.body:', req.body?.budgetIds);
     const budgetLineIds = Array.isArray(req.body?.budgetLineIds)
@@ -352,6 +356,9 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
         currency: currency == null ? null : String(currency),
         ownerUserId: ownerUserId == null || ownerUserId === '' ? null : Number(ownerUserId),
         buyerUserId: buyerUserId == null || buyerUserId === '' ? null : Number(buyerUserId),
+        // Contract Type and PO Strategy
+        contractTypeId: contractTypeId == null || contractTypeId === '' ? null : String(contractTypeId),
+        poStrategy: poStrategy == null || poStrategy === '' ? null : String(poStrategy),
       },
       select: packageSelect,
     });
@@ -364,6 +371,26 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
       } catch (err) {
         console.error('[projects.packages.create] Failed to link budget lines:', err.message);
         console.error('[projects.packages.create] Error details:', err);
+      }
+    }
+    // Try to create milestones if provided and PO strategy is milestone-based
+    if (Array.isArray(milestones) && milestones.length > 0 && poStrategy === 'MILESTONE_BASED') {
+      try {
+        console.log('[projects.packages.create] Creating milestones:', { packageId: created.id, milestones });
+        await prisma.packageMilestone.createMany({
+          data: milestones.map((m, idx) => ({
+            tenantId,
+            packageId: created.id,
+            name: m.name || `Milestone ${idx + 1}`,
+            description: m.description || null,
+            percentage: m.percentage != null ? Number(m.percentage) : null,
+            targetDate: m.targetDate ? new Date(m.targetDate) : null,
+            sequence: m.sequence != null ? Number(m.sequence) : idx + 1,
+          })),
+        });
+        console.log('[projects.packages.create] Successfully created milestones');
+      } catch (err) {
+        console.error('[projects.packages.create] Failed to create milestones:', err.message);
       }
     }
     // If a draft document entityId was provided, relink draft document links to this package id
@@ -415,6 +442,17 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
         select: {
           ...packageSelect,
           awardSupplier: { select: { id: true, name: true } },
+          contractType: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              framework: true,
+              retentionRate: true,
+              paymentTerms: true,
+              suggestedPOStrategy: true,
+            }
+          },
           contracts: {
             where: { status: { not: 'archived' } }, // Exclude archived contracts
             orderBy: { createdAt: 'desc' },
@@ -720,6 +758,17 @@ router.get('/packages/:packageId', async (req, res, next) => {
         select: {
           ...packageSelect,
           awardSupplier: { select: { id: true, name: true } },
+          contractType: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              framework: true,
+              retentionRate: true,
+              paymentTerms: true,
+              suggestedPOStrategy: true,
+            }
+          },
           contracts: {
             where: { status: { not: 'archived' } }, // Exclude archived contracts
             orderBy: { createdAt: 'desc' },

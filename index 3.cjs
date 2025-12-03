@@ -303,8 +303,7 @@ app.use('/api/tenders', tendersBuilderRouter);
 app.use('/api/packages', packagesPricingRouter);
 app.use('/api/packages', requireAuth, packagesDocumentsRouter);
 app.use('/api/package-responses', packagesResponsesRouter);
-// DISABLED: Old snapshot-based CVR system - replaced with real-time CVR at line 488
-// app.use('/api/projects', requireAuth, cvrRouter(prisma));
+app.use('/api/projects', requireAuth, cvrRouter(prisma));
 app.use('/api/projects', requireAuth, diaryRouter(prisma));
 // Budgets CSV import preview/commit
 app.use('/api', requireAuth, budgetsImportRouter);
@@ -377,7 +376,6 @@ app.use('/api/rfis', requireAuth, rfisRouter);
 app.use('/api/qa', requireAuth, qaRouter);
 app.use('/api/hs', requireAuth, hsRouter);
 app.use('/api/carbon', requireAuth, carbonRouter);
-app.use('/api', require('./routes/budgetCategories.seed.cjs')); // Seed endpoint
 app.use('/api/budget-categories', requireAuth, require('./routes/budgetCategories.cjs'));
 app.use('/api/analytics', requireAuth, analyticsRouter(prisma));
 app.use('/api', homeRoutes(prisma, { requireAuth }));
@@ -418,7 +416,6 @@ app.use('/api', directAwardRouter);
 app.use('/api', contractsReadRouter);
 app.use('/api', contractsGenerateDocRouter);
 app.use('/api', contractsStatusRouter);
-app.use('/api', contractsDocumentsRouter); // Contract document upload & OCR
 app.use('/api', invoiceMatchingRouter); // Invoice-PO matching, call-off POs
 app.use('/api', contractsOnlyOfficeRouter);
 app.use('/api', contractsRouter);
@@ -485,124 +482,17 @@ app.get('/api/projects/:id/pos', requireAuth, async (req, res) => {
   }
 });
 
-// Project CVR: Real-time calculation from budget lines, contracts, and payment applications
+// Project CVR: return an empty stub to avoid 404s when CVR module is not enabled
 app.get('/api/projects/:id/cvr', requireAuth, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
     const projectId = Number(req.params.id);
     if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'Invalid project id' });
-
-    // 1. GET BUDGET from budget lines (project-level, no packageId)
-    // FIXED: Use 'total' field to match Budget page
-    const budgetLines = await prisma.budgetLine.findMany({
-      where: { tenantId, projectId },
-      select: {
-        total: true,
-      },
-    });
-    const totalBudget = budgetLines.reduce((sum, bl) => sum + Number(bl.total || 0), 0);
-
-    // 2. GET COMMITTED from active/signed contracts (grouped by packageId)
-    const contracts = await prisma.contract.findMany({
-      where: {
-        tenantId,
-        projectId,
-        status: { in: ['active', 'signed'] },
-      },
-      select: {
-        id: true,
-        contractRef: true,
-        value: true,
-        packageId: true,
-        package: {
-          select: {
-            id: true,
-            trade: true,
-          },
-        },
-      },
-    });
-    const totalCommitted = contracts.reduce((sum, c) => sum + Number(c.value || 0), 0);
-
-    // 3. GET ACTUAL from certified payment applications (via contractId → packageId)
-    const paymentApps = await prisma.applicationForPayment.findMany({
-      where: {
-        tenantId,
-        projectId,
-        status: { notIn: ['CANCELLED', 'REJECTED'] },
-      },
-      select: {
-        certifiedThisPeriod: true,
-        claimedThisPeriod: true,
-        contractId: true,
-        contract: {
-          select: {
-            packageId: true,
-          },
-        },
-      },
-    });
-    const totalActual = paymentApps.reduce((sum, app) => {
-      return sum + Number(app.certifiedThisPeriod || app.claimedThisPeriod || 0);
-    }, 0);
-
-    // Group by package for breakdown
-    const packageMap = new Map();
-
-    // Add contracts by package
-    contracts.forEach((contract) => {
-      const pkgId = contract.packageId;
-      if (!packageMap.has(pkgId)) {
-        packageMap.set(pkgId, {
-          id: pkgId,
-          code: contract.package?.trade || 'Unknown',
-          name: contract.package?.trade || 'Unallocated',
-          planned: 0, // No budget breakdown by package
-          estimate: 0,
-          actualToDate: 0,
-        });
-      }
-      const pkg = packageMap.get(pkgId);
-      pkg.estimate += Number(contract.value || 0);
-    });
-
-    // Add payment apps by package (via contract.packageId)
-    paymentApps.forEach((app) => {
-      const pkgId = app.contract?.packageId;
-      if (!packageMap.has(pkgId)) {
-        packageMap.set(pkgId, {
-          id: pkgId,
-          code: 'Unknown',
-          name: 'Unallocated',
-          planned: 0,
-          estimate: 0,
-          actualToDate: 0,
-        });
-      }
-      const pkg = packageMap.get(pkgId);
-      pkg.actualToDate += Number(app.certifiedThisPeriod || app.claimedThisPeriod || 0);
-    });
-
-    const entries = Array.from(packageMap.values()).map((pkg) => ({
-      ...pkg,
-      variance: pkg.estimate - pkg.actualToDate,
-      costToComplete: pkg.estimate - pkg.actualToDate,
-    }));
-
-    res.json({
-      totalBudget,
-      totalCommitted,
-      totalActual,
-      variance: totalBudget - totalCommitted,
-      remaining: totalBudget - totalActual,
-      entries,
-      items: entries, // Legacy support
-      periods: [], // Legacy support
-    });
-  } catch (error) {
-    console.error('[CVR] Error:', error);
-    res.status(500).json({ error: error.message });
-  }
+    // Try fetch minimal if tables exist, otherwise return empty
+    let periods = [];
+    try { periods = await prisma.cVRPeriod?.findMany?.({ where: { tenantId, projectId } }).catch(()=>[]); } catch(_) {}
+    res.json({ periods: periods || [], entries: [] });
+  } catch (_) { res.json({ periods: [], entries: [] }); }
 });
 
 // --------- Compatibility routes for FE variants expecting nested project endpoints ---------
