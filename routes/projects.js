@@ -400,7 +400,15 @@ module.exports = (prisma) => {
           costCode: { select: { id: true, code: true, description: true } },
           _count: { select: { budgetItems: true, submissions: true, invites: true } },
           budgetItems: {
-            include: { budgetLine: true },
+            select: {
+              budgetLine: {
+                select: {
+                  id: true,
+                  total: true,
+                  amount: true,
+                },
+              },
+            },
           },
           contracts: {
             where: { status: { not: 'archived' } }, // Exclude archived contracts
@@ -444,7 +452,7 @@ module.exports = (prisma) => {
 
         // Check for active tender (Request table)
         const rfxInfo = rfxMap.get(pkg.id);
-        if (rfxInfo && ['draft', 'open', 'issued', 'evaluating'].includes(rfxInfo.status)) {
+        if (rfxInfo && !['closed', 'cancelled', 'void'].includes(String(rfxInfo.status || '').toLowerCase())) {
           sourcingStatus = 'tender';
           tenderId = rfxInfo.id;
         }
@@ -555,7 +563,11 @@ module.exports = (prisma) => {
       if (pkgIds.length) {
         const cons = await prisma.contract.findMany({
           where: { projectId, packageId: { in: pkgIds } },
-          include: { supplier: { select: { id: true, name: true } } },
+          select: {
+            id: true,
+            packageId: true,
+            supplier: { select: { id: true, name: true } },
+          },
           orderBy: [{ createdAt: 'desc' }],
         });
         for (const c of cons) {
@@ -893,6 +905,62 @@ module.exports = (prisma) => {
     }
   });
 
+  // GET /api/projects/:id/role-summary - Get project role context (Task 2.1)
+  router.get('/:id/role-summary', async (req, res) => {
+    try {
+      const tenantId = req.user && req.user.tenantId;
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid project id' });
+
+      const project = await prisma.project.findFirst({
+        where: { id, tenantId, deletedAt: null },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!project) return res.status(404).json({ error: 'PROJECT_NOT_FOUND' });
+
+      // Build upstream party object if exists
+      let upstreamParty = null;
+      if (project.upstreamPartyId) {
+        const upstream = await prisma.client.findFirst({
+          where: { id: Number(project.upstreamPartyId), deletedAt: null },
+          select: { id: true, name: true },
+        });
+        if (upstream) {
+          upstreamParty = {
+            type: project.upstreamPartyType,
+            id: upstream.id,
+            name: upstream.name,
+            contractRef: project.upstreamContractRef,
+            poNumber: project.upstreamPoNumber,
+          };
+          // If contact specified, fetch it
+          if (project.upstreamContactId) {
+            const contact = await prisma.contact.findFirst({
+              where: { id: Number(project.upstreamContactId), deletedAt: null },
+              select: { id: true, name: true, email: true },
+            });
+            if (contact) {
+              upstreamParty.contactId = contact.id;
+              upstreamParty.contactName = contact.name;
+              upstreamParty.contactEmail = contact.email;
+            }
+          }
+        }
+      }
+
+      return res.json({
+        projectRole: project.projectRole || 'PRINCIPAL_CONTRACTOR',
+        upstreamParty,
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to load project role' });
+    }
+  });
+
   // POST /api/projects
   router.post('/', async (req, res) => {
     let tenantId;
@@ -987,6 +1055,13 @@ module.exports = (prisma) => {
       siteLat: siteLatDecimal,
       siteLng: siteLngDecimal,
       labels: Array.isArray(body.labels) ? body.labels : undefined,
+      // Task 2.1: Project role fields
+      projectRole: body.role ?? body.projectRole ?? undefined, // Accept 'role' (API standard) or 'projectRole' (DB field name)
+      upstreamPartyType: body.upstreamPartyType ?? undefined,
+      upstreamPartyId: body.upstreamPartyId != null ? Number(body.upstreamPartyId) : undefined,
+      upstreamContactId: body.upstreamContactId != null ? Number(body.upstreamContactId) : undefined,
+      upstreamContractRef: body.upstreamContractRef ?? undefined,
+      upstreamPoNumber: body.upstreamPoNumber ?? undefined,
     };
 
     const created = await prisma.project.create({

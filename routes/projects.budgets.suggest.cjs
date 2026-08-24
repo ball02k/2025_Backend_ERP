@@ -6,6 +6,11 @@ const { generateJSON } = require('../lib/llm.provider.cjs');
 const { matchCostCode } = require('../lib/costCodeMatcher.cjs');
 const { requireProjectMember } = require('../middleware/membership.cjs');
 const { log } = require('../lib/logger.cjs');
+const {
+  evaluatePackageLock,
+  enforceDecision,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
 
 // Validation schemas
 const SuggestionRequestSchema = z.object({
@@ -374,67 +379,90 @@ router.post('/:projectId/budgets/suggest/accept', requireProjectMember, async (r
 
     const input = AcceptRequestSchema.parse(req.body);
     const tenantId = req.user?.tenantId || 'demo';
-
-    // Prepare budget lines for creation
-    const budgetLines = input.items.map((item) => {
-      const qty = toDecimal(item.qty, { fallback: 0 });
-      const rate = toDecimal(item.rate, { fallback: 0 });
-      const total = toDecimal(Number(item.qty) * Number(item.rate), { fallback: 0 });
-
-      return {
+    const packageIds = Array.from(new Set(input.items.map((item) => Number(item.packageId)).filter(Number.isFinite)));
+    for (const packageId of packageIds) {
+      const packageDecision = await evaluatePackageLock({
+        prisma,
         tenantId,
         projectId,
-        description: item.description,
-        qty,
-        rate,
-        total,
-        amount: total,
-        unit: item.unit || 'ea',
-        costCodeId: item.costCodeId || null,
-        groupId: item.groupId || null,
-        position: 0,
-        sortOrder: 0,
-      };
-    });
-
-    // Create budget lines
-    const result = await prisma.budgetLine.createMany({
-      data: budgetLines,
-      skipDuplicates: false,
-    });
-
-    // Create package associations if packageId provided
-    for (const [idx, item] of input.items.entries()) {
-      if (item.packageId) {
-        // Find the created budget line ID (since createMany doesn't return IDs directly,
-        // we need to query for the most recent lines matching our descriptions)
-        const createdLine = await prisma.budgetLine.findFirst({
-          where: {
-            tenantId,
-            projectId,
-            description: item.description,
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        if (createdLine) {
-          await prisma.packageItem.create({
-            data: {
-              tenantId,
-              packageId: item.packageId,
-              budgetLineId: createdLine.id,
-            },
-          }).catch((err) => {
-            // Ignore duplicate errors
-            if (!err.code?.includes('Unique')) {
-              console.warn('[accept] Failed to link package:', err.message);
-            }
-          });
-        }
-      }
+        packageId,
+        action: 'budget_suggestion_accept',
+        proposedChanges: { budgetEstimate: true },
+      });
+      await enforceDecision(req, 'Package', packageId, 'budget_suggestion.accept.package_link', packageDecision);
     }
 
-    return res.json({ created: result.count });
+    const createdCount = await prisma.$transaction(async (tx) => {
+      let count = 0;
+
+      for (const item of input.items) {
+        const qty = toDecimal(item.qty, { fallback: 0 });
+        const rate = toDecimal(item.rate, { fallback: 0 });
+        const total = toDecimal(Number(item.qty) * Number(item.rate), { fallback: 0 });
+
+        // Use an explicit column list because this local database predates newer
+        // BudgetLine model defaults such as forecastMethod.
+        const createdRows = await tx.$queryRaw`
+          INSERT INTO "BudgetLine" (
+            "tenantId",
+            "projectId",
+            "description",
+            "qty",
+            "rate",
+            "total",
+            "amount",
+            "unit",
+            "costCodeId",
+            "groupId",
+            "position",
+            "sortOrder",
+            "updatedAt"
+          )
+          VALUES (
+            ${tenantId},
+            ${projectId},
+            ${item.description},
+            CAST(${qty.toString()} AS numeric),
+            CAST(${rate.toString()} AS numeric),
+            CAST(${total.toString()} AS numeric),
+            CAST(${total.toString()} AS numeric),
+            ${item.unit || 'ea'},
+            ${item.costCodeId || null},
+            ${item.groupId || null},
+            0,
+            0,
+            CURRENT_TIMESTAMP
+          )
+          RETURNING "id"
+        `;
+
+        const createdLineId = createdRows[0]?.id;
+        if (!createdLineId) {
+          throw new Error('Budget line insert did not return an id');
+        }
+
+        if (item.packageId) {
+          await tx.$executeRaw`
+            INSERT INTO "PackageItem" (
+              "tenantId",
+              "packageId",
+              "budgetLineId"
+            )
+            VALUES (
+              ${tenantId},
+              ${item.packageId},
+              ${createdLineId}
+            )
+          `;
+        }
+
+        count += 1;
+      }
+
+      return count;
+    });
+
+    return res.json({ created: createdCount });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({
@@ -443,6 +471,7 @@ router.post('/:projectId/budgets/suggest/accept', requireProjectMember, async (r
     }
 
     console.error('[suggest/accept] Error:', error);
+    if (sendCommercialLock(res, error)) return;
     return res.status(500).json({
       error: { code: 'INTERNAL', message: 'Failed to accept suggestions' },
     });

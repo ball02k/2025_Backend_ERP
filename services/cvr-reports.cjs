@@ -53,7 +53,7 @@ async function createReport({
         select: {
           id: true,
           name: true,
-          number: true,
+          code: true,
         },
       },
     },
@@ -77,7 +77,7 @@ async function getReportById(tenantId, reportId) {
         select: {
           id: true,
           name: true,
-          number: true,
+          code: true,
         },
       },
     },
@@ -123,7 +123,7 @@ async function listReports({
           select: {
             id: true,
             name: true,
-            number: true,
+            code: true,
           },
         },
       },
@@ -190,7 +190,7 @@ async function updateReport(tenantId, reportId, updates) {
         select: {
           id: true,
           name: true,
-          number: true,
+          code: true,
         },
       },
     },
@@ -240,13 +240,13 @@ async function updateReportStatus(
 
   // Set timestamp and user fields based on status
   if (newStatus === 'SUBMITTED') {
-    updateData.submittedDate = new Date();
+    updateData.submittedAt = new Date();
     updateData.submittedBy = userId;
   } else if (newStatus === 'APPROVED') {
-    updateData.approvedDate = new Date();
+    updateData.approvedAt = new Date();
     updateData.approvedBy = userId;
   } else if (newStatus === 'REJECTED') {
-    updateData.rejectedDate = new Date();
+    updateData.rejectedAt = new Date();
     updateData.rejectedBy = userId;
     if (comments) {
       updateData.rejectionReason = comments;
@@ -265,7 +265,7 @@ async function updateReportStatus(
         select: {
           id: true,
           name: true,
-          number: true,
+          code: true,
         },
       },
     },

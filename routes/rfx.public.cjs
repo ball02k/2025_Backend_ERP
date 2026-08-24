@@ -1,15 +1,37 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
+const { writeAudit } = require('../lib/audit.cjs');
+const crypto = require('crypto');
+const multer = require('multer');
+const { storageService } = require('../services/storage.factory.cjs');
 
 const prisma = new PrismaClient();
 const router = express.Router();
+
+// Configure multer for file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+});
 
 /**
  * PUBLIC RFx Response API
  *
  * Allows suppliers to respond to RFx invitations via magic link (responseToken)
  * without authentication. All endpoints are tenant-scoped via the invite.
+ *
+ * Enhanced with:
+ * - Audit logging (opened, saved, submitted)
+ * - Token expiry and revocation checks
+ * - Tracking timestamps (lastOpenedAt, lastSavedAt, submittedAt)
+ * - Structured request logging
+ * - 409 lock after submission
  */
+
+// Helper to generate unique request ID for tracing
+function generateRequestId() {
+  return crypto.randomBytes(8).toString('hex');
+}
 
 // Helper to load invite and validate token
 async function loadInviteByToken(responseToken) {
@@ -19,27 +41,43 @@ async function loadInviteByToken(responseToken) {
 
   const invite = await prisma.requestInvite.findFirst({
     where: { responseToken },
-    include: {
-      request: {
+  });
+
+  if (!invite) {
+    return null;
+  }
+
+  // Check if token is revoked
+  if (invite.revokedAt) {
+    return { error: 'TOKEN_REVOKED', invite: null };
+  }
+
+  // Check if token is expired
+  if (invite.expiresAt && new Date() > invite.expiresAt) {
+    return { error: 'TOKEN_EXPIRED', invite: null };
+  }
+
+  // Fetch the associated Request with package/project details
+  const request = await prisma.request.findFirst({
+    where: { id: invite.requestId },
+    select: {
+      id: true,
+      tenantId: true,
+      title: true,
+      type: true,
+      deadline: true,
+      status: true,
+      addenda: true,
+      packageId: true,
+      package: {
         select: {
           id: true,
-          tenantId: true,
-          title: true,
-          description: true,
-          deadline: true,
-          status: true,
-          packageId: true,
-          package: {
+          name: true,
+          projectId: true,
+          project: {
             select: {
               id: true,
               name: true,
-              code: true,
-              project: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
             },
           },
         },
@@ -47,7 +85,35 @@ async function loadInviteByToken(responseToken) {
     },
   });
 
-  return invite;
+  if (!request) {
+    return { error: 'RFX_NOT_FOUND', invite: null };
+  }
+
+  // Fetch sections and questions for this request
+  const sections = await prisma.requestSection.findMany({
+    where: {
+      tenantId: invite.tenantId,
+      requestId: request.id,
+    },
+    orderBy: { order: 'asc' },
+  });
+
+  const questions = await prisma.requestQuestion.findMany({
+    where: {
+      tenantId: invite.tenantId,
+      requestId: request.id,
+    },
+    orderBy: { order: 'asc' },
+  });
+
+  // Attach sections and questions to request
+  request.sections = sections;
+  request.questions = questions;
+
+  // Attach request to invite object for convenience
+  invite.request = request;
+
+  return { invite };
 }
 
 // Helper to load or find submission for an invite
@@ -84,17 +150,31 @@ async function loadSubmission(tenantId, requestId, invite) {
 // GET /api/public/rfx/respond/:responseToken
 // Load RFx details, invite info, and existing submission (if any)
 router.get('/respond/:responseToken', async (req, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
     const { responseToken } = req.params;
 
-    const invite = await loadInviteByToken(responseToken);
+    console.log(`[${requestId}] [supplier_portal] GET /respond/:token - Loading invite`);
 
-    if (!invite) {
+    const result = await loadInviteByToken(responseToken);
+
+    if (!result) {
+      console.log(`[${requestId}] [supplier_portal] Token not found: ${responseToken?.substring(0, 8)}...`);
       return res.status(404).json({ error: 'INVALID_TOKEN' });
     }
 
+    if (result.error) {
+      console.log(`[${requestId}] [supplier_portal] Token validation failed: ${result.error}`);
+      return res.status(403).json({ error: result.error });
+    }
+
+    const invite = result.invite;
+
     // Check if Request exists
     if (!invite.request) {
+      console.log(`[${requestId}] [supplier_portal] RFx not found for invite ${invite.id}`);
       return res.status(404).json({ error: 'RFX_NOT_FOUND' });
     }
 
@@ -104,16 +184,72 @@ router.get('/respond/:responseToken', async (req, res) => {
     // Load existing submission if any
     const submission = await loadSubmission(tenantId, request.id, invite);
 
+    // Update lastOpenedAt timestamp
+    await prisma.requestInvite.update({
+      where: { id: invite.id },
+      data: { lastOpenedAt: new Date() },
+    });
+
+    // Audit log: supplier opened portal
+    try {
+      await writeAudit(
+        tenantId,
+        null, // No userId for supplier (they're not logged in)
+        'supplier_invite_opened',
+        'RequestInvite',
+        invite.id,
+        {
+          requestId: request.id,
+          requestTitle: request.title,
+          supplierId: invite.supplierId,
+          supplierName: invite.supplierName,
+          email: invite.email,
+          hasExistingSubmission: Boolean(submission),
+          submissionStatus: submission?.status,
+          actorType: 'supplier_portal',
+          requestIdTrace: requestId,
+        }
+      );
+    } catch (auditErr) {
+      console.error(`[${requestId}] Audit log failed:`, auditErr.message);
+    }
+
+    console.log(`[${requestId}] [supplier_portal] Loaded RFx ${request.id} for tenant ${tenantId}, invite ${invite.id}, elapsed ${Date.now() - startTime}ms`);
+
+    // Organize questions by section
+    const sectionsMap = new Map();
+
+    // First, create sections with empty questions arrays
+    (request.sections || []).forEach(section => {
+      sectionsMap.set(section.id, {
+        ...section,
+        questions: [],
+      });
+    });
+
+    // Then, assign questions to their sections
+    (request.questions || []).forEach(question => {
+      if (question.sectionId && sectionsMap.has(question.sectionId)) {
+        sectionsMap.get(question.sectionId).questions.push(question);
+      }
+    });
+
+    // Convert map to array and sort by order
+    const sectionsWithQuestions = Array.from(sectionsMap.values()).sort((a, b) => a.order - b.order);
+
     // Build response
     const rfxData = {
       id: request.id,
       title: request.title,
-      description: request.description || null,
+      type: request.type || 'RFP',
+      description: request.addenda || null,
       deadline: request.deadline,
       status: request.status,
       projectName: request.package?.project?.name || null,
       packageName: request.package?.name || null,
       packageCode: request.package?.code || null,
+      sections: sectionsWithQuestions,
+      questions: request.questions || [], // Keep flat list for backwards compatibility
     };
 
     const inviteData = {
@@ -155,23 +291,34 @@ router.get('/respond/:responseToken', async (req, res) => {
       submission: submissionData,
     });
   } catch (error) {
-    console.error('[rfx.public] GET /respond/:responseToken error:', error);
-    return res.status(500).json({ error: 'SERVER_ERROR' });
+    console.error(`[${requestId || 'unknown'}] [rfx.public] GET /respond/:responseToken error:`, error);
+    return res.status(500).json({ error: 'SERVER_ERROR', message: error.message });
   }
 });
 
 // POST /api/public/rfx/respond/:responseToken/save
 // Save draft response
 router.post('/respond/:responseToken/save', async (req, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
     const { responseToken } = req.params;
     const body = req.body || {};
 
-    const invite = await loadInviteByToken(responseToken);
+    console.log(`[${requestId}] [supplier_portal] POST /respond/:token/save - Saving draft`);
 
-    if (!invite) {
+    const result = await loadInviteByToken(responseToken);
+
+    if (!result) {
       return res.status(404).json({ error: 'INVALID_TOKEN' });
     }
+
+    if (result.error) {
+      return res.status(403).json({ error: result.error });
+    }
+
+    const invite = result.invite;
 
     if (!invite.request) {
       return res.status(404).json({ error: 'RFX_NOT_FOUND' });
@@ -179,7 +326,16 @@ router.post('/respond/:responseToken/save', async (req, res) => {
 
     const request = invite.request;
     const tenantId = invite.tenantId;
-    const requestId = request.id;
+    const rfxId = request.id;
+
+    // Check if already submitted - return 409 Conflict
+    if (invite.submittedAt || invite.status === 'responded') {
+      console.log(`[${requestId}] [supplier_portal] Cannot save - already submitted`);
+      return res.status(409).json({
+        error: 'ALREADY_SUBMITTED',
+        message: 'This response has already been submitted and cannot be modified'
+      });
+    }
 
     // Extract supplier/contact info from body
     const {
@@ -228,6 +384,20 @@ router.post('/respond/:responseToken/save', async (req, res) => {
       ...otherAnswers,
     };
 
+    // Extract file URLs from answers (keys like q_20 with URLs)
+    const fileEntries = [];
+    Object.entries(answers).forEach(([key, value]) => {
+      if (key.startsWith('q_') && typeof value === 'string' && value.startsWith('/uploads/')) {
+        fileEntries.push({
+          questionKey: key,
+          questionId: Number(key.replace('q_', '')),
+          url: value,
+        });
+      }
+    });
+
+    const files = fileEntries.length > 0 ? { uploaded: fileEntries } : null;
+
     // Upsert submission
     let submission;
 
@@ -239,7 +409,7 @@ router.post('/respond/:responseToken/save', async (req, res) => {
       submission = await prisma.requestResponse.findFirst({
         where: {
           tenantId,
-          requestId,
+          requestId: rfxId,
           supplierId: -1, // Dummy for manual invites
           stage: 1,
         },
@@ -251,6 +421,7 @@ router.post('/respond/:responseToken/save', async (req, res) => {
           where: { id: submission.id },
           data: {
             answers: { ...answers, inviteId: invite.id },
+            files,
             status: submission.status === 'submitted' ? 'submitted' : 'in_progress',
           },
         });
@@ -259,10 +430,11 @@ router.post('/respond/:responseToken/save', async (req, res) => {
         submission = await prisma.requestResponse.create({
           data: {
             tenantId,
-            requestId,
+            requestId: rfxId,
             supplierId: -1, // Dummy for manual invites
             stage: 1,
             answers: { ...answers, inviteId: invite.id },
+            files,
             status: 'in_progress',
           },
         });
@@ -272,7 +444,7 @@ router.post('/respond/:responseToken/save', async (req, res) => {
       submission = await prisma.requestResponse.findFirst({
         where: {
           tenantId,
-          requestId,
+          requestId: rfxId,
           supplierId: invite.supplierId,
           stage: 1,
         },
@@ -284,6 +456,7 @@ router.post('/respond/:responseToken/save', async (req, res) => {
           where: { id: submission.id },
           data: {
             answers,
+            files,
             status: submission.status === 'submitted' ? 'submitted' : 'in_progress',
           },
         });
@@ -292,15 +465,48 @@ router.post('/respond/:responseToken/save', async (req, res) => {
         submission = await prisma.requestResponse.create({
           data: {
             tenantId,
-            requestId,
+            requestId: rfxId,
             supplierId: invite.supplierId,
             stage: 1,
             answers,
+            files,
             status: 'in_progress',
           },
         });
       }
     }
+
+    // Update lastSavedAt on invite
+    await prisma.requestInvite.update({
+      where: { id: invite.id },
+      data: { lastSavedAt: new Date() },
+    });
+
+    // Audit log: supplier saved draft
+    try {
+      await writeAudit(
+        tenantId,
+        null,
+        'supplier_response_saved',
+        'RequestResponse',
+        submission.id,
+        {
+          requestId: rfxId,
+          requestTitle: request.title,
+          inviteId: invite.id,
+          supplierId: invite.supplierId,
+          supplierName: answers.supplierName,
+          email: invite.email,
+          totalPrice: answers.totalPrice,
+          actorType: 'supplier_portal',
+          requestIdTrace: requestId,
+        }
+      );
+    } catch (auditErr) {
+      console.error(`[${requestId}] Audit log failed:`, auditErr.message);
+    }
+
+    console.log(`[${requestId}] [supplier_portal] Saved draft for RFx ${rfxId}, invite ${invite.id}, submission ${submission.id}, elapsed ${Date.now() - startTime}ms`);
 
     // Return saved submission
     const submissionData = {
@@ -321,23 +527,34 @@ router.post('/respond/:responseToken/save', async (req, res) => {
       submission: submissionData,
     });
   } catch (error) {
-    console.error('[rfx.public] POST /respond/:responseToken/save error:', error);
-    return res.status(500).json({ error: 'SERVER_ERROR' });
+    console.error(`[${requestId || 'unknown'}] [rfx.public] POST /respond/:responseToken/save error:`, error);
+    return res.status(500).json({ error: 'SERVER_ERROR', message: error.message });
   }
 });
 
 // POST /api/public/rfx/respond/:responseToken/submit
 // Submit final response
 router.post('/respond/:responseToken/submit', async (req, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
     const { responseToken } = req.params;
     const body = req.body || {};
 
-    const invite = await loadInviteByToken(responseToken);
+    console.log(`[${requestId}] [supplier_portal] POST /respond/:token/submit - Submitting final response`);
 
-    if (!invite) {
+    const result = await loadInviteByToken(responseToken);
+
+    if (!result) {
       return res.status(404).json({ error: 'INVALID_TOKEN' });
     }
+
+    if (result.error) {
+      return res.status(403).json({ error: result.error });
+    }
+
+    const invite = result.invite;
 
     if (!invite.request) {
       return res.status(404).json({ error: 'RFX_NOT_FOUND' });
@@ -345,7 +562,16 @@ router.post('/respond/:responseToken/submit', async (req, res) => {
 
     const request = invite.request;
     const tenantId = invite.tenantId;
-    const requestId = request.id;
+    const rfxId = request.id;
+
+    // Check if already submitted
+    if (invite.submittedAt || invite.status === 'responded') {
+      console.log(`[${requestId}] [supplier_portal] Already submitted`);
+      return res.status(409).json({
+        error: 'ALREADY_SUBMITTED',
+        message: 'This response has already been submitted'
+      });
+    }
 
     // Extract supplier/contact info from body
     const {
@@ -388,8 +614,10 @@ router.post('/respond/:responseToken/submit', async (req, res) => {
       inviteUpdates.contactLastName = contactLastName;
     }
     // Update invite status to 'responded'
+    const now = new Date();
     inviteUpdates.status = 'responded';
-    inviteUpdates.respondedAt = new Date();
+    inviteUpdates.respondedAt = now;
+    inviteUpdates.submittedAt = now;
 
     if (Object.keys(inviteUpdates).length > 0) {
       await prisma.requestInvite.update({
@@ -420,7 +648,7 @@ router.post('/respond/:responseToken/submit', async (req, res) => {
       submission = await prisma.requestResponse.findFirst({
         where: {
           tenantId,
-          requestId,
+          requestId: rfxId,
           supplierId: -1,
           stage: 1,
         },
@@ -441,7 +669,7 @@ router.post('/respond/:responseToken/submit', async (req, res) => {
         submission = await prisma.requestResponse.create({
           data: {
             tenantId,
-            requestId,
+            requestId: rfxId,
             supplierId: -1,
             stage: 1,
             answers: { ...answers, inviteId: invite.id },
@@ -455,7 +683,7 @@ router.post('/respond/:responseToken/submit', async (req, res) => {
       submission = await prisma.requestResponse.findFirst({
         where: {
           tenantId,
-          requestId,
+          requestId: rfxId,
           supplierId: invite.supplierId,
           stage: 1,
         },
@@ -476,7 +704,7 @@ router.post('/respond/:responseToken/submit', async (req, res) => {
         submission = await prisma.requestResponse.create({
           data: {
             tenantId,
-            requestId,
+            requestId: rfxId,
             supplierId: invite.supplierId,
             stage: 1,
             answers,
@@ -486,6 +714,33 @@ router.post('/respond/:responseToken/submit', async (req, res) => {
         });
       }
     }
+
+    // Audit log: supplier submitted response
+    try {
+      await writeAudit(
+        tenantId,
+        null,
+        'supplier_response_submitted',
+        'RequestResponse',
+        submission.id,
+        {
+          requestId: rfxId,
+          requestTitle: request.title,
+          inviteId: invite.id,
+          supplierId: invite.supplierId,
+          supplierName: answers.supplierName,
+          email: invite.email,
+          totalPrice: answers.totalPrice,
+          submittedAt: submission.submittedAt,
+          actorType: 'supplier_portal',
+          requestIdTrace: requestId,
+        }
+      );
+    } catch (auditErr) {
+      console.error(`[${requestId}] Audit log failed:`, auditErr.message);
+    }
+
+    console.log(`[${requestId}] [supplier_portal] Submitted response for RFx ${rfxId}, invite ${invite.id}, submission ${submission.id}, elapsed ${Date.now() - startTime}ms`);
 
     // Return final submission
     const submissionData = {
@@ -506,8 +761,79 @@ router.post('/respond/:responseToken/submit', async (req, res) => {
       submission: submissionData,
     });
   } catch (error) {
-    console.error('[rfx.public] POST /respond/:responseToken/submit error:', error);
-    return res.status(500).json({ error: 'SERVER_ERROR' });
+    console.error(`[${requestId || 'unknown'}] [rfx.public] POST /respond/:responseToken/submit error:`, error);
+    return res.status(500).json({ error: 'SERVER_ERROR', message: error.message });
+  }
+});
+
+// POST /respond/:token/upload-file - Upload file for supplier submission
+router.post('/respond/:responseToken/upload-file', upload.single('file'), async (req, res) => {
+  const requestId = generateRequestId();
+  const { responseToken } = req.params;
+
+  try {
+    console.log(`[${requestId}] [supplier_portal] POST /respond/:token/upload-file - Uploading file`);
+
+    // Validate token and load invite
+    const invite = await loadInviteByToken(responseToken);
+    if (!invite) {
+      return res.status(404).json({ error: 'INVITE_NOT_FOUND' });
+    }
+
+    // Check if already submitted
+    if (invite.status === 'responded') {
+      return res.status(409).json({ error: 'ALREADY_SUBMITTED', message: 'Cannot upload files after submission' });
+    }
+
+    // Validate file
+    if (!req.file) {
+      return res.status(400).json({ error: 'NO_FILE', message: 'No file provided' });
+    }
+
+    // Generate unique filename
+    const timestamp = Date.now();
+    const random = crypto.randomBytes(4).toString('hex');
+    const ext = req.file.originalname.split('.').pop();
+    const safeOriginalName = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const filename = `rfx_${invite.rfxId}_${invite.supplierId}_${timestamp}_${random}.${ext}`;
+
+    // Upload file using storage service
+    const result = await storageService.uploadFile(req.file, filename);
+
+    console.log(`[${requestId}] [supplier_portal] File uploaded: ${filename} for RFx ${invite.rfxId}`);
+
+    // Audit log
+    await writeAudit({
+      tenantId: invite.tenantId,
+      userId: null,
+      action: 'supplier_file_uploaded',
+      entityType: 'RequestInvite',
+      entityId: invite.id,
+      metadata: {
+        requestId: invite.rfxId,
+        supplierId: invite.supplierId,
+        filename: result.filename,
+        originalName: req.file.originalname,
+        size: result.size,
+        mimetype: result.mimetype,
+        actorType: 'supplier_portal',
+        requestIdTrace: requestId,
+      },
+    });
+
+    return res.json({
+      success: true,
+      file: {
+        url: result.url,
+        filename: result.filename,
+        originalName: req.file.originalname,
+        size: result.size,
+        mimetype: result.mimetype,
+      },
+    });
+  } catch (error) {
+    console.error(`[${requestId}] [supplier_portal] File upload error:`, error);
+    return res.status(500).json({ error: 'UPLOAD_FAILED', message: error.message });
   }
 });
 

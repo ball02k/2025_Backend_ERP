@@ -193,7 +193,7 @@ router.get('/finance/dashboard-summary', async (req, res) => {
 router.get('/finance/payment-applications', async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const { status, projectId, contractId, packageId, supplierId, search, dateFrom, dateTo } = req.query;
+    const { status, projectId, contractId, packageId, supplierId, search, dateFrom, dateTo, direction } = req.query;
 
     // Build where clause - support ALL filters
     const where = { tenantId };
@@ -212,6 +212,10 @@ router.get('/finance/payment-applications', async (req, res) => {
     }
     if (supplierId && supplierId !== 'ALL') {
       where.supplierId = Number(supplierId);
+    }
+    // Direction filtering - OUTBOUND (raising to MC) or INBOUND (receiving from subs)
+    if (direction) {
+      where.direction = direction;
     }
     if (search) {
       where.applicationNo = { contains: search };
@@ -311,6 +315,13 @@ router.get('/finance/payment-applications', async (req, res) => {
         claimedThisPeriod: Number(app.claimedThisPeriod || 0),
         certifiedThisPeriod: Number(app.certifiedThisPeriod || 0),
         amountPaid: Number(app.amountPaid || 0),
+        direction: app.direction, // Include direction in response
+        paymentCertificateSentAt: app.paymentCertificateSentAt,
+        paymentCertificateSentMethod: app.paymentCertificateSentMethod,
+        paymentCertificateSentTo: app.paymentCertificateSentTo,
+        paymentNoticeSent: app.paymentNoticeSent,
+        paymentNoticeSentAt: app.paymentNoticeSentAt || app.paymentNoticeIssuedAt,
+        paymentNoticeAmount: Number(app.paymentNoticeAmount || 0),
       })),
       summary: {
         totalCount,
@@ -336,7 +347,7 @@ router.get('/finance/payment-applications', async (req, res) => {
 router.get('/finance/payment-applications/export', async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const { status, projectId, contractId, packageId, supplierId, search, dateFrom, dateTo } = req.query;
+    const { status, projectId, contractId, packageId, supplierId, search, dateFrom, dateTo, direction } = req.query;
 
     // Build where clause (same as list endpoint, plus additional filters)
     const where = { tenantId };
@@ -355,6 +366,10 @@ router.get('/finance/payment-applications/export', async (req, res) => {
     }
     if (supplierId && supplierId !== 'ALL') {
       where.supplierId = Number(supplierId);
+    }
+    // Direction filtering - OUTBOUND (raising to MC) or INBOUND (receiving from subs)
+    if (direction) {
+      where.direction = direction;
     }
     if (search) {
       where.applicationNo = { contains: search };

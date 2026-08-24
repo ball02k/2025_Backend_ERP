@@ -3,6 +3,11 @@ const router = express.Router();
 const requireAuth = require('../middleware/requireAuth.cjs');
 const requireFinanceRole = require('../middleware/requireFinanceRole.cjs');
 const { prisma } = require('../utils/prisma.cjs');
+const {
+  evaluateInvoiceLock,
+  enforceDecision,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
 
 router.use(requireAuth);
 router.use(requireFinanceRole);
@@ -16,6 +21,22 @@ function toOrderBy(order) {
   const allowed = new Set(['createdAt', 'updatedAt', 'issueDate', 'dueDate', 'gross', 'number']);
   const k = allowed.has(key) ? key : 'createdAt';
   return { [k]: dir };
+}
+
+async function enforceInvoiceUnlocked(req, invoiceId, action, proposedChanges = {}) {
+  const decision = await evaluateInvoiceLock({
+    prisma,
+    tenantId: req.user?.tenantId,
+    invoiceId,
+    action,
+    proposedChanges,
+  });
+  await enforceDecision(req, 'Invoice', invoiceId, `invoice.${action}`, decision);
+}
+
+function sendFinanceError(res, error, message) {
+  if (sendCommercialLock(res, error)) return;
+  res.status(500).json({ error: message });
 }
 
 // LIST invoices
@@ -104,33 +125,36 @@ router.put('/finance/invoices/:id', async (req, res) => {
     if (status !== undefined) data.status = String(status);
     if (supplierId !== undefined) data.supplierId = supplierId != null ? Number(supplierId) : null;
     if (projectId !== undefined) data.projectId = Number(projectId);
+    await enforceInvoiceUnlocked(req, id, 'update', data);
     const updated = await prisma.invoice.update({ where: { id }, data });
     try { await prisma.auditLog.create({ data: { entity: 'Invoice', entityId: String(id), action: 'update', userId: req.user?.id ?? null, changes: { set: data } } }); } catch(_e) {}
     res.json(updated);
   } catch (e) {
-    res.status(500).json({ error: 'Failed to update invoice' });
+    sendFinanceError(res, e, 'Failed to update invoice');
   }
 });
 
 router.post('/finance/invoices/:id/approve', async (req, res) => {
   try {
     const id = Number(req.params.id);
+    await enforceInvoiceUnlocked(req, id, 'approve', { status: 'Approved' });
     const updated = await prisma.invoice.update({ where: { id }, data: { status: 'Approved' } });
     try { await prisma.auditLog.create({ data: { entity: 'Invoice', entityId: String(id), action: 'approve', userId: req.user?.id ?? null } }); } catch(_e) {}
     res.json(updated);
   } catch (e) {
-    res.status(500).json({ error: 'Failed to approve invoice' });
+    sendFinanceError(res, e, 'Failed to approve invoice');
   }
 });
 
 router.post('/finance/invoices/:id/reject', async (req, res) => {
   try {
     const id = Number(req.params.id);
+    await enforceInvoiceUnlocked(req, id, 'reject', { status: 'Rejected' });
     const updated = await prisma.invoice.update({ where: { id }, data: { status: 'Rejected' } });
     try { await prisma.auditLog.create({ data: { entity: 'Invoice', entityId: String(id), action: 'reject', userId: req.user?.id ?? null } }); } catch(_e) {}
     res.json(updated);
   } catch (e) {
-    res.status(500).json({ error: 'Failed to reject invoice' });
+    sendFinanceError(res, e, 'Failed to reject invoice');
   }
 });
 

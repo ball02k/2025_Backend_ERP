@@ -16,6 +16,20 @@ module.exports = (prisma) => {
     return req.user && req.user.tenantId;
   }
 
+  const requestInviteSendSelect = {
+    id: true,
+    requestId: true,
+    supplierId: true,
+    email: true,
+    supplierName: true,
+    contactFirstName: true,
+    contactLastName: true,
+    status: true,
+    respondedAt: true,
+    responseToken: true,
+    lastSentAt: true,
+  };
+
   // Generate a unique response token for supplier invite portal access
   async function generateUniqueResponseToken(tenantId, maxAttempts = 5) {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -95,8 +109,8 @@ module.exports = (prisma) => {
             select: {
               id: true,
               name: true,
-              code: true,
               projectId: true,
+              costCode: { select: { code: true } },
               project: {
                 select: {
                   id: true,
@@ -194,6 +208,7 @@ module.exports = (prisma) => {
 
           let invite = await prisma.requestInvite.findFirst({
             where: whereClause,
+            select: requestInviteSendSelect,
           });
 
           // Generate response token if needed
@@ -220,11 +235,13 @@ module.exports = (prisma) => {
             invite = await prisma.requestInvite.update({
               where: { id: invite.id },
               data: invitePayload,
+              select: requestInviteSendSelect,
             });
           } else {
             // Create new invite
             invite = await prisma.requestInvite.create({
               data: invitePayload,
+              select: requestInviteSendSelect,
             });
           }
 
@@ -248,7 +265,7 @@ module.exports = (prisma) => {
             },
             package: {
               name: rfx.package?.name || '',
-              code: rfx.package?.code || '',
+              code: rfx.package?.costCode?.code || '',
             },
             rfx: {
               title: rfx.title || '',
@@ -273,6 +290,12 @@ module.exports = (prisma) => {
             to: email.trim(),
             subject: renderedSubject.trim(),
             text: renderedBody,
+          });
+
+          await prisma.requestInvite.update({
+            where: { id: invite.id },
+            data: { status: 'invited', lastSentAt: new Date() },
+            select: { id: true },
           });
 
           // Audit log
@@ -363,6 +386,7 @@ module.exports = (prisma) => {
       // Fetch the existing invite
       const invite = await prisma.requestInvite.findFirst({
         where: { id: inviteId, tenantId },
+        select: requestInviteSendSelect,
       });
 
       if (!invite) {
@@ -382,6 +406,7 @@ module.exports = (prisma) => {
               id: true,
               name: true,
               projectId: true,
+              costCode: { select: { code: true } },
               project: {
                 select: {
                   id: true,
@@ -430,10 +455,9 @@ Best regards,
 {{tenant.name}}
       `.trim();
 
-      // Build base URL for response links
-      const protocol = process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
-      const host = req.get('host');
-      const baseUrl = process.env.PUBLIC_URL || `${protocol}://${host}`;
+      // Build base URL for response links (use PUBLIC_APP_URL for frontend URL, not backend)
+      const publicAppUrl = process.env.PUBLIC_APP_URL || 'http://localhost:5173';
+      const baseUrl = publicAppUrl.replace(/\/$/, ''); // Remove trailing slash
 
       // Build the public response link using the SAME token
       const link = `${baseUrl}/rfx/respond/${invite.responseToken}`;
@@ -455,7 +479,7 @@ Best regards,
         },
         package: {
           name: rfx.package?.name || '',
-          code: rfx.package?.code || '',
+          code: rfx.package?.costCode?.code || '',
         },
         rfx: {
           title: rfx.title || '',
@@ -486,6 +510,7 @@ Best regards,
       await prisma.requestInvite.update({
         where: { id: inviteId },
         data: { lastSentAt: new Date() },
+        select: { id: true },
       });
 
       // Audit log
@@ -564,6 +589,7 @@ Best regards,
       // Delete the invite
       await prisma.requestInvite.delete({
         where: { id: inviteId },
+        select: { id: true },
       });
 
       // Audit log

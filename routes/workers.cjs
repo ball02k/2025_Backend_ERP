@@ -852,5 +852,246 @@ module.exports = (prisma) => {
     }
   });
 
+  // ============================================================================
+  // SUBCONTRACTOR MANAGEMENT (ADMIN)
+  // ============================================================================
+
+  // POST /api/workers/:id/portal-access - Enable/disable portal access
+  router.post('/:id/portal-access', requirePerm('workers:update'), async (req, res) => {
+    try {
+      const { tenantId, userId } = req.user;
+      const { id } = req.params;
+      const { portalEnabled } = req.body;
+
+      const worker = await prisma.worker.findFirst({
+        where: { id, tenantId, isDeleted: false },
+      });
+
+      if (!worker) {
+        return res.status(404).json({
+          success: false,
+          error: 'Worker not found',
+        });
+      }
+
+      const updatedWorker = await prisma.worker.update({
+        where: { id },
+        data: { portalEnabled },
+      });
+
+      // Audit log
+      await prisma.auditLog.create({
+        data: {
+          userId,
+          entity: 'WORKER',
+          entityId: id,
+          action: portalEnabled ? 'PORTAL_ENABLED' : 'PORTAL_DISABLED',
+          changes: {
+            workerId: id,
+            workerNumber: worker.workerNumber,
+            portalEnabled,
+          },
+          ipAddress: req.ip,
+        },
+      });
+
+      res.json({
+        success: true,
+        data: updatedWorker,
+        message: `Portal access ${portalEnabled ? 'enabled' : 'disabled'} successfully`,
+      });
+    } catch (error) {
+      console.error('Error updating portal access:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to update portal access',
+      });
+    }
+  });
+
+  // GET /api/workers/:id/documents - Get subcontractor documents (admin)
+  router.get('/:id/documents', requirePerm('workers:view'), async (req, res) => {
+    try {
+      const { tenantId } = req.user;
+      const { id } = req.params;
+      const { status, documentType } = req.query;
+
+      const worker = await prisma.worker.findFirst({
+        where: { id, tenantId, isDeleted: false },
+      });
+
+      if (!worker) {
+        return res.status(404).json({
+          success: false,
+          error: 'Worker not found',
+        });
+      }
+
+      const where = {
+        workerId: id,
+        tenantId,
+      };
+
+      if (status) where.status = status;
+      if (documentType) where.documentType = documentType;
+
+      const documents = await prisma.subcontractorDocument.findMany({
+        where,
+        orderBy: { uploadedAt: 'desc' },
+      });
+
+      res.json({
+        success: true,
+        data: documents,
+      });
+    } catch (error) {
+      console.error('Error fetching documents:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch documents',
+      });
+    }
+  });
+
+  // POST /api/workers/:workerId/documents/:docId/review - Approve/reject document
+  router.post('/:workerId/documents/:docId/review', requirePerm('workers:update'), async (req, res) => {
+    try {
+      const { tenantId, userId } = req.user;
+      const { workerId, docId } = req.params;
+      const { status, reviewNotes } = req.body;
+
+      if (!['APPROVED', 'REJECTED'].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Status must be APPROVED or REJECTED',
+        });
+      }
+
+      const document = await prisma.subcontractorDocument.findFirst({
+        where: {
+          id: docId,
+          workerId,
+          tenantId,
+        },
+        include: {
+          worker: {
+            select: { workerNumber: true, firstName: true, lastName: true },
+          },
+        },
+      });
+
+      if (!document) {
+        return res.status(404).json({
+          success: false,
+          error: 'Document not found',
+        });
+      }
+
+      const updatedDocument = await prisma.subcontractorDocument.update({
+        where: { id: docId },
+        data: {
+          status,
+          reviewedBy: userId,
+          reviewedAt: new Date(),
+          reviewNotes,
+        },
+      });
+
+      // Audit log
+      await prisma.auditLog.create({
+        data: {
+          userId,
+          entity: 'SUBCONTRACTOR_DOCUMENT',
+          entityId: docId,
+          action: `DOCUMENT_${status}`,
+          changes: {
+            workerId,
+            workerNumber: document.worker.workerNumber,
+            workerName: `${document.worker.firstName} ${document.worker.lastName}`,
+            documentType: document.documentType,
+            documentName: document.documentName,
+            status,
+            reviewNotes,
+          },
+          ipAddress: req.ip,
+        },
+      });
+
+      res.json({
+        success: true,
+        data: updatedDocument,
+        message: `Document ${status.toLowerCase()} successfully`,
+      });
+    } catch (error) {
+      console.error('Error reviewing document:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to review document',
+      });
+    }
+  });
+
+  // GET /api/workers/:id/audit-logs - Get audit logs for subcontractor
+  router.get('/:id/audit-logs', requirePerm('workers:view'), async (req, res) => {
+    try {
+      const { tenantId } = req.user;
+      const { id } = req.params;
+      const { page = 1, limit = 50, action } = req.query;
+
+      const worker = await prisma.worker.findFirst({
+        where: { id, tenantId, isDeleted: false },
+      });
+
+      if (!worker) {
+        return res.status(404).json({
+          success: false,
+          error: 'Worker not found',
+        });
+      }
+
+      const where = {
+        OR: [
+          { entity: 'WORKER', entityId: id },
+          { entity: 'JOB_SCHEDULE', changes: { path: ['performerId'], equals: id } },
+          { entity: 'SUBCONTRACTOR_DOCUMENT', changes: { path: ['workerId'], equals: id } },
+        ],
+      };
+
+      if (action) {
+        where.action = action;
+      }
+
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+      const take = parseInt(limit);
+
+      const [logs, total] = await Promise.all([
+        prisma.auditLog.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { timestamp: 'desc' },
+        }),
+        prisma.auditLog.count({ where }),
+      ]);
+
+      res.json({
+        success: true,
+        data: logs,
+        meta: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(total / parseInt(limit)),
+        },
+      });
+    } catch (error) {
+      console.error('Error fetching audit logs:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch audit logs',
+      });
+    }
+  });
+
   return router;
 };

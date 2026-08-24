@@ -12,28 +12,95 @@ router.get('/', async (req, res, next) => {
     if (!tenantId) return res.status(401).json({ error: 'Unauthorized' });
     if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'projectId required' });
 
-    const project = await prisma.project.findFirst({ where: { id: projectId, tenantId } });
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, tenantId },
+      select: { id: true, name: true },
+    });
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
     const itemsRaw = await prisma.applicationForPayment.findMany({
       where: { tenantId, projectId },
       orderBy: { updatedAt: 'desc' },
       take: 100,
+      select: {
+        id: true,
+        projectId: true,
+        contractId: true,
+        supplierId: true,
+        applicationNumber: true,
+        applicationNo: true,
+        reference: true,
+        status: true,
+        paymentNoticeAmount: true,
+        certifiedThisPeriod: true,
+        certifiedNetValue: true,
+        certifiedAmount: true,
+        claimedThisPeriod: true,
+        claimedNetValue: true,
+        netClaimed: true,
+        amountPaid: true,
+        applicationDate: true,
+        periodStart: true,
+        periodEnd: true,
+        updatedAt: true,
+        contract: {
+          select: {
+            id: true,
+            contractRef: true,
+            title: true,
+          },
+        },
+        supplier: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
     });
     const toStrYymm = (d) => {
       try { const dt = new Date(d); return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`; } catch { return null; }
     };
-  const items = (itemsRaw || []).map((r) => ({
-      id: r.id,
-      projectId: project.id,
-      period: toStrYymm(r.applicationDate),
-      status: r.status,
-      value: r.certifiedAmount != null ? Number(r.certifiedAmount) : (r.netClaimed != null ? Number(r.netClaimed) : null),
-      updatedAt: r.updatedAt,
-    }));
-    // Add links for FE pills
-    const { buildLinks } = require('../lib/buildLinks.cjs');
-    const enriched = items.map(it => ({ ...it, links: buildLinks('afp', { ...it, project: { id: project.id, name: project.name } }) }));
+    const items = (itemsRaw || []).map((r) => {
+      const value =
+        r.paymentNoticeAmount ??
+        r.certifiedThisPeriod ??
+        r.certifiedNetValue ??
+        r.certifiedAmount ??
+        r.claimedThisPeriod ??
+        r.claimedNetValue ??
+        r.netClaimed ??
+        null;
+
+      return {
+        id: r.id,
+        projectId: project.id,
+        contractId: r.contractId,
+        supplierId: r.supplierId,
+        applicationNo: r.applicationNo || (r.applicationNumber ? `PA-${r.applicationNumber}` : null),
+        period: toStrYymm(r.periodStart || r.applicationDate),
+        status: r.status,
+        value: value != null ? Number(value) : null,
+        amountPaid: r.amountPaid != null ? Number(r.amountPaid) : 0,
+        updatedAt: r.updatedAt,
+        links: [
+          { type: 'project', id: project.id, href: `/projects/${project.id}`, label: project.name || `Project ${project.id}` },
+          ...(r.contract ? [{
+            type: 'contract',
+            id: r.contract.id,
+            href: `/contracts/${r.contract.id}`,
+            label: r.contract.contractRef || r.contract.title || `Contract ${r.contract.id}`,
+          }] : []),
+          ...(r.supplier ? [{
+            type: 'supplier',
+            id: r.supplier.id,
+            href: `/suppliers/${r.supplier.id}`,
+            label: r.supplier.name || `Supplier ${r.supplier.id}`,
+          }] : []),
+        ],
+      };
+    });
+    const enriched = items;
     return res.json({ items: enriched });
   } catch (err) { next(err); }
 });

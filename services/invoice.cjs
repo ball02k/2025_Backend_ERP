@@ -10,6 +10,72 @@ const { createActual, updateActualStatus, deleteActual } = require('./cvr.cjs');
 const { markPurchaseOrderInvoiced } = require('./purchaseOrder.cjs');
 
 const prisma = new PrismaClient();
+const invoiceColumnCache = new Map();
+
+async function hasInvoiceColumn(columnName) {
+  if (invoiceColumnCache.has(columnName)) {
+    return invoiceColumnCache.get(columnName);
+  }
+
+  const rows = await prisma.$queryRaw`
+    SELECT 1 AS present
+    FROM information_schema.columns
+    WHERE table_schema = ${'public'}
+      AND table_name = ${'Invoice'}
+      AND column_name = ${columnName}
+    LIMIT 1
+  `;
+  const present = rows.length > 0;
+  invoiceColumnCache.set(columnName, present);
+  return present;
+}
+
+function invoiceSelect(includeDirection = false) {
+  return {
+    id: true,
+    tenantId: true,
+    projectId: true,
+    supplierId: true,
+    budgetLineId: true,
+    contractId: true,
+    number: true,
+    issueDate: true,
+    dueDate: true,
+    net: true,
+    vat: true,
+    gross: true,
+    status: true,
+    documentId: true,
+    ocrStatus: true,
+    ocrResultJson: true,
+    poNumberRef: true,
+    matchStatus: true,
+    matchedPoId: true,
+    source: true,
+    packageId: true,
+    receivedDate: true,
+    matchedDate: true,
+    approvedDate: true,
+    approvedBy: true,
+    paidDate: true,
+    paidAmount: true,
+    paymentRef: true,
+    disputeReason: true,
+    createdAt: true,
+    updatedAt: true,
+    ...(includeDirection ? { direction: true } : {}),
+    project: { select: { code: true, name: true } },
+    supplier: { select: { id: true, name: true } },
+    contract: { select: { id: true, title: true } },
+    budgetLine: { select: { id: true, code: true, description: true } },
+  };
+}
+
+function withLegacyDirection(invoice) {
+  return invoice && invoice.direction == null
+    ? { ...invoice, direction: 'INBOUND' }
+    : invoice;
+}
 
 /**
  * Create a new Invoice (RECEIVED status)
@@ -31,6 +97,7 @@ async function createInvoice({
   source,
   createdBy,
 }) {
+  const hasDirection = await hasInvoiceColumn('direction');
   const invoice = await prisma.invoice.create({
     data: {
       tenantId,
@@ -50,6 +117,7 @@ async function createInvoice({
       matchedPoId,
       source: source || 'MANUAL',
     },
+    select: invoiceSelect(hasDirection),
   });
 
   // Create CVR actual record
@@ -66,7 +134,7 @@ async function createInvoice({
     createdBy,
   });
 
-  return invoice;
+  return withLegacyDirection(invoice);
 }
 
 /**
@@ -237,7 +305,8 @@ async function deleteInvoice(id, tenantId) {
  * Get Invoices with filters
  */
 async function getInvoices(tenantId, filters = {}) {
-  const { projectId, status, supplierId, budgetLineId, limit = 50, offset = 0 } = filters;
+  const { projectId, status, supplierId, budgetLineId, direction, limit = 50, offset = 0 } = filters;
+  const hasDirection = await hasInvoiceColumn('direction');
 
   const where = {
     tenantId,
@@ -245,17 +314,14 @@ async function getInvoices(tenantId, filters = {}) {
     ...(status && { status }),
     ...(supplierId && { supplierId }),
     ...(budgetLineId && { budgetLineId }),
+    // Task 2.5: Direction filtering - OUTBOUND (we raise to MC/client) or INBOUND (we receive from subs)
+    ...(hasDirection && direction && (direction === 'OUTBOUND' || direction === 'INBOUND') && { direction }),
   };
 
   const [items, total] = await Promise.all([
     prisma.invoice.findMany({
       where,
-      include: {
-        project: { select: { code: true, name: true } },
-        supplier: { select: { id: true, name: true } },
-        contract: { select: { id: true, title: true } },
-        budgetLine: { select: { id: true, code: true, description: true } },
-      },
+      select: invoiceSelect(hasDirection),
       orderBy: { createdAt: 'desc' },
       take: limit,
       skip: offset,
@@ -263,48 +329,45 @@ async function getInvoices(tenantId, filters = {}) {
     prisma.invoice.count({ where }),
   ]);
 
-  return { items, total };
+  return { items: items.map(withLegacyDirection), total };
 }
 
 /**
  * Get single Invoice by ID
  */
 async function getInvoiceById(id, tenantId) {
-  return await prisma.invoice.findFirst({
+  const hasDirection = await hasInvoiceColumn('direction');
+  const invoice = await prisma.invoice.findFirst({
     where: { id, tenantId },
-    include: {
-      project: { select: { code: true, name: true } },
-      supplier: { select: { id: true, name: true } },
-      contract: { select: { id: true, title: true } },
-      budgetLine: { select: { id: true, code: true, description: true } },
-    },
+    select: invoiceSelect(hasDirection),
   });
+  return withLegacyDirection(invoice);
 }
 
 /**
  * Get invoices awaiting approval
  */
 async function getInvoicesAwaitingApproval(tenantId, projectId = null) {
+  const hasDirection = await hasInvoiceColumn('direction');
   const where = {
     tenantId,
     status: { in: ['RECEIVED', 'MATCHED'] },
     ...(projectId && { projectId }),
   };
 
-  return await prisma.invoice.findMany({
+  const invoices = await prisma.invoice.findMany({
     where,
-    include: {
-      project: { select: { code: true, name: true } },
-      supplier: { select: { id: true, name: true } },
-    },
+    select: invoiceSelect(hasDirection),
     orderBy: { issueDate: 'asc' },
   });
+  return invoices.map(withLegacyDirection);
 }
 
 /**
  * Get overdue invoices
  */
 async function getOverdueInvoices(tenantId, projectId = null) {
+  const hasDirection = await hasInvoiceColumn('direction');
   const where = {
     tenantId,
     status: { in: ['APPROVED', 'MATCHED', 'RECEIVED'] },
@@ -312,14 +375,12 @@ async function getOverdueInvoices(tenantId, projectId = null) {
     ...(projectId && { projectId }),
   };
 
-  return await prisma.invoice.findMany({
+  const invoices = await prisma.invoice.findMany({
     where,
-    include: {
-      project: { select: { code: true, name: true } },
-      supplier: { select: { id: true, name: true } },
-    },
+    select: invoiceSelect(hasDirection),
     orderBy: { dueDate: 'asc' },
   });
+  return invoices.map(withLegacyDirection);
 }
 
 module.exports = {

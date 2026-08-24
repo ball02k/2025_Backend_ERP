@@ -2,6 +2,7 @@
 const express = require('express');
 const { requirePerm } = require('../middleware/checkPermission.cjs');
 const ConflictDetectionService = require('../services/conflictDetection.cjs');
+const ResourceRecommendationService = require('../services/resourceRecommendation.cjs');
 const {
   scheduleQuerySchema,
   calendarQuerySchema,
@@ -9,10 +10,12 @@ const {
   updateScheduleSchema,
   bulkAssignSchema,
 } = require('../lib/validation.jobSchedules.cjs');
+const { sseEmitter, EventTypes } = require('../services/eventEmitter.cjs');
 
 module.exports = (prisma) => {
   const router = express.Router();
   const conflictService = new ConflictDetectionService(prisma);
+  const recommendationService = new ResourceRecommendationService(prisma);
 
   // Helper: Calculate estimated hours
   function calculateHours(startTime, endTime) {
@@ -522,6 +525,16 @@ module.exports = (prisma) => {
         });
       }
 
+      // Emit real-time event
+      sseEmitter.emitToTenant(tenantId, EventTypes.SCHEDULE_CREATED, {
+        schedule,
+        scheduleId: schedule.id,
+        jobId: schedule.jobId,
+        workerId: schedule.workerId,
+        equipmentId: schedule.equipmentId,
+        hasConflicts: conflictCheck.hasConflicts,
+      });
+
       res.status(201).json({
         schedule,
         conflicts: conflictCheck.hasConflicts ? conflictCheck.conflicts : []
@@ -685,6 +698,15 @@ module.exports = (prisma) => {
         }
       });
 
+      // Emit real-time event
+      sseEmitter.emitToTenant(tenantId, EventTypes.SCHEDULE_CONFIRMED, {
+        schedule: updated,
+        scheduleId: updated.id,
+        jobId: updated.jobId,
+        workerId: updated.workerId,
+        confirmedBy: userId,
+      });
+
       res.json({ schedule: updated });
     } catch (error) {
       console.error('Confirm schedule error:', error);
@@ -774,6 +796,17 @@ module.exports = (prisma) => {
         }
       });
 
+      // Emit real-time event
+      sseEmitter.emitToTenant(tenantId, EventTypes.SCHEDULE_UPDATED, {
+        schedule: updated,
+        scheduleId: updated.id,
+        jobId: updated.jobId,
+        workerId: updated.workerId,
+        equipmentId: updated.equipmentId,
+        changes: Object.keys(updateData),
+        oldSchedule: schedule,
+      });
+
       res.json({
         schedule: updated,
         conflicts: conflictCheck?.conflicts || []
@@ -812,10 +845,115 @@ module.exports = (prisma) => {
         }
       });
 
+      // Emit real-time event
+      sseEmitter.emitToTenant(tenantId, EventTypes.SCHEDULE_DELETED, {
+        scheduleId: id,
+        jobId: schedule.jobId,
+        workerId: schedule.workerId,
+        equipmentId: schedule.equipmentId,
+        deletedBy: userId,
+      });
+
       res.json({ message: 'Schedule deleted successfully' });
     } catch (error) {
       console.error('Delete schedule error:', error);
       res.status(500).json({ error: 'Failed to delete schedule' });
+    }
+  });
+
+  // =========================================================================
+  // POST /api/job-schedules/recommend - Get resource recommendations
+  // =========================================================================
+  router.post('/recommend', requirePerm('schedules:view'), async (req, res) => {
+    try {
+      const { tenantId } = req.user;
+      const {
+        jobId,
+        equipmentType,
+        resourceType = 'workers', // 'workers', 'equipment', or 'both'
+        limit = 10
+      } = req.body;
+
+      let jobDetails = null;
+
+      // If jobId provided, fetch job details
+      if (jobId) {
+        jobDetails = await prisma.job.findFirst({
+          where: {
+            id: jobId,
+            tenantId,
+            isDeleted: false
+          }
+        });
+
+        if (!jobDetails) {
+          return res.status(404).json({ error: 'Job not found' });
+        }
+      }
+
+      // Prepare recommendation parameters
+      const recommendParams = {
+        tenantId,
+        jobId: jobId || null,
+        jobType: jobDetails?.jobType || req.body.jobType,
+        trade: req.body.trade, // Can be specified independently
+        clientId: jobDetails?.clientId || req.body.clientId,
+        siteLatitude: jobDetails?.siteLatitude || req.body.siteLatitude,
+        siteLongitude: jobDetails?.siteLongitude || req.body.siteLongitude,
+        requiredSkills: jobDetails?.requiredSkills || req.body.requiredSkills || [],
+        requiredCerts: jobDetails?.requiredCerts || req.body.requiredCerts || [],
+        estimatedHours: jobDetails?.estimatedDuration || req.body.estimatedHours,
+        scheduledStartDate: jobDetails?.scheduledStartDate || req.body.scheduledStartDate,
+        scheduledEndDate: jobDetails?.scheduledEndDate || req.body.scheduledEndDate,
+        preferredEngineerId: jobDetails?.preferredEngineerId || req.body.preferredEngineerId,
+        slaDueDate: jobDetails?.slaDueDate || req.body.slaDueDate,
+        priority: jobDetails?.priority || req.body.priority || 'NORMAL',
+        limit
+      };
+
+      const results = {};
+
+      // Get worker recommendations
+      if (resourceType === 'workers' || resourceType === 'both') {
+        results.workers = await recommendationService.recommendWorkers(recommendParams);
+      }
+
+      // Get equipment recommendations
+      if (resourceType === 'equipment' || resourceType === 'both') {
+        const equipmentParams = {
+          ...recommendParams,
+          equipmentType: equipmentType || req.body.equipmentType
+        };
+        results.equipment = await recommendationService.recommendEquipment(equipmentParams);
+      }
+
+      // Add summary
+      const summary = {
+        jobId,
+        jobNumber: jobDetails?.jobNumber,
+        jobTitle: jobDetails?.title,
+        requiredSkills: recommendParams.requiredSkills,
+        requiredCerts: recommendParams.requiredCerts,
+        scheduledStartDate: recommendParams.scheduledStartDate,
+        scheduledEndDate: recommendParams.scheduledEndDate,
+        estimatedHours: recommendParams.estimatedHours,
+        priority: recommendParams.priority,
+        slaStatus: recommendParams.slaDueDate ?
+          (new Date(recommendParams.slaDueDate) < new Date() ? 'OVERDUE' : 'ACTIVE') : 'NONE'
+      };
+
+      res.json({
+        success: true,
+        summary,
+        recommendations: results
+      });
+    } catch (error) {
+      console.error('Recommendation error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to generate recommendations',
+        details: error.message
+      });
     }
   });
 

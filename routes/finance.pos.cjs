@@ -3,6 +3,11 @@ const router = express.Router();
 const requireAuth = require('../middleware/requireAuth.cjs');
 const requireFinanceRole = require('../middleware/requireFinanceRole.cjs');
 const { prisma } = require('../utils/prisma.cjs');
+const {
+  evaluatePurchaseOrderLock,
+  enforceDecision,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
 
 router.use(requireAuth);
 router.use(requireFinanceRole);
@@ -20,8 +25,37 @@ function toOrderBy(order) {
 
 async function nextPoCode(tenantId) {
   const y = new Date().getFullYear();
-  const count = await prisma.purchaseOrder.count({ where: { tenantId } });
-  return `PO-${y}-${String(count + 1).padStart(4, '0')}`;
+  const prefix = `PO-${y}-`;
+  const latest = await prisma.purchaseOrder.findFirst({
+    where: { tenantId, code: { startsWith: prefix } },
+    orderBy: { id: 'desc' },
+    select: { code: true },
+  });
+  const match = latest?.code ? String(latest.code).match(/-(\d+)$/) : null;
+  let next = match ? Number(match[1]) + 1 : 1;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const code = `${prefix}${String(next).padStart(4, '0')}`;
+    const existing = await prisma.purchaseOrder.findFirst({ where: { tenantId, code }, select: { id: true } });
+    if (!existing) return code;
+    next++;
+  }
+  return `${prefix}${Date.now().toString().slice(-6)}`;
+}
+
+async function enforcePoUnlocked(req, poId, action, proposedChanges = {}) {
+  const decision = await evaluatePurchaseOrderLock({
+    prisma,
+    tenantId: req.user?.tenantId,
+    purchaseOrderId: poId,
+    action,
+    proposedChanges,
+  });
+  await enforceDecision(req, 'PurchaseOrder', poId, `purchase_order.${action}`, decision);
+}
+
+function sendFinanceError(res, error, message) {
+  if (sendCommercialLock(res, error)) return;
+  res.status(500).json({ error: message });
 }
 
   // LIST POs (with document presence)
@@ -81,7 +115,7 @@ async function nextPoCode(tenantId) {
     }
     const code = await nextPoCode(tenantId);
     const po = await prisma.purchaseOrder.create({
-      data: { tenantId, projectId: Number(projectId), code, supplier: supplierName || 'Unknown', supplierId: supplierIdNum, status: 'Open', total: 0, notes },
+      data: { tenantId, projectId: Number(projectId), code, supplier: supplierName || 'Unknown', supplierId: supplierIdNum, status: 'Open', total: 0, internalNotes: notes || null },
     });
     // Audit
     try { await prisma.auditLog.create({ data: { entity: 'PurchaseOrder', entityId: String(po.id), action: 'create', userId: req.user?.id ?? null, changes: { create: { projectId, supplierId } } } }); } catch (_e) {}
@@ -120,13 +154,14 @@ async function nextPoCode(tenantId) {
     const data = {};
     if (supplier !== undefined) data.supplier = supplier;
     if (status !== undefined) data.status = status;
-    if (notes !== undefined) data.notes = notes;
+    if (notes !== undefined) data.internalNotes = notes;
     if (total !== undefined) data.total = Number(total);
+    await enforcePoUnlocked(req, id, 'update', data);
     const updated = await prisma.purchaseOrder.update({ where: { id }, data });
     try { await prisma.auditLog.create({ data: { entity: 'PurchaseOrder', entityId: String(id), action: 'update', userId: req.user?.id ?? null, changes: { set: data } } }); } catch(_e) {}
     res.json(updated);
   } catch (e) {
-    res.status(500).json({ error: 'Failed to update PO' });
+    sendFinanceError(res, e, 'Failed to update PO');
   }
 });
 
@@ -137,6 +172,7 @@ async function nextPoCode(tenantId) {
     const id = Number(req.params.id);
     const lines = Array.isArray(req.body) ? req.body : (Array.isArray(req.body?.lines) ? req.body.lines : []);
     if (!lines.length) return res.status(400).json({ error: 'No lines provided' });
+    await enforcePoUnlocked(req, id, 'add_line', { lines: true });
     let lineNo = Number(req.body?.start || 1);
     const created = [];
     for (const l of lines) {
@@ -153,14 +189,21 @@ async function nextPoCode(tenantId) {
     try { await prisma.auditLog.create({ data: { entity: 'PurchaseOrder', entityId: String(id), action: 'update_lines', userId: req.user?.id ?? null, changes: { add: created.length } } }); } catch(_e) {}
     res.json({ items: created });
   } catch (e) {
-    res.status(500).json({ error: 'Failed to add PO lines' });
+    sendFinanceError(res, e, 'Failed to add PO lines');
   }
 });
 
   // Update a line
   router.put('/finance/pos/:id/lines/:lineId', async (req, res) => {
   try {
+    const tenantId = req.user.tenantId;
+    const poId = Number(req.params.id);
     const id = Number(req.params.lineId);
+    const existingLine = await prisma.pOLine.findFirst({
+      where: { id, poId, tenantId },
+      select: { id: true, qty: true, unitCost: true },
+    });
+    if (!existingLine) return res.status(404).json({ error: 'PO line not found' });
     const { item, description, qty, unit, unitCost, lineTotal } = req.body || {};
     const data = {};
     if (item !== undefined || description !== undefined) data.item = String(description ?? item ?? '');
@@ -168,23 +211,41 @@ async function nextPoCode(tenantId) {
     if (unit !== undefined) data.unit = String(unit);
     if (unitCost !== undefined) data.unitCost = Number(unitCost);
     if (lineTotal !== undefined) data.lineTotal = Number(lineTotal);
+    if (lineTotal === undefined && (qty !== undefined || unitCost !== undefined)) {
+      const nextQty = qty !== undefined ? Number(qty) : Number(existingLine.qty || 0);
+      const nextUnitCost = unitCost !== undefined ? Number(unitCost) : Number(existingLine.unitCost || 0);
+      data.lineTotal = nextQty * nextUnitCost;
+    }
+    await enforcePoUnlocked(req, poId, 'update_line', data);
     const row = await prisma.pOLine.update({ where: { id }, data });
+    const sum = await prisma.pOLine.aggregate({ where: { poId }, _sum: { lineTotal: true } });
+    await prisma.purchaseOrder.update({ where: { id: poId }, data: { total: sum._sum.lineTotal || 0 } });
     try { await prisma.auditLog.create({ data: { entity: 'POLine', entityId: String(id), action: 'update', userId: req.user?.id ?? null, changes: { set: data } } }); } catch(_e) {}
     res.json(row);
   } catch (e) {
-    res.status(500).json({ error: 'Failed to update PO line' });
+    sendFinanceError(res, e, 'Failed to update PO line');
   }
 });
 
   // Delete a line
   router.delete('/finance/pos/:id/lines/:lineId', async (req, res) => {
   try {
+    const tenantId = req.user.tenantId;
+    const poId = Number(req.params.id);
     const id = Number(req.params.lineId);
+    const existingLine = await prisma.pOLine.findFirst({
+      where: { id, poId, tenantId },
+      select: { id: true },
+    });
+    if (!existingLine) return res.status(404).json({ error: 'PO line not found' });
+    await enforcePoUnlocked(req, poId, 'delete_line', { lines: true });
     await prisma.pOLine.delete({ where: { id } });
+    const sum = await prisma.pOLine.aggregate({ where: { poId }, _sum: { lineTotal: true } });
+    await prisma.purchaseOrder.update({ where: { id: poId }, data: { total: sum._sum.lineTotal || 0 } });
     try { await prisma.auditLog.create({ data: { entity: 'POLine', entityId: String(id), action: 'delete', userId: req.user?.id ?? null } } ); } catch(_e) {}
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: 'Failed to delete PO line' });
+    sendFinanceError(res, e, 'Failed to delete PO line');
   }
 });
 

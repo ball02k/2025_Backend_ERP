@@ -1,0 +1,57 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./",
+
+    // Allow JavaScript files
+    "allowJs": true,
+    "checkJs": false,
+
+    // Generate .d.ts files
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
+
+    // Type checking
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+
+    // Module resolution
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "typeRoots": ["./node_modules/@types"],
+    "types": ["node"],
+
+    // Other
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Source maps
+    "sourceMap": false,
+    "inlineSourceMap": false
+  },
+  "include": [
+    "services/**/*.ts",
+    "routes/**/*.ts",
+    "types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "node_modules/**",
+    "dist",
+    "prisma",
+    "**/*.d 2.ts",
+    "**/*.d 3.ts"
+  ]
+}

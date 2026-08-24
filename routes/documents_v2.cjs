@@ -182,7 +182,7 @@ router.post('/complete', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-    const { q, projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId, entityType, entityId, limit = 50, offset = 0, includeImports } = req.query;
+    const { q, projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId, invoiceId, supplierId, entityType, entityId, limit = 50, offset = 0, includeImports } = req.query;
 
     const where = { tenantId };
 
@@ -193,20 +193,30 @@ router.get('/', async (req, res) => {
       ];
     }
 
-    if (projectId || variationId || rfiId || qaRecordId || hsEventId || carbonEntryId || entityType || entityId) {
-      where.links = {
-        some: {
-          tenantId,
-          ...(projectId ? { projectId: Number(projectId) } : {}),
-          ...(variationId ? { variationId: Number(variationId) } : {}),
-          ...(rfiId ? { rfiId: Number(rfiId) } : {}),
-          ...(qaRecordId ? { qaRecordId: Number(qaRecordId) } : {}),
-          ...(hsEventId ? { hsEventId: Number(hsEventId) } : {}),
-          ...(carbonEntryId ? { carbonEntryId: Number(carbonEntryId) } : {}),
-          ...(entityType ? { entityType: String(entityType) } : {}),
-          ...(entityId != null ? { entityId: Number(entityId) } : {}),
-        },
-      };
+    if (projectId || variationId || rfiId || qaRecordId || hsEventId || carbonEntryId || invoiceId || supplierId || entityType || entityId) {
+      // Build the links filter - use specific fields if available, otherwise fall back to polymorphic
+      const linkFilter = { tenantId };
+
+      if (projectId) linkFilter.projectId = Number(projectId);
+      if (variationId) linkFilter.variationId = Number(variationId);
+      if (rfiId) linkFilter.rfiId = Number(rfiId);
+      if (qaRecordId) linkFilter.qaRecordId = Number(qaRecordId);
+      if (hsEventId) linkFilter.hsEventId = Number(hsEventId);
+      if (carbonEntryId) linkFilter.carbonEntryId = Number(carbonEntryId);
+
+      // Handle polymorphic linking - specific types take precedence
+      if (invoiceId) {
+        linkFilter.entityType = 'invoice';
+        linkFilter.entityId = Number(invoiceId);
+      } else if (supplierId) {
+        linkFilter.entityType = 'supplier';
+        linkFilter.entityId = Number(supplierId);
+      } else if (entityType || entityId != null) {
+        if (entityType) linkFilter.entityType = String(entityType);
+        if (entityId != null) linkFilter.entityId = Number(entityId);
+      }
+
+      where.links = { some: linkFilter };
     }
 
     // By default hide import-temporary files (category starting with 'import:') unless includeImports=true|1
@@ -335,8 +345,8 @@ router.delete('/:id', async (req, res) => {
 
 // POST /api/documents/:id/link
 router.post('/:id/link', async (req, res) => {
-  const { projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId, poId } = req.body || {};
-  if (!projectId && !variationId && !rfiId && !qaRecordId && !hsEventId && !carbonEntryId && !poId)
+  const { projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId, poId, invoiceId, supplierId, entityType, entityId } = req.body || {};
+  if (!projectId && !variationId && !rfiId && !qaRecordId && !hsEventId && !carbonEntryId && !poId && !invoiceId && !supplierId && !entityType)
     return res.status(400).json({ error: 'Provide a valid link target' });
 
   try {
@@ -356,7 +366,9 @@ router.post('/:id/link', async (req, res) => {
         hsEventId: hsEventId ? Number(hsEventId) : null,
         carbonEntryId: carbonEntryId ? Number(carbonEntryId) : null,
         poId: poId ? Number(poId) : null,
-        linkType: projectId ? 'project' : variationId ? 'variation' : poId ? 'po' : rfiId ? 'rfi' : qaRecordId ? 'qa' : hsEventId ? 'hs' : 'carbon',
+        entityType: invoiceId ? 'invoice' : supplierId ? 'supplier' : entityType ? String(entityType) : null,
+        entityId: invoiceId ? Number(invoiceId) : supplierId ? Number(supplierId) : entityId ? Number(entityId) : null,
+        linkType: projectId ? 'project' : variationId ? 'variation' : poId ? 'po' : rfiId ? 'rfi' : qaRecordId ? 'qa' : hsEventId ? 'hs' : invoiceId ? 'invoice' : supplierId ? 'supplier' : entityType ? String(entityType) : 'carbon',
       },
     });
 
@@ -369,8 +381,8 @@ router.post('/:id/link', async (req, res) => {
 
 // POST /api/documents/:id/unlink
 router.post('/:id/unlink', async (req, res) => {
-  const { projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId, poId } = req.body || {};
-  if (!projectId && !variationId && !rfiId && !qaRecordId && !hsEventId && !carbonEntryId && !poId)
+  const { projectId, variationId, rfiId, qaRecordId, hsEventId, carbonEntryId, poId, invoiceId, supplierId, entityType, entityId } = req.body || {};
+  if (!projectId && !variationId && !rfiId && !qaRecordId && !hsEventId && !carbonEntryId && !poId && !invoiceId && !supplierId && !entityType)
     return res.status(400).json({ error: 'Provide a valid unlink target' });
   try {
     const tenantId = req.user.tenantId;
@@ -385,6 +397,10 @@ router.post('/:id/unlink', async (req, res) => {
       ...(qaRecordId ? { qaRecordId: Number(qaRecordId) } : {}),
       ...(hsEventId ? { hsEventId: Number(hsEventId) } : {}),
       ...(carbonEntryId ? { carbonEntryId: Number(carbonEntryId) } : {}),
+      ...(invoiceId ? { entityType: 'invoice', entityId: Number(invoiceId) } : {}),
+      ...(supplierId ? { entityType: 'supplier', entityId: Number(supplierId) } : {}),
+      ...(entityType ? { entityType: String(entityType) } : {}),
+      ...(entityId != null ? { entityId: Number(entityId) } : {}),
     };
     const result = await prisma.documentLink.deleteMany({ where });
     res.json({ data: { deleted: result.count } });

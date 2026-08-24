@@ -3,6 +3,11 @@ const router = express.Router();
 const { prisma, dec } = require('../utils/prisma.cjs');
 const { requireProjectMember } = require('../middleware/membership.cjs');
 const { recomputeProcurement } = require('../services/projectSnapshot');
+const {
+  evaluatePurchaseOrderLock,
+  enforceDecision,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
 
 function getTenantId(req) {
   return req.user && req.user.tenantId;
@@ -46,6 +51,17 @@ async function attachSupplierInfo(rows, tenantId) {
   return Array.isArray(rows) ? rows.map(decorate) : decorate(rows);
 }
 
+async function enforcePoUnlocked(req, tenantId, poId, action, proposedChanges = {}) {
+  const decision = await evaluatePurchaseOrderLock({
+    prisma,
+    tenantId,
+    purchaseOrderId: poId,
+    action,
+    proposedChanges,
+  });
+  await enforceDecision(req, 'PurchaseOrder', poId, `purchase_order.${action}`, decision);
+}
+
 router.get('/', requireProjectMember, async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
@@ -83,7 +99,10 @@ router.get('/', requireProjectMember, async (req, res, next) => {
       supplier: { id: r.supplierId || null, name: r.supplier || null },
     }));
     res.json({ total, items });
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (sendCommercialLock(res, e)) return;
+    next(e);
+  }
 });
 
 // --- Fuzzy matching utilities (no external deps) ---
@@ -245,6 +264,7 @@ router.put('/pos/:id', async (req, res, next) => {
     await new Promise((resolve, reject) => requireProjectMember(req, res, (err) => err ? reject(err) : resolve()));
 
     const { lines = [], ...data } = req.body;
+    await enforcePoUnlocked(req, tenantId, id, 'update', { ...data, ...(lines.length ? { lines: true } : {}) });
     const updated = await prisma.$transaction(async (tx) => {
       await tx.pOLine.deleteMany({ where: { poId: id, tenantId } });
       if (lines.length) {
@@ -303,7 +323,10 @@ router.put('/pos/:id', async (req, res, next) => {
       ...updatedWithSupplier,
       supplier: updatedWithSupplier.supplierId ? { id: updatedWithSupplier.supplierId, name: updatedWithSupplier.supplierInfo?.name || updatedWithSupplier.supplier || null } : (updatedWithSupplier.supplier ? { id: null, name: updatedWithSupplier.supplier } : null),
     });
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (sendCommercialLock(res, e)) return;
+    next(e);
+  }
 });
 
 // Delete PO
@@ -318,6 +341,7 @@ router.delete('/pos/:id', async (req, res, next) => {
     req.query.projectId = String(existing.projectId);
     await new Promise((resolve, reject) => requireProjectMember(req, res, (err) => err ? reject(err) : resolve()));
 
+    await enforcePoUnlocked(req, tenantId, id, 'delete', {});
     await prisma.$transaction(async (tx) => {
       await tx.pOLine.deleteMany({ where: { poId: id, tenantId } });
       await tx.delivery.deleteMany({ where: { poId: id, tenantId } });
@@ -325,7 +349,10 @@ router.delete('/pos/:id', async (req, res, next) => {
     });
     await recomputeProcurement(existing.projectId, tenantId);
     res.status(204).end();
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (sendCommercialLock(res, e)) return;
+    next(e);
+  }
 });
 
 // Create Delivery

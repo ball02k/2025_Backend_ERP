@@ -4,6 +4,26 @@ const cvrService = require('../services/cvr.cjs');
 
 module.exports = (prisma) => {
   const router = express.Router();
+  const invoiceColumnCache = new Map();
+
+  async function hasInvoiceColumn(columnName) {
+    if (invoiceColumnCache.has(columnName)) {
+      return invoiceColumnCache.get(columnName);
+    }
+
+    const rows = await prisma.$queryRaw`
+      SELECT 1 AS present
+      FROM information_schema.columns
+      WHERE table_schema = ${'public'}
+        AND table_name = ${'Invoice'}
+        AND column_name = ${columnName}
+      LIMIT 1
+    `;
+    const present = rows.length > 0;
+    invoiceColumnCache.set(columnName, present);
+    return present;
+  }
+
   function toCsvRow(values) {
     return values.map((v)=>{
       if (v === null || v === undefined) return '';
@@ -86,10 +106,16 @@ module.exports = (prisma) => {
       const supplierId = Number(req.query.supplierId);
       const from = req.query.from ? new Date(String(req.query.from)) : null; // dueDate from
       const to = req.query.to ? new Date(String(req.query.to)) : null;       // dueDate to
+      const direction = req.query.direction; // INBOUND or OUTBOUND
+      const hasDirection = await hasInvoiceColumn('direction');
 
       const where = { tenantId, projectId };
       if (statusList) where.status = { in: statusList };
       if (Number.isFinite(supplierId)) where.supplierId = supplierId;
+      // Task 2.5: Filter by direction (INBOUND = received from suppliers, OUTBOUND = raised to clients)
+      if (hasDirection && (direction === 'INBOUND' || direction === 'OUTBOUND')) {
+        where.direction = direction;
+      }
       if (from || to) {
         where.dueDate = {};
         if (from) where.dueDate.gte = from;
@@ -106,6 +132,7 @@ module.exports = (prisma) => {
             id: true,
             number: true,
             status: true,
+            ...(hasDirection ? { direction: true } : {}),
             supplierId: true,
             issueDate: true,
             dueDate: true,
@@ -135,6 +162,7 @@ module.exports = (prisma) => {
           id: r.id,
           number: r.number,
           status: r.status,
+          direction: r.direction || 'INBOUND',
           projectId: r.projectId,
           project: proj,
           supplierId: r.supplierId || null,

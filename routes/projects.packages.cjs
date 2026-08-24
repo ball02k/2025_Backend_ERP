@@ -3,8 +3,11 @@ const { PrismaClient, Prisma } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { buildLinks } = require('../lib/buildLinks.cjs');
 const { safeJson } = require('../lib/serialize.cjs');
-
-console.log('===== [projects.packages.cjs] MODULE LOADED AT', new Date().toISOString(), '=====');
+const {
+  evaluatePackageLock,
+  enforceDecision,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
 
 const packageSelect = {
   id: true,
@@ -182,7 +185,7 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
     let rows = [];
     try {
       rows = await prisma.package.findMany({
-        where: { projectId },
+        where: { projectId, project: { tenantId } },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
         select: {
           ...packageSelect,
@@ -223,12 +226,11 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
       });
     } catch (e) {
       // Fallback minimal selection if schema migrations not applied yet
-      rows = await prisma.package.findMany({ where: { projectId }, orderBy: [{ name: 'asc' }, { id: 'asc' }], select: packageSelect });
+      rows = await prisma.package.findMany({ where: { projectId, project: { tenantId } }, orderBy: [{ name: 'asc' }, { id: 'asc' }], select: packageSelect });
     }
 
     // Check for existing RFx for each package
     const packageIds = rows.map(pkg => pkg.id);
-    console.log('[projects.packages] Checking for tenders:', { tenantId, packageIds });
     const existingRfx = await prisma.request.findMany({
       where: { tenantId, packageId: { in: packageIds } },
       select: { id: true, packageId: true, status: true }
@@ -236,7 +238,6 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
       console.error('[projects.packages] Failed to query requests:', err.message);
       return [];
     });
-    console.log('[projects.packages] Found tenders:', existingRfx);
     const rfxMap = new Map(existingRfx.map(r => [r.packageId, { id: r.id, status: r.status }]));
 
     const data = rows.map((pkg) => {
@@ -249,7 +250,7 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
 
       // Check for active tender (Request table)
       const rfxInfo = rfxMap.get(pkg.id);
-      if (rfxInfo && ['draft', 'open', 'issued', 'evaluating'].includes(rfxInfo.status)) {
+      if (rfxInfo && !['closed', 'cancelled', 'void'].includes(String(rfxInfo.status || '').toLowerCase())) {
         sourcingStatus = 'tender';
         tenderId = rfxInfo.id;
       }
@@ -275,21 +276,8 @@ router.get('/projects/:projectId/packages', async (req, res, next) => {
       normalized.tenderId = tenderId;
       normalized.contractId = contractId;
 
-      // Debug log for first package
-      if (pkg.id === packageIds[0]) {
-        console.log('[projects.packages] First package sourcing:', {
-          packageId: pkg.id,
-          packageName: pkg.name,
-          sourcingStatus,
-          tenderId,
-          contractId,
-          hasContracts: normalized.contracts?.length,
-        });
-      }
-
       return normalized;
     });
-    console.log('[projects.packages] Returning', data.length, 'packages');
     res.json({ items: data, total: data.length });
   } catch (e) { next(e); }
 });
@@ -303,16 +291,29 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
       targetAwardDate, requiredOnSite, leadTimeWeeks, contractForm, retentionPct, paymentTerms, currency,
       ownerUserId, buyerUserId, draftEntityId, contractTypeId, poStrategy, milestones } = req.body || {};
     // Accept both budgetIds and budgetLineIds for compatibility
-    console.log('[projects.packages.create] req.body keys:', Object.keys(req.body || {}));
-    console.log('[projects.packages.create] contractTypeId from req.body:', contractTypeId);
-    console.log('[projects.packages.create] poStrategy from req.body:', poStrategy);
-    console.log('[projects.packages.create] budgetLineIds from req.body:', req.body?.budgetLineIds);
-    console.log('[projects.packages.create] budgetIds from req.body:', req.body?.budgetIds);
     const budgetLineIds = Array.isArray(req.body?.budgetLineIds)
       ? req.body.budgetLineIds.map(Number).filter(Number.isFinite)
       : (Array.isArray(req.body?.budgetIds) ? req.body.budgetIds.map(Number).filter(Number.isFinite) : []);
-    console.log('[projects.packages.create] Extracted budgetLineIds:', budgetLineIds);
     if (!name) return res.status(400).json({ error: 'Name is required' });
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: 'INVALID_PROJECT_ID' });
+
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, tenantId },
+      select: { id: true },
+    });
+    if (!project) return res.status(404).json({ error: 'PROJECT_NOT_FOUND' });
+
+    if (budgetLineIds.length) {
+      const validBudgetLineCount = await prisma.budgetLine.count({
+        where: { tenantId, projectId, id: { in: budgetLineIds } },
+      });
+      if (validBudgetLineCount !== new Set(budgetLineIds).size) {
+        return res.status(400).json({
+          error: 'INVALID_BUDGET_LINES',
+          message: 'One or more selected budget lines do not belong to this project.',
+        });
+      }
+    }
 
     // Guard: prevent mixing awarded/contracted links
     if (budgetLineIds.length) {
@@ -320,6 +321,7 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
         const related = await prisma.package.findMany({
           where: {
             projectId,
+            project: { tenantId },
             // fetch any packages already linked to these budget lines
             budgetItems: { some: { budgetLineId: { in: budgetLineIds } } },
           },
@@ -365,18 +367,14 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
     // Try to attach budget lines if table exists (log on failure)
     if (Array.isArray(budgetLineIds) && budgetLineIds.length > 0) {
       try {
-        console.log('[projects.packages.create] Linking budget lines:', { packageId: created.id, budgetLineIds, tenantId });
         await prisma.packageItem.createMany({ data: budgetLineIds.map((id) => ({ tenantId, packageId: created.id, budgetLineId: Number(id) })) });
-        console.log('[projects.packages.create] Successfully linked budget lines');
       } catch (err) {
         console.error('[projects.packages.create] Failed to link budget lines:', err.message);
-        console.error('[projects.packages.create] Error details:', err);
       }
     }
     // Try to create milestones if provided and PO strategy is milestone-based
     if (Array.isArray(milestones) && milestones.length > 0 && poStrategy === 'MILESTONE_BASED') {
       try {
-        console.log('[projects.packages.create] Creating milestones:', { packageId: created.id, milestones });
         await prisma.packageMilestone.createMany({
           data: milestones.map((m, idx) => ({
             tenantId,
@@ -388,7 +386,6 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
             sequence: m.sequence != null ? Number(m.sequence) : idx + 1,
           })),
         });
-        console.log('[projects.packages.create] Successfully created milestones');
       } catch (err) {
         console.error('[projects.packages.create] Failed to create milestones:', err.message);
       }
@@ -432,13 +429,14 @@ router.post('/projects/:projectId/packages', async (req, res, next) => {
 // GET /api/projects/:projectId/packages/:packageId — package detail with budget lines
 router.get('/projects/:projectId/packages/:packageId', async (req, res, next) => {
   try {
+    const tenantId = req.user?.tenantId || req.tenantId || 'demo';
     const projectId = Number(req.params.projectId);
     const packageId = Number(req.params.packageId);
     let pkg = null;
     let minimalMode = false;
     try {
       pkg = await prisma.package.findFirst({
-        where: { id: packageId, projectId },
+        where: { id: packageId, projectId, project: { tenantId } },
         select: {
           ...packageSelect,
           awardSupplier: { select: { id: true, name: true } },
@@ -498,7 +496,7 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
       // Fallback for older schemas (before extra fields were added)
       minimalMode = true;
       pkg = await prisma.package.findFirst({
-        where: { id: packageId, projectId },
+        where: { id: packageId, projectId, project: { tenantId } },
         select: {
           id: true, projectId: true, name: true, scopeSummary: true, trade: true, status: true,
           budgetEstimate: true, deadline: true, awardValue: true, awardSupplierId: true,
@@ -518,7 +516,7 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
       // Attach budget lines via join table (legacy path)
       try {
         const items = await prisma.packageItem.findMany({
-          where: { packageId },
+          where: { packageId, tenantId },
           select: {
             budgetLine: {
               select: {
@@ -571,6 +569,7 @@ router.get('/projects/:projectId/packages/:packageId', async (req, res, next) =>
 // PATCH /api/projects/:projectId/packages/:packageId — update basic package fields
 router.patch('/projects/:projectId/packages/:packageId', async (req, res, next) => {
   try {
+    const tenantId = req.user?.tenantId || req.tenantId || 'demo';
     const projectId = Number(req.params.projectId);
     const packageId = Number(req.params.packageId);
     const body = req.body || {};
@@ -601,8 +600,24 @@ router.patch('/projects/:projectId/packages/:packageId', async (req, res, next) 
 
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'NO_FIELDS_TO_UPDATE' });
 
+    const existing = await prisma.package.findFirst({
+      where: { id: packageId, projectId, project: { tenantId } },
+      select: { id: true },
+    });
+    if (!existing) return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
+
+    const lockDecision = await evaluatePackageLock({
+      prisma,
+      tenantId,
+      projectId,
+      packageId,
+      action: 'update',
+      proposedChanges: data,
+    });
+    await enforceDecision(req, 'Package', packageId, 'UPDATE', lockDecision);
+
     const updated = await prisma.package.update({
-      where: { id: packageId },
+      where: { id: existing.id },
       data,
       select: packageSelect,
     });
@@ -611,7 +626,7 @@ router.patch('/projects/:projectId/packages/:packageId', async (req, res, next) 
     try {
       await prisma.auditLog?.create?.({
         data: {
-          tenantId: req.user?.tenantId || req.tenantId || 'demo',
+          tenantId,
           userId: req.user?.id ? Number(req.user.id) : null,
           entity: 'Package',
           entityId: String(packageId),
@@ -626,16 +641,30 @@ router.patch('/projects/:projectId/packages/:packageId', async (req, res, next) 
     row.scope = row.scope ?? row.scopeSummary ?? null;
     row.links = buildLinks('package', { ...row, projectId });
     res.json(row);
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (sendCommercialLock(res, e)) return;
+    next(e);
+  }
 });
 
 // POST /api/projects/:projectId/packages/:packageId/create-tender — one-click RFx draft
 router.post('/projects/:projectId/packages/:packageId/create-tender', async (req, res, next) => {
   try {
+    const tenantId = (req.user && req.user.tenantId) || req.tenantId || 'demo';
     const projectId = Number(req.params.projectId);
     const packageId = Number(req.params.packageId);
-    const pkg = await prisma.package.findFirst({ where: { id: packageId, projectId }, select: { id: true, name: true } });
+    const pkg = await prisma.package.findFirst({ where: { id: packageId, projectId, project: { tenantId } }, select: { id: true, name: true } });
     if (!pkg) return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
+
+    const lockDecision = await evaluatePackageLock({
+      prisma,
+      tenantId,
+      projectId,
+      packageId,
+      action: 'start_sourcing',
+      proposedChanges: { status: 'Tender' },
+    });
+    await enforceDecision(req, 'Package', packageId, 'CREATE_TENDER', lockDecision);
 
     // Create a lightweight RFx draft (Request) aligned with existing flow
     const now = new Date();
@@ -645,7 +674,7 @@ router.post('/projects/:projectId/packages/:packageId/create-tender', async (req
 
     const rfx = await prisma.request.create({
       data: {
-        tenantId: (req.user && req.user.tenantId) || 'demo',
+        tenantId,
         packageId: pkg.id,
         title,
         type: 'RFP',
@@ -658,7 +687,7 @@ router.post('/projects/:projectId/packages/:packageId/create-tender', async (req
     try {
       tender = await prisma.tender.create({
         data: {
-          tenantId: (req.user && req.user.tenantId) || 'demo',
+          tenantId,
           projectId,
           packageId: pkg.id,
           title,
@@ -671,7 +700,7 @@ router.post('/projects/:projectId/packages/:packageId/create-tender', async (req
       if (tender && qs.length) {
         await prisma.tenderQuestion.createMany({
           data: qs.map((q) => ({
-            tenantId: (req.user && req.user.tenantId) || 'demo',
+            tenantId,
             tenderId: tender.id,
             text: String(q.text || ''),
             type: String(q.type || 'text'),
@@ -684,7 +713,10 @@ router.post('/projects/:projectId/packages/:packageId/create-tender', async (req
     } catch (_) {}
     await prisma.package.update({ where: { id: pkg.id }, data: { status: 'Tender' } }).catch(() => {});
     res.status(201).json({ requestId: rfx.id, title: rfx.title, tenderId: tender?.id || null });
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (sendCommercialLock(res, e)) return;
+    next(e);
+  }
 });
 
 // DELETE /api/projects/:projectId/packages/:packageId — delete a package
@@ -704,7 +736,7 @@ router.delete('/projects/:projectId/packages/:packageId', async (req, res, next)
 
     // Verify package exists and belongs to this project/tenant
     const pkg = await prisma.package.findFirst({
-      where: { id: packageId, projectId },
+      where: { id: packageId, projectId, project: { tenantId } },
       include: { project: { select: { tenantId: true } } }
     });
 
@@ -715,6 +747,15 @@ router.delete('/projects/:projectId/packages/:packageId', async (req, res, next)
     if (pkg.project.tenantId !== tenantId) {
       return res.status(403).json({ error: 'ACCESS_DENIED' });
     }
+
+    const lockDecision = await evaluatePackageLock({
+      prisma,
+      tenantId,
+      projectId,
+      packageId,
+      action: 'delete',
+    });
+    await enforceDecision(req, 'Package', packageId, 'DELETE', lockDecision);
 
     // Check for blockers
     if (pkg.awardedToSupplierId) {
@@ -738,6 +779,7 @@ router.delete('/projects/:projectId/packages/:packageId', async (req, res, next)
 
     res.json({ ok: true });
   } catch (e) {
+    if (sendCommercialLock(res, e)) return;
     next(e);
   }
 });
@@ -820,7 +862,7 @@ router.get('/packages/:packageId', async (req, res, next) => {
       row.scope = row.scope ?? row.scopeSummary ?? null;
       try {
         const items = await prisma.packageItem.findMany({
-          where: { packageId },
+          where: { packageId, tenantId },
           select: {
             budgetLine: {
               select: {

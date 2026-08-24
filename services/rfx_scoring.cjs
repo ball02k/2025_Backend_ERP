@@ -16,6 +16,57 @@ function getMCQScore(options, answer) {
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
 function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
 
+function getAnswer(answers, question) {
+  return answers?.[question.id] ?? answers?.[String(question.id)] ?? answers?.[question.prompt];
+}
+
+function isPriceQuestion(question, questionCfg = {}, scaleCfg = {}) {
+  const cfgType = String(questionCfg.type || questionCfg.mode || '').toLowerCase();
+  const prompt = String(question?.prompt || '').toLowerCase();
+  const qtype = String(question?.qType || '').toLowerCase();
+  const lowerBest = questionCfg.lowestBest === true || questionCfg.lowerBest === true || scaleCfg?.price?.lowestBest === true;
+
+  if (cfgType === 'price' || questionCfg.price === true) return true;
+  if (lowerBest && (qtype === 'number' || qtype === 'numeric')) return true;
+  return /\b(price|tender sum|tender total|contract sum|total bid)\b/.test(prompt);
+}
+
+function mergeResponsesBySupplier(responses) {
+  const bySupplier = new Map();
+  const sorted = [...responses].sort((a, b) => (a.stage === b.stage ? a.id - b.id : a.stage - b.stage));
+  for (const response of sorted) {
+    const supplierKey = Number(response.supplierId);
+    if (!Number.isFinite(supplierKey)) continue;
+    bySupplier.set(supplierKey, {
+      ...(bySupplier.get(supplierKey) || {}),
+      ...(response.answers || {}),
+    });
+  }
+  return bySupplier;
+}
+
+function buildPriceBenchmarks({ questions, responsesBySupplier, perQuestionCfg, scaleCfg }) {
+  const benchmarks = new Map();
+  for (const question of questions) {
+    const questionCfg = perQuestionCfg[question.id] || perQuestionCfg[String(question.id)] || question.calc || {};
+    if (!isPriceQuestion(question, questionCfg, scaleCfg)) continue;
+
+    const values = [];
+    for (const answers of responsesBySupplier.values()) {
+      const value = num(getAnswer(answers, question));
+      if (value != null && value > 0) values.push(value);
+    }
+    if (!values.length) continue;
+
+    benchmarks.set(question.id, {
+      min: Math.min(...values),
+      max: Math.max(...values),
+      count: values.length,
+    });
+  }
+  return benchmarks;
+}
+
 /**
  * Compute RFx scoring with optional normalization.
  * Returns { score, sections: [...], normalization, latestResponseId }
@@ -24,15 +75,18 @@ async function computeRequestScore({ tenantId, requestId, supplierId, scaleCfg =
   const doNormalize = !!scaleCfg.normalize;
   const perQuestionCfg = (scaleCfg && scaleCfg.perQuestion) || {};
 
-  const [sections, questions, responses] = await Promise.all([
+  const [sections, questions, allResponses] = await Promise.all([
     prisma.requestSection.findMany({ where: { tenantId, requestId }, orderBy: [{ order: 'asc' }] }),
     prisma.requestQuestion.findMany({ where: { tenantId, requestId } }),
-    prisma.requestResponse.findMany({ where: { tenantId, requestId, supplierId, status: 'submitted' } }),
+    prisma.requestResponse.findMany({ where: { tenantId, requestId, status: 'submitted' } }),
   ]);
 
+  const responses = allResponses.filter((response) => Number(response.supplierId) === Number(supplierId));
   const mergedAnswers = responses
     .sort((a, b) => (a.stage === b.stage ? a.id - b.id : a.stage - b.stage))
     .reduce((acc, r) => ({ ...acc, ...(r.answers || {}) }), {});
+  const responsesBySupplier = mergeResponsesBySupplier(allResponses);
+  const priceBenchmarks = buildPriceBenchmarks({ questions, responsesBySupplier, perQuestionCfg, scaleCfg });
 
   const bySection = new Map();
   for (const q of questions) {
@@ -51,7 +105,7 @@ async function computeRequestScore({ tenantId, requestId, supplierId, scaleCfg =
     let qWeights = 0;
     const qBreakdown = [];
     for (const q of qs) {
-      const ans = mergedAnswers[q.id] ?? mergedAnswers[String(q.id)] ?? mergedAnswers[q.prompt];
+      const ans = getAnswer(mergedAnswers, q);
       let base = null;
       const qtype = String(q.qType || '').toLowerCase();
       if (qtype === 'mcq' || qtype === 'select' || qtype === 'single_choice') base = getMCQScore(q.options, ans);
@@ -66,7 +120,17 @@ async function computeRequestScore({ tenantId, requestId, supplierId, scaleCfg =
       let usedMin = null;
       let usedMax = null;
       let targetMax = null;
-      if (doNormalize && base != null && Number.isFinite(Number(base))) {
+      let scoringMethod = null;
+      const priceBenchmark = priceBenchmarks.get(q.id);
+      if (priceBenchmark && base != null && Number(base) > 0) {
+        const priceScale = scaleCfg.price && typeof scaleCfg.price === 'object' ? scaleCfg.price : {};
+        const tMax = num(qCfg.targetMax ?? priceScale.targetMax ?? scaleCfg.targetMax ?? scaleCfg.defaultMax ?? 10) ?? 10;
+        usedBase = clamp01(priceBenchmark.min / Number(base)) * tMax;
+        usedMin = priceBenchmark.min;
+        usedMax = priceBenchmark.max;
+        targetMax = tMax;
+        scoringMethod = 'lowest_price';
+      } else if (doNormalize && base != null && Number.isFinite(Number(base))) {
         const min = num(qCfg.min ?? scaleCfg.defaultMin);
         const max = num(qCfg.max ?? scaleCfg.defaultMax);
         if (min != null && max != null && Number.isFinite(min) && Number.isFinite(max) && max > min) {
@@ -74,6 +138,7 @@ async function computeRequestScore({ tenantId, requestId, supplierId, scaleCfg =
           const tMax = num(scaleCfg.targetMax);
           usedBase = tMax != null ? norm * tMax : norm;
           usedMin = min; usedMax = max; targetMax = tMax;
+          scoringMethod = 'linear_normalized';
         }
       }
       if (usedBase != null && Number.isFinite(Number(usedBase))) {
@@ -87,7 +152,8 @@ async function computeRequestScore({ tenantId, requestId, supplierId, scaleCfg =
         baseScore: base,
         effectiveBase: usedBase,
         weight: w,
-        normalization: doNormalize ? { min: usedMin, max: usedMax, targetMax } : undefined,
+        scoringMethod,
+        normalization: (doNormalize || priceBenchmark) ? { min: usedMin, max: usedMax, targetMax } : undefined,
       });
     }
     const sectionWeight = section.weight ? Number(section.weight) : 1;
@@ -108,10 +174,16 @@ async function computeRequestScore({ tenantId, requestId, supplierId, scaleCfg =
   return {
     score: totalScore,
     sections: sectionBreakdown,
-    normalization: doNormalize ? { defaultMin: scaleCfg.defaultMin ?? null, defaultMax: scaleCfg.defaultMax ?? null, targetMax: scaleCfg.targetMax ?? null } : undefined,
+    normalization: (doNormalize || priceBenchmarks.size > 0)
+      ? {
+          defaultMin: scaleCfg.defaultMin ?? null,
+          defaultMax: scaleCfg.defaultMax ?? null,
+          targetMax: scaleCfg.targetMax ?? null,
+          priceBenchmarks: Object.fromEntries(priceBenchmarks),
+        }
+      : undefined,
     latestResponseId: latest ? latest.id : null,
   };
 }
 
 module.exports = { computeRequestScore };
-

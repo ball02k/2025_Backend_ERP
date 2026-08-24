@@ -31,6 +31,7 @@ module.exports = function purchaseOrdersRouter(prisma) {
         status: req.query.status,
         supplierId: req.query.supplierId ? Number(req.query.supplierId) : undefined,
         budgetLineId: req.query.budgetLineId ? Number(req.query.budgetLineId) : undefined,
+        direction: req.query.direction, // Task 2.5: Direction filtering
         limit: req.query.limit ? Number(req.query.limit) : 50,
         offset: req.query.offset ? Number(req.query.offset) : 0,
       };

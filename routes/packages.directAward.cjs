@@ -1,7 +1,17 @@
 const router = require('express').Router();
 const { prisma, Prisma } = require('../utils/prisma.cjs');
 const requireAuth = require('../middleware/requireAuth.cjs');
+const { requirePerm } = require('../middleware/checkPermission.cjs');
+const { assertProjectMember } = require('../middleware/membership.cjs');
 const { checkSupplierCompliance } = require('../services/compliance.service.cjs');
+const { createDraftContract } = require('../lib/contractWrites.cjs');
+const {
+  evaluatePackageLock,
+  enforceDecision,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
+
+const ID_SELECT = { id: true };
 
 function toDecimal(value) {
   try {
@@ -11,7 +21,12 @@ function toDecimal(value) {
   }
 }
 
-router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
+function hasAdminBypass(user) {
+  const roles = Array.isArray(user?.roles) ? user.roles : user?.role ? [user.role] : [];
+  return roles.includes('dev') || roles.includes('admin');
+}
+
+router.post('/packages/:id/direct-award', requireAuth, requirePerm('procurement:award'), async (req, res) => {
   const tenantId = req.user?.tenantId;
   const userId = req.user?.id ? Number(req.user.id) : null;
   const packageId = Number(req.params.id);
@@ -21,19 +36,22 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
   }
 
   try {
-    const body = req.body || {};
+    const body = { ...(req.query || {}), ...(req.body || {}) };
     const supplierId = Number(body.supplierId);
     if (!Number.isFinite(supplierId)) {
       return res.status(400).json({ error: 'SUPPLIER_REQUIRED' });
     }
 
     const mode = (body.mode || 'all').toString();
-    const selectedLineIds = Array.isArray(body.lineItemIds)
-      ? body.lineItemIds.map(Number).filter(Number.isFinite)
-      : [];
+    const rawLineItemIds = body.lineItemIds;
+    const selectedLineIds = Array.isArray(rawLineItemIds)
+      ? rawLineItemIds.map(Number).filter(Number.isFinite)
+      : typeof rawLineItemIds === 'string'
+        ? rawLineItemIds.split(',').map(Number).filter(Number.isFinite)
+        : [];
 
     const pkg = await prisma.package.findFirst({
-      where: { id: packageId },
+      where: { id: packageId, project: { tenantId } },
       select: {
         id: true,
         projectId: true,
@@ -41,24 +59,54 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
         status: true,
         awardValue: true,
         awardSupplierId: true,
+        awardedToSupplierId: true,
+        awardedValue: true,
+        contractTypeId: true,
+        retentionPct: true,
+        paymentTerms: true,
+        currency: true,
       },
     });
     if (!pkg) {
       return res.status(404).json({ error: 'PACKAGE_NOT_FOUND' });
     }
 
-    // Removed strict project membership check - authenticated users can perform direct awards
+    if (!hasAdminBypass(req.user)) {
+      const membership = await assertProjectMember({ userId, projectId: pkg.projectId, tenantId });
+      if (!membership) {
+        return res.status(403).json({ error: 'NOT_A_PROJECT_MEMBER' });
+      }
+      req.membership = membership;
+    }
+
+    const packageLock = await evaluatePackageLock({
+      prisma,
+      tenantId,
+      projectId: pkg.projectId,
+      packageId: pkg.id,
+      action: 'direct_award',
+      proposedChanges: { status: 'awarded', awardValue: body.awardAmount ?? true },
+    });
+    await enforceDecision(req, 'Package', pkg.id, 'DIRECT_AWARD', packageLock);
 
     // Try to get PackageLineItem records first (new join table approach)
     let packageLineItems = [];
     try {
       packageLineItems = await prisma.packageLineItem.findMany({
         where: { packageId: pkg.id, tenantId },
+        select: {
+          id: true,
+          budgetLineItemId: true,
+          description: true,
+          qty: true,
+          rate: true,
+          total: true,
+          costCode: true,
+        },
         orderBy: { id: 'asc' },
       });
-      console.log(`[direct-award] PackageLineItem lookup: found ${packageLineItems.length} records`);
     } catch (err) {
-      console.warn('[direct-award] PackageLineItem lookup failed, trying budgetLineItem', err?.message);
+      packageLineItems = [];
     }
 
     // Fallback to PackageItem (join table for package -> budgetLine) if PackageLineItem doesn't exist or is empty
@@ -67,24 +115,30 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
       try {
         const packageItems = await prisma.packageItem.findMany({
           where: { packageId: pkg.id, tenantId },
-          include: { budgetLine: true },
+          select: {
+            budgetLine: {
+              select: {
+                id: true,
+                code: true,
+                description: true,
+                qty: true,
+                rate: true,
+                total: true,
+                amount: true,
+              },
+            },
+          },
           orderBy: { id: 'asc' },
         });
-        console.log(`[direct-award] PackageItem lookup: found ${packageItems.length} records`);
         // Extract the budgetLine from each packageItem
         budgetLines = packageItems.map(pi => pi.budgetLine).filter(Boolean);
-        console.log(`[direct-award] budgetLine extracted: found ${budgetLines.length} records`);
-        if (budgetLines.length > 0) {
-          console.log('[direct-award] Sample budgetLine:', JSON.stringify(budgetLines[0], null, 2));
-        }
       } catch (err) {
-        console.warn('[direct-award] PackageItem lookup failed', err?.message);
+        budgetLines = [];
       }
     }
 
     // Combine both approaches - prefer PackageLineItem but fall back to budgetLineItem
     const allLines = packageLineItems.length > 0 ? packageLineItems : budgetLines;
-    console.log(`[direct-award] Total lines available: ${allLines.length} (from ${packageLineItems.length > 0 ? 'PackageLineItem' : 'budgetLineItem'})`);
 
     // Allow direct awards without budget lines if user provides manual award amount
     if (!allLines.length) {
@@ -225,7 +279,8 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
         qty: qtyDecimal,
         rate: rateDecimal,
         total: totalDecimal,
-        costCode: line.costCode || null,
+        // FIXED: Budget lines use 'code' field, not 'costCode'
+        costCode: line.code || line.costCode || null,
       };
     });
 
@@ -237,16 +292,23 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'OVERRIDE_REASON_REQUIRED' });
     }
 
-    // TEMP: Disable compliance check for testing contract document editor
-    // const compliance = await checkSupplierCompliance(tenantId, supplierId);
-    // if (!compliance.ok && !body.complianceOverrideReason) {
-    //   return res.status(400).json({ error: 'COMPLIANCE_BLOCK', details: compliance });
-    // }
-    const compliance = { ok: true }; // Bypass for now
+    const compliance = await checkSupplierCompliance(tenantId, supplierId);
+    if (!compliance.ok && !body.complianceOverrideReason) {
+      return res.status(409).json({
+        error: 'COMPLIANCE_BLOCK',
+        message: compliance.summary || 'Supplier compliance is incomplete',
+        details: compliance,
+      });
+    }
 
     const awardDate = body.awardDate ? new Date(body.awardDate) : new Date();
+    const contractStartDate = body.startDate ? new Date(body.startDate) : awardDate;
     const title = (body.name && body.name.toString().trim()) || pkg.name || 'Direct Award';
     const contractRef = (body.awardRef && body.awardRef.toString().trim()) || `DA-${pkg.id}-${Date.now()}`;
+    const retentionValue =
+      body.retentionPct == null || body.retentionPct === ''
+        ? pkg.retentionPct
+        : toDecimal(body.retentionPct, { allowNull: true });
 
     const data = {
       tenantId,
@@ -257,26 +319,43 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
       contractRef,
       value: toDecimal(awardAmount),
       status: 'draft',
-      startDate: awardDate,
+      startDate: contractStartDate,
       endDate: body.endDate ? new Date(body.endDate) : null,
-      currency: body.currency || 'GBP',
+      currency: body.currency || pkg.currency || 'GBP',
       notes: body.notes || null,
-      retentionPct:
-        body.retentionPct == null || body.retentionPct === ''
-          ? null
-          : toDecimal(body.retentionPct, { allowNull: true }),
-      paymentTerms: body.paymentTerms || null,
+      retentionPct: retentionValue,
+      paymentTerms: body.paymentTerms || pkg.paymentTerms || null,
+      contractTypeId: body.contractTypeId || pkg.contractTypeId || null,
+      sourceMode: 'direct_award',
     };
 
     const awardAmountDecimal = toDecimal(awardAmount);
+    const awardOverrideReason =
+      body.overrideReason ||
+      body.complianceOverrideReason ||
+      null;
 
     let created;
+    let award;
     await prisma.$transaction(async (tx) => {
-      created = await tx.contract.create({
+      award = await tx.award.create({
         data: {
-          ...data,
-          value: awardAmountDecimal,
+          tenantId,
+          projectId: pkg.projectId,
+          packageId: pkg.id,
+          supplierId,
+          awardValue: awardAmountDecimal,
+          awardDate,
+          overrideUsed: Boolean(overrideApplied || !compliance.ok),
+          overrideReason: awardOverrideReason,
         },
+        select: ID_SELECT,
+      });
+
+      created = await createDraftContract(tx, {
+        ...data,
+        value: awardAmountDecimal,
+        awardId: award.id,
       });
 
       // Create initial contract document and first version
@@ -288,6 +367,7 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
           editorType: 'prosemirror',
           active: true,
         },
+        select: ID_SELECT,
       });
 
       // Create first version with contract details as ProseMirror JSON
@@ -348,6 +428,7 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
           redlinePatch: null,
           createdBy: userId,
         },
+        select: ID_SELECT,
       });
 
       if (lineSnapshots.length) {
@@ -364,6 +445,7 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
               packageLineItemId: line.packageLineItemId,
               budgetLineId: line.budgetLineId,
             },
+            select: ID_SELECT,
           });
         }
       }
@@ -373,13 +455,22 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
         data: {
           status: 'awarded',
           awardSupplierId: pkg.awardSupplierId ? pkg.awardSupplierId : supplierId,
+          awardedToSupplierId: pkg.awardedToSupplierId ? pkg.awardedToSupplierId : supplierId,
           awardValue: (() => {
             const existing = pkg.awardValue instanceof Prisma.Decimal
               ? pkg.awardValue
               : new Prisma.Decimal(pkg.awardValue || 0);
             return existing.add(awardAmountDecimal);
           })(),
+          awardedValue: (() => {
+            const existing = pkg.awardedValue instanceof Prisma.Decimal
+              ? pkg.awardedValue
+              : new Prisma.Decimal(pkg.awardedValue || 0);
+            return existing.add(awardAmountDecimal);
+          })(),
+          awardedAt: new Date(),
         },
+        select: ID_SELECT,
       });
 
       await tx.auditLog.create({
@@ -390,6 +481,7 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
           action: 'direct_award.create',
           changes: {
             packageId: pkg.id,
+            awardId: award.id,
             supplierId,
             mode,
             selectedLineIds: lineSnapshots.map((l) => l.budgetLineId),
@@ -402,6 +494,7 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
             complianceOverrideReason: body.complianceOverrideReason || null,
           },
         },
+        select: ID_SELECT,
       });
     });
 
@@ -414,11 +507,13 @@ router.post('/packages/:id/direct-award', requireAuth, async (req, res) => {
 
     return res.status(201).json({
       id: created.id,
+      awardId: award?.id || null,
       projectId: created.projectId,
       packageId: created.packageId,
-      contractNumber: created.contractNumber,
+      contractRef: created.contractRef,
     });
   } catch (error) {
+    if (sendCommercialLock(res, error)) return;
     console.error('direct-award error', error);
     return res.status(500).json({ error: 'DIRECT_AWARD_FAILED' });
   }

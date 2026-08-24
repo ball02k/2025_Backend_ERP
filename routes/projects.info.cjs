@@ -10,6 +10,50 @@ function safeJson(x) {
   );
 }
 
+const PROJECT_INFO_SELECT = {
+  id: true,
+  tenantId: true,
+  code: true,
+  name: true,
+  description: true,
+  status: true,
+  type: true,
+  statusId: true,
+  typeId: true,
+  country: true,
+  currency: true,
+  unitSystem: true,
+  taxScheme: true,
+  contractForm: true,
+  clientId: true,
+  clientContactId: true,
+  sitePostcode: true,
+  siteLat: true,
+  siteLng: true,
+  contractType: true,
+  paymentTermsDays: true,
+  retentionPct: true,
+  projectManagerId: true,
+  projectManagerUserId: true,
+  quantitySurveyorUserId: true,
+  startPlanned: true,
+  endPlanned: true,
+  startActual: true,
+  endActual: true,
+  labels: true,
+  budget: true,
+  actualSpend: true,
+  startDate: true,
+  endDate: true,
+  deletedAt: true,
+  createdAt: true,
+  updatedAt: true,
+  client: { select: { id: true, name: true } },
+  clientContact: { select: { id: true, firstName: true, lastName: true, email: true } },
+  projectManager: { select: { id: true, name: true, email: true } },
+  quantitySurveyor: { select: { id: true, name: true, email: true } },
+};
+
 // GET /api/projects/:projectId/info → project info snapshot
 router.get('/projects/:projectId/info', requireAuth, async (req, res) => {
   try {
@@ -24,12 +68,7 @@ router.get('/projects/:projectId/info', requireAuth, async (req, res) => {
 
     const project = await prisma.project.findFirst({
       where: { id: projectId, tenantId },
-      include: {
-        client: { select: { id: true, name: true } },
-        clientContact: { select: { id: true, firstName: true, lastName: true, email: true } },
-        projectManager: { select: { id: true, name: true, email: true } },
-        quantitySurveyor: { select: { id: true, name: true, email: true } },
-      },
+      select: PROJECT_INFO_SELECT,
     });
 
     if (!project) {
@@ -44,6 +83,7 @@ router.get('/projects/:projectId/info', requireAuth, async (req, res) => {
     if (out.code && !out.projectCode) {
       out.projectCode = out.code;
     }
+    out.projectRole = out.projectRole || 'PRINCIPAL_CONTRACTOR';
 
     // Derive name for contact from firstName/lastName
     if (out.clientContact) {
@@ -135,6 +175,7 @@ router.patch('/projects/:projectId/info', requireAuth, async (req, res) => {
     const updated = await prisma.project.update({
       where: { id: projectId },
       data,
+      select: PROJECT_INFO_SELECT,
     });
 
     const out = safeJson(updated);
@@ -143,6 +184,7 @@ router.patch('/projects/:projectId/info', requireAuth, async (req, res) => {
     if (out.code && !out.projectCode) {
       out.projectCode = out.code;
     }
+    out.projectRole = out.projectRole || 'PRINCIPAL_CONTRACTOR';
 
     return res.json(out);
   } catch (e) {
@@ -151,6 +193,92 @@ router.patch('/projects/:projectId/info', requireAuth, async (req, res) => {
       error: {
         code: e.code || 'INTERNAL',
         message: e.message || 'Failed to update project info',
+      },
+    });
+  }
+});
+
+// GET /api/projects/:projectId/role-summary → project role context and capabilities
+// Task 2.1: Returns role-based context for workflow and UI
+router.get('/projects/:projectId/role-summary', requireAuth, async (req, res) => {
+  try {
+    const projectId = Number(req.params.projectId);
+    if (!Number.isFinite(projectId)) {
+      return res
+        .status(400)
+        .json({ error: { code: 'BAD_REQUEST', message: 'Invalid projectId' } });
+    }
+
+    const tenantId = req.user?.tenantId || req.tenantId || 'demo';
+
+    // Fetch project with upstream party and contact details
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, tenantId },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!project) {
+      return res
+        .status(404)
+        .json({ error: { code: 'NOT_FOUND', message: 'Project not found' } });
+    }
+
+    const role = project.projectRole || 'PRINCIPAL_CONTRACTOR';
+
+    // Build upstream party object
+    let upstreamParty = null;
+    if (project.upstreamParty && project.upstreamPartyType) {
+      const contact = project.upstreamContact;
+      upstreamParty = {
+        type: project.upstreamPartyType,
+        id: project.upstreamParty.id,
+        name: project.upstreamParty.name,
+        contactName: contact
+          ? `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.email
+          : undefined,
+        contactEmail: contact?.email,
+        contractRef: project.upstreamContractRef || undefined,
+        poNumber: project.upstreamPoNumber || undefined,
+      };
+    }
+
+    // Calculate capabilities based on role
+    const capabilities = {
+      canRaiseApplications: role === 'SUBCONTRACTOR' || role === 'DIRECT_TO_CLIENT',
+      canReceiveApplications: role === 'PRINCIPAL_CONTRACTOR' || role === 'DIRECT_TO_CLIENT',
+      canCreateContracts: role === 'PRINCIPAL_CONTRACTOR' || role === 'DIRECT_TO_CLIENT',
+      canIssuePOs: role === 'PRINCIPAL_CONTRACTOR' || role === 'DIRECT_TO_CLIENT',
+      canReceiveCertificates: role === 'SUBCONTRACTOR',
+    };
+
+    // Determine terminology/labels
+    const terminology = {
+      upstreamLabel:
+        role === 'SUBCONTRACTOR' ? 'Main Contractor' :
+        role === 'DIRECT_TO_CLIENT' ? 'Client' :
+        'Client',
+      applicationDirection:
+        role === 'SUBCONTRACTOR' || role === 'DIRECT_TO_CLIENT' ? 'outbound' : 'inbound',
+      paymentSource:
+        role === 'SUBCONTRACTOR' ? 'MC' :
+        role === 'DIRECT_TO_CLIENT' ? 'Client' :
+        'Subcontractors',
+    };
+
+    return res.json({
+      projectRole: role,
+      upstreamParty,
+      capabilities,
+      terminology,
+    });
+  } catch (e) {
+    console.error('[projects/role-summary] ', e);
+    return res.status(500).json({
+      error: {
+        code: e.code || 'INTERNAL',
+        message: e.message || 'Failed to load project role summary',
       },
     });
   }

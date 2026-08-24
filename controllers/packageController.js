@@ -85,7 +85,34 @@ exports.listContractsByProject = async (req, res) => {
     const projectId = Number(req.params.projectId);
     const contracts = await prisma.contract.findMany({
       where: { tenantId, projectId },
-      include: {
+      select: {
+        id: true,
+        tenantId: true,
+        projectId: true,
+        packageId: true,
+        supplierId: true,
+        title: true,
+        contractRef: true,
+        value: true,
+        currency: true,
+        status: true,
+        signedAt: true,
+        startDate: true,
+        endDate: true,
+        retentionPct: true,
+        paymentTerms: true,
+        notes: true,
+        createdAt: true,
+        updatedAt: true,
+        originalValue: true,
+        sourceMode: true,
+        paymentFrequency: true,
+        paymentDueDays: true,
+        paymentFinalDays: true,
+        retentionPercentage: true,
+        nextApplicationDue: true,
+        totalCertifiedToDate: true,
+        totalPaidToDate: true,
         supplier: { select: { name: true, id: true } },
         package: { select: { name: true, id: true } }
       }

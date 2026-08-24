@@ -7,11 +7,322 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { buildLinks } = require('../lib/buildLinks.cjs');
 const { safeJson } = require('../lib/serialize.cjs');
-const { generatePaymentCertificatePdf, generatePaymentNoticePdf, generatePayLessNoticePdf } = require('../services/paymentCertificatePdf.cjs');
-const { saveBufferAsDocument } = require('../services/storage.cjs');
-const { sendEmail } = require('../services/email.service.cjs');
-const { paymentCertificateEmail } = require('../templates/emailTemplates.cjs');
-const paymentRecording = require('../services/paymentRecording.cjs');
+const {
+  evaluatePaymentApplicationLock,
+  assertCommercialUnlocked,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
+
+let paymentCertificatePdfService;
+let storageService;
+let emailService;
+let emailTemplates;
+let paymentDocumentsService;
+let paymentRecordingService;
+let cisCalculatorService;
+let paymentCalculatorService;
+
+const applicationTransitionSelect = {
+  id: true,
+  tenantId: true,
+  projectId: true,
+  supplierId: true,
+  contractId: true,
+  applicationNumber: true,
+  applicationNo: true,
+  reference: true,
+  title: true,
+  applicationDate: true,
+  valuationDate: true,
+  dueDate: true,
+  finalPaymentDate: true,
+  periodStart: true,
+  periodEnd: true,
+  status: true,
+  currency: true,
+  claimedGrossValue: true,
+  claimedRetention: true,
+  claimedNetValue: true,
+  claimedPreviouslyPaid: true,
+  claimedThisPeriod: true,
+  certifiedGrossValue: true,
+  certifiedRetention: true,
+  certifiedNetValue: true,
+  certifiedPreviouslyPaid: true,
+  certifiedThisPeriod: true,
+  certifiedAmount: true,
+  certifiedDate: true,
+  amountPaid: true,
+  paidDate: true,
+  notes: true,
+  submittedBy: true,
+  submittedAt: true,
+  reviewedBy: true,
+  reviewedAt: true,
+  approvedBy: true,
+  approvedAt: true,
+  paymentNoticeSent: true,
+  paymentNoticeSentAt: true,
+  paymentNoticeAmount: true,
+  paymentNoticeIssuedAt: true,
+  payLessNoticeSent: true,
+  payLessNoticeSentAt: true,
+  payLessNoticeAmount: true,
+  payLessNoticeReason: true,
+  payLessNoticeIssuedAt: true,
+  isActCompliant: true,
+  certificationNotes: true,
+  createdAt: true,
+  updatedAt: true,
+  supplier: { select: { id: true, name: true } },
+  contract: { select: { id: true, title: true } },
+};
+
+const tableColumnCache = new Map();
+const applicationColumnCache = new Map();
+
+const certificateApplicationSelect = {
+  id: true,
+  tenantId: true,
+  projectId: true,
+  supplierId: true,
+  contractId: true,
+  applicationNumber: true,
+  applicationNo: true,
+  reference: true,
+  title: true,
+  applicationDate: true,
+  valuationDate: true,
+  dueDate: true,
+  finalPaymentDate: true,
+  periodStart: true,
+  periodEnd: true,
+  status: true,
+  claimedGrossValue: true,
+  claimedRetention: true,
+  claimedNetValue: true,
+  claimedPreviouslyPaid: true,
+  claimedThisPeriod: true,
+  grossToDate: true,
+  retentionValue: true,
+  netClaimed: true,
+  certifiedGrossValue: true,
+  certifiedRetention: true,
+  certifiedNetValue: true,
+  certifiedPreviouslyPaid: true,
+  certifiedThisPeriod: true,
+  certifiedAmount: true,
+  certifiedDate: true,
+  certificationNotes: true,
+  paymentNoticeAmount: true,
+  paymentNoticeSentAt: true,
+  amountPaid: true,
+  paidDate: true,
+  qsNotes: true,
+  valuationDocument: true,
+  supplier: { select: { id: true, name: true, email: true } },
+  project: { select: { id: true, name: true, code: true } },
+  contract: {
+    select: {
+      id: true,
+      title: true,
+      contractRef: true,
+      supplier: { select: { id: true, name: true, email: true } },
+    },
+  },
+};
+
+async function hasTableColumn(tableName, columnName) {
+  const key = `${tableName}.${columnName}`;
+  if (tableColumnCache.has(key)) {
+    return tableColumnCache.get(key);
+  }
+
+  const rows = await prisma.$queryRaw`
+    SELECT 1 AS present
+    FROM information_schema.columns
+    WHERE table_schema = ${'public'}
+      AND table_name = ${tableName}
+      AND column_name = ${columnName}
+    LIMIT 1
+  `;
+  const present = rows.length > 0;
+  tableColumnCache.set(key, present);
+  return present;
+}
+
+async function hasApplicationColumn(columnName) {
+  if (applicationColumnCache.has(columnName)) {
+    return applicationColumnCache.get(columnName);
+  }
+
+  const present = await hasTableColumn('ApplicationForPayment', columnName);
+  applicationColumnCache.set(columnName, present);
+  return present;
+}
+
+async function hasInvoiceColumn(columnName) {
+  return hasTableColumn('Invoice', columnName);
+}
+
+function toPaymentMoney(value) {
+  return Number(value || 0);
+}
+
+function normaliseCertificateApplication(application) {
+  const grossVal = toPaymentMoney(application.certifiedGrossValue ?? application.claimedGrossValue ?? application.grossToDate);
+  const retention = toPaymentMoney(application.certifiedRetention ?? application.claimedRetention ?? application.retentionValue);
+  const netDue = toPaymentMoney(
+    application.paymentNoticeAmount ??
+    application.certifiedThisPeriod ??
+    application.certifiedNetValue ??
+    application.certifiedAmount ??
+    (grossVal ? grossVal - retention : null) ??
+    application.claimedNetValue ??
+    application.claimedThisPeriod ??
+    application.netClaimed
+  );
+
+  return {
+    ...application,
+    grossVal,
+    retention,
+    prevPaid: toPaymentMoney(application.certifiedPreviouslyPaid ?? application.claimedPreviouslyPaid),
+    netDue,
+    paymentNoticeAmount: application.paymentNoticeAmount ?? netDue,
+    certNumber: application.applicationNo || application.applicationNumber || application.id,
+    appNumber: application.applicationNo || application.applicationNumber || application.id,
+  };
+}
+
+async function updateApplicationIfColumnsExist(id, data) {
+  const updateData = {};
+  for (const [field, value] of Object.entries(data)) {
+    if (await hasApplicationColumn(field)) {
+      updateData[field] = value;
+    }
+  }
+
+  if (!Object.keys(updateData).length) {
+    return null;
+  }
+
+  return prisma.applicationForPayment.update({
+    where: { id: Number(id) },
+    data: updateData,
+    select: { id: true },
+  });
+}
+
+function getPaymentCertificatePdfService() {
+  paymentCertificatePdfService ||= require('../services/paymentCertificatePdf.cjs');
+  return paymentCertificatePdfService;
+}
+
+function getStorageService() {
+  storageService ||= require('../services/storage.cjs');
+  return storageService;
+}
+
+function getEmailService() {
+  emailService ||= require('../services/email.service.cjs');
+  return emailService;
+}
+
+function getEmailTemplates() {
+  emailTemplates ||= require('../templates/emailTemplates.cjs');
+  return emailTemplates;
+}
+
+function getPaymentDocumentsService() {
+  paymentDocumentsService ||= require('../services/paymentDocuments.cjs');
+  return paymentDocumentsService;
+}
+
+function getPaymentRecordingService() {
+  paymentRecordingService ||= require('../services/paymentRecording.cjs');
+  return paymentRecordingService;
+}
+
+function getCISCalculatorService() {
+  cisCalculatorService ||= require('../services/cisCalculator.cjs');
+  return cisCalculatorService;
+}
+
+function getPaymentCalculatorService() {
+  paymentCalculatorService ||= require('../services/paymentCalculator.cjs');
+  return paymentCalculatorService;
+}
+
+function generatePaymentCertificatePdf(...args) {
+  return getPaymentCertificatePdfService().generatePaymentCertificatePdf(...args);
+}
+
+function generatePaymentNoticePdf(...args) {
+  return getPaymentCertificatePdfService().generatePaymentNoticePdf(...args);
+}
+
+function generatePayLessNoticePdf(...args) {
+  return getPaymentCertificatePdfService().generatePayLessNoticePdf(...args);
+}
+
+function saveBufferAsDocument(...args) {
+  return getStorageService().saveBufferAsDocument(...args);
+}
+
+function sendEmail(...args) {
+  return getEmailService().sendEmail(...args);
+}
+
+function paymentCertificateEmail(...args) {
+  return getEmailTemplates().paymentCertificateEmail(...args);
+}
+
+function generatePaymentCertificate(...args) {
+  return getPaymentDocumentsService().generatePaymentCertificate(...args);
+}
+
+function generatePaymentNotice(...args) {
+  return getPaymentDocumentsService().generatePaymentNotice(...args);
+}
+
+function generatePayLessNotice(...args) {
+  return getPaymentDocumentsService().generatePayLessNotice(...args);
+}
+
+function getPaymentDocuments(...args) {
+  return getPaymentDocumentsService().getPaymentDocuments(...args);
+}
+
+function checkConstructionActCompliance(...args) {
+  return getPaymentDocumentsService().checkConstructionActCompliance(...args);
+}
+
+function calculateCIS(...args) {
+  return getCISCalculatorService().calculateCIS(...args);
+}
+
+function calculatePayment(...args) {
+  return getPaymentCalculatorService().calculatePayment(...args);
+}
+
+async function enforceApplicationUnlocked(req, applicationId, action, proposedChanges = {}) {
+  const tenantId = req.user?.tenantId;
+  if (!tenantId) {
+    const err = new Error('Tenant context is required for payment application changes');
+    err.status = 403;
+    err.code = 'TENANT_REQUIRED';
+    throw err;
+  }
+  const decision = await evaluatePaymentApplicationLock({
+    prisma,
+    tenantId,
+    applicationId,
+    action,
+    proposedChanges,
+  });
+  return assertCommercialUnlocked(decision);
+}
 
 // ==============================================================================
 // HELPER FUNCTIONS
@@ -207,6 +518,64 @@ async function updateBudgetActuals(application, amountPaid) {
 // ==============================================================================
 
 /**
+ * GET /api/projects/:projectId/payment-applications
+ * Project-scoped list used by the project finance pages.
+ */
+router.get('/projects/:projectId/payment-applications', async (req, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId || 'demo';
+    const projectId = Number(req.params.projectId);
+    const { status, supplierId, contractId, direction, limit = 100, offset = 0 } = req.query;
+
+    if (!Number.isFinite(projectId)) {
+      return res.status(400).json({ error: 'Invalid project id' });
+    }
+
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, tenantId },
+      select: { id: true, name: true },
+    });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const where = { tenantId, projectId };
+    if (status) where.status = String(status);
+    if (supplierId) where.supplierId = Number(supplierId);
+    if (contractId) where.contractId = Number(contractId);
+    if (direction && ['OUTBOUND', 'INBOUND'].includes(String(direction).toUpperCase())) {
+      where.direction = String(direction).toUpperCase();
+    }
+
+    const take = Math.min(Number(limit) || 100, 250);
+    const skip = Math.max(Number(offset) || 0, 0);
+
+    const [items, total] = await Promise.all([
+      prisma.applicationForPayment.findMany({
+        where,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take,
+        skip,
+        include: {
+          supplier: { select: { id: true, name: true } },
+          contract: { select: { id: true, title: true, contractRef: true } },
+        },
+      }),
+      prisma.applicationForPayment.count({ where }),
+    ]);
+
+    const data = items.map((item) => {
+      const x = safeJson(item);
+      x.links = buildLinks('applicationForPayment', x);
+      return x;
+    });
+
+    res.json({ items: data, total, limit: take, offset: skip });
+  } catch (e) {
+    console.error('[payment-applications] Project list error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
  * GET /api/contracts/:contractId/applications
  * List all payment applications for a contract
  */
@@ -214,7 +583,7 @@ router.get('/contracts/:contractId/applications', async (req, res, next) => {
   try {
     const contractId = Number(req.params.contractId);
     const tenantId = req.user?.tenantId || 'demo';
-    const { status, fromDate, toDate, limit = 100, offset = 0 } = req.query;
+    const { status, fromDate, toDate, direction, limit = 100, offset = 0 } = req.query;
 
     const where = { contractId, tenantId };
 
@@ -226,6 +595,11 @@ router.get('/contracts/:contractId/applications', async (req, res, next) => {
       where.applicationDate = {};
       if (fromDate) where.applicationDate.gte = new Date(fromDate);
       if (toDate) where.applicationDate.lte = new Date(toDate);
+    }
+
+    // Task 2.5: Direction filtering - OUTBOUND (we raise to MC/client) or INBOUND (we receive from subs)
+    if (direction && (direction === 'OUTBOUND' || direction === 'INBOUND')) {
+      where.direction = direction;
     }
 
     const [items, total] = await Promise.all([
@@ -398,17 +772,87 @@ router.post('/contracts/:contractId/applications', async (req, res, next) => {
             data: {
               tenantId,
               applicationId: application.id,
-              contractLineItemId: allocation.contractLineItemId,
-              budgetLineId: allocation.budgetLineId,
-              contractorClaimedValue: Number(allocation.claimedAmount),
-              contractorClaimedQuantity: 0, // Can be enhanced later
-              contractorNotes: allocation.description || '',
+              packageId: contract.packageId || null,
+              budgetLineId: allocation.budgetLineId || null,
+              description: allocation.description || `Line item ${allocation.contractLineItemId || allocation.budgetLineId || ''}`.trim(),
+              contractValue: Number(allocation.claimedAmount),
+              quantityThisPeriod: 1,
+              quantityCumulative: 1,
+              unit: allocation.unit || 'item',
+              rate: Number(allocation.claimedAmount),
+              valueThisPeriod: Number(allocation.claimedAmount),
+              valueCumulative: Number(allocation.claimedAmount),
             }
           });
         }
       }
 
       console.log(`[payment-applications] Created line item allocations for application ${application.id}`);
+    }
+
+    // Calculate complete payment breakdown (MCD → Retention → CIS → VAT) - Task 1.6
+    if (claimedGrossValue > 0) {
+      try {
+        const paymentCalc = await calculatePayment({
+          grossAmount: claimedGrossValue,
+          contractId: application.contractId,
+          supplierId: application.supplierId, // Optional - only for inbound apps
+          tenantId,
+        });
+
+        // Update application with complete breakdown
+        await prisma.applicationForPayment.update({
+          where: { id: application.id },
+          data: {
+            // MCD
+            mcdPercentage: paymentCalc.mcdPercentage,
+            mcdAmount: paymentCalc.mcdAmount,
+            grossAfterMCD: paymentCalc.grossAfterMCD,
+            // CIS
+            labourElement: paymentCalc.labourElement,
+            materialsElement: paymentCalc.materialsElement,
+            cisStatus: paymentCalc.cisStatus,
+            cisRate: paymentCalc.cisRate,
+            cisDeduction: paymentCalc.cisDeduction,
+            netAfterCIS: paymentCalc.netAfterCIS,
+            cisCalculatedAt: paymentCalc.calculatedAt,
+            cisWarnings: paymentCalc.cisWarnings.length > 0 ? JSON.stringify(paymentCalc.cisWarnings) : null,
+            // VAT
+            vatTreatment: paymentCalc.vatTreatment,
+            vatRate: paymentCalc.vatRate,
+            vatAmount: paymentCalc.vatAmount,
+            grossWithVAT: paymentCalc.grossWithVAT,
+            reverseCharge: paymentCalc.reverseCharge,
+            reverseChargeNote: paymentCalc.reverseChargeNote,
+          },
+        });
+
+        // Attach payment breakdown to response
+        Object.assign(application, {
+          mcdPercentage: paymentCalc.mcdPercentage,
+          mcdAmount: paymentCalc.mcdAmount,
+          grossAfterMCD: paymentCalc.grossAfterMCD,
+          labourElement: paymentCalc.labourElement,
+          materialsElement: paymentCalc.materialsElement,
+          cisStatus: paymentCalc.cisStatus,
+          cisRate: paymentCalc.cisRate,
+          cisDeduction: paymentCalc.cisDeduction,
+          netAfterCIS: paymentCalc.netAfterCIS,
+          cisCalculatedAt: paymentCalc.calculatedAt,
+          cisWarnings: paymentCalc.cisWarnings.length > 0 ? JSON.stringify(paymentCalc.cisWarnings) : null,
+          vatTreatment: paymentCalc.vatTreatment,
+          vatRate: paymentCalc.vatRate,
+          vatAmount: paymentCalc.vatAmount,
+          grossWithVAT: paymentCalc.grossWithVAT,
+          reverseCharge: paymentCalc.reverseCharge,
+          reverseChargeNote: paymentCalc.reverseChargeNote,
+        });
+
+        console.log(`[payment-applications] Payment calculated for application ${application.id}: MCD ${paymentCalc.mcdAmount}, CIS ${paymentCalc.cisDeduction}, VAT ${paymentCalc.vatAmount}, Total ${paymentCalc.grossWithVAT}`);
+      } catch (calcError) {
+        console.error('[payment-applications] Payment calculation error:', calcError?.message);
+        // Don't fail the entire request if calculation fails
+      }
     }
 
     const result = safeJson(application);
@@ -432,33 +876,61 @@ router.get('/applications/:id', async (req, res, next) => {
 
     const application = await prisma.applicationForPayment.findFirst({
       where: { id, tenantId },
-      include: {
-        supplier: { select: { id: true, name: true } },
-        contract: {
-          select: {
-            id: true,
-            title: true,
-            contractRef: true,
-            paymentDueDays: true,
-            paymentFinalDays: true,
-            retentionPercentage: true,
-          }
-        },
-        project: { select: { id: true, name: true } },
-        lineItemDetails: {
-          orderBy: { createdAt: 'asc' },
-        },
-        attachments: {
-          select: { id: true, documentId: true, label: true, createdAt: true },
-        },
-      },
+      select: certificateApplicationSelect,
     });
 
     if (!application) {
       return res.status(404).json({ error: 'Payment application not found' });
     }
 
+    const [lineItemDetails, attachments] = await Promise.all([
+      prisma.paymentApplicationLineItem.findMany({
+        where: { tenantId, applicationId: id },
+        select: {
+          id: true,
+          tenantId: true,
+          applicationId: true,
+          packageId: true,
+          description: true,
+          reference: true,
+          quantityPrevious: true,
+          quantityThisPeriod: true,
+          quantityCumulative: true,
+          unit: true,
+          rate: true,
+          valuePrevious: true,
+          valueThisPeriod: true,
+          valueCumulative: true,
+          qsCertifiedQuantity: true,
+          qsCertifiedValue: true,
+          qsNotes: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }).catch(() => []),
+      prisma.afpAttachment.findMany({
+        where: { tenantId, afpId: id },
+        select: { id: true, documentId: true, label: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      }).catch(() => []),
+    ]);
+
     const result = safeJson(application);
+    result.lineItemDetails = safeJson(lineItemDetails);
+    result.attachments = safeJson(attachments);
+    result.paymentCertificateUrl = result.paymentCertificateUrl || result.valuationDocument || null;
+    result.totalPaid = Number(result.totalPaid ?? result.amountPaid ?? 0);
+    result.paidAt = result.paidAt || result.paidDate || null;
+    result.certifiedPaymentAmount = Number(
+      result.paymentNoticeAmount ??
+      result.certifiedThisPeriod ??
+      result.certifiedNetValue ??
+      result.certifiedAmount ??
+      0
+    );
+    result.remainingBalance = Math.max(result.certifiedPaymentAmount - result.totalPaid, 0);
+    result.paidInFull = result.certifiedPaymentAmount > 0 && result.totalPaid >= result.certifiedPaymentAmount;
     result.links = buildLinks('applicationForPayment', result);
 
     res.json(result);
@@ -484,6 +956,8 @@ router.patch('/applications/:id', async (req, res, next) => {
     if (!existing) {
       return res.status(404).json({ error: 'Payment application not found' });
     }
+
+    await enforceApplicationUnlocked(req, id, 'update', req.body || {});
 
     // Only allow updates in DRAFT status
     if (existing.status !== 'DRAFT') {
@@ -578,12 +1052,163 @@ router.patch('/applications/:id', async (req, res, next) => {
       },
     });
 
+    // Recalculate complete payment breakdown if gross amount changed - Task 1.6
+    if (req.body.claimedGrossValue !== undefined) {
+      try {
+        const paymentCalc = await calculatePayment({
+          grossAmount: Number(application.claimedGrossValue),
+          contractId: application.contractId,
+          supplierId: application.supplierId, // Optional - only for inbound apps
+          tenantId,
+        });
+
+        // Update all payment breakdown fields
+        await prisma.applicationForPayment.update({
+          where: { id: application.id },
+          data: {
+            // MCD
+            mcdPercentage: paymentCalc.mcdPercentage,
+            mcdAmount: paymentCalc.mcdAmount,
+            grossAfterMCD: paymentCalc.grossAfterMCD,
+            // CIS
+            labourElement: paymentCalc.labourElement,
+            materialsElement: paymentCalc.materialsElement,
+            cisStatus: paymentCalc.cisStatus,
+            cisRate: paymentCalc.cisRate,
+            cisDeduction: paymentCalc.cisDeduction,
+            netAfterCIS: paymentCalc.netAfterCIS,
+            cisCalculatedAt: paymentCalc.calculatedAt,
+            cisWarnings: paymentCalc.cisWarnings.length > 0 ? JSON.stringify(paymentCalc.cisWarnings) : null,
+            // VAT
+            vatTreatment: paymentCalc.vatTreatment,
+            vatRate: paymentCalc.vatRate,
+            vatAmount: paymentCalc.vatAmount,
+            grossWithVAT: paymentCalc.grossWithVAT,
+            reverseCharge: paymentCalc.reverseCharge,
+            reverseChargeNote: paymentCalc.reverseChargeNote,
+          },
+        });
+
+        // Attach payment breakdown to response
+        Object.assign(application, {
+          mcdPercentage: paymentCalc.mcdPercentage,
+          mcdAmount: paymentCalc.mcdAmount,
+          grossAfterMCD: paymentCalc.grossAfterMCD,
+          labourElement: paymentCalc.labourElement,
+          materialsElement: paymentCalc.materialsElement,
+          cisStatus: paymentCalc.cisStatus,
+          cisRate: paymentCalc.cisRate,
+          cisDeduction: paymentCalc.cisDeduction,
+          netAfterCIS: paymentCalc.netAfterCIS,
+          cisCalculatedAt: paymentCalc.calculatedAt,
+          cisWarnings: paymentCalc.cisWarnings.length > 0 ? JSON.stringify(paymentCalc.cisWarnings) : null,
+          vatTreatment: paymentCalc.vatTreatment,
+          vatRate: paymentCalc.vatRate,
+          vatAmount: paymentCalc.vatAmount,
+          grossWithVAT: paymentCalc.grossWithVAT,
+          reverseCharge: paymentCalc.reverseCharge,
+          reverseChargeNote: paymentCalc.reverseChargeNote,
+        });
+
+        console.log(`[payment-applications] Payment recalculated for application ${application.id}: MCD ${paymentCalc.mcdAmount}, CIS ${paymentCalc.cisDeduction}, VAT ${paymentCalc.vatAmount}`);
+      } catch (calcError) {
+        console.error('[payment-applications] Payment recalculation error:', calcError?.message);
+        // Don't fail the entire request if calculation fails
+      }
+    }
+
     const result = safeJson(application);
     result.links = buildLinks('applicationForPayment', result);
 
     res.json(result);
   } catch (e) {
+    if (sendCommercialLock(res, e)) return;
+    if (e?.status) return res.status(e.status).json({ error: e.code || 'REQUEST_FAILED', message: e.message });
     console.error('[payment-applications] Update error:', e?.message, e?.stack);
+    next(e);
+  }
+});
+
+/**
+ * POST /api/applications/:id/recalculate-cis
+ * Manually recalculate complete payment breakdown (MCD, Retention, CIS, VAT)
+ * (useful if supplier CIS status changed or contract terms updated)
+ * Note: Endpoint name kept for backward compatibility
+ */
+router.post('/applications/:id/recalculate-cis', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const tenantId = req.user?.tenantId || 'demo';
+
+    const application = await prisma.applicationForPayment.findFirst({
+      where: { id, tenantId },
+      include: {
+        supplier: { select: { id: true, name: true } },
+        contract: { select: { id: true, title: true } },
+      },
+    });
+
+    if (!application) {
+      return res.status(404).json({ error: 'Payment application not found' });
+    }
+
+    if (!application.claimedGrossValue || Number(application.claimedGrossValue) <= 0) {
+      return res.status(400).json({ error: 'Application has no gross value - cannot calculate payment' });
+    }
+
+    await enforceApplicationUnlocked(req, id, 'recalculate', {
+      claimedGrossValue: application.claimedGrossValue,
+    });
+
+    // Recalculate complete payment breakdown - Task 1.6
+    const paymentCalc = await calculatePayment({
+      grossAmount: Number(application.claimedGrossValue),
+      contractId: application.contractId,
+      supplierId: application.supplierId, // Optional - only for inbound apps
+      tenantId,
+    });
+
+    // Update application with complete breakdown
+    const updated = await prisma.applicationForPayment.update({
+      where: { id },
+      data: {
+        // MCD
+        mcdPercentage: paymentCalc.mcdPercentage,
+        mcdAmount: paymentCalc.mcdAmount,
+        grossAfterMCD: paymentCalc.grossAfterMCD,
+        // CIS
+        labourElement: paymentCalc.labourElement,
+        materialsElement: paymentCalc.materialsElement,
+        cisStatus: paymentCalc.cisStatus,
+        cisRate: paymentCalc.cisRate,
+        cisDeduction: paymentCalc.cisDeduction,
+        netAfterCIS: paymentCalc.netAfterCIS,
+        cisCalculatedAt: paymentCalc.calculatedAt,
+        cisWarnings: paymentCalc.cisWarnings.length > 0 ? JSON.stringify(paymentCalc.cisWarnings) : null,
+        // VAT
+        vatTreatment: paymentCalc.vatTreatment,
+        vatRate: paymentCalc.vatRate,
+        vatAmount: paymentCalc.vatAmount,
+        grossWithVAT: paymentCalc.grossWithVAT,
+        reverseCharge: paymentCalc.reverseCharge,
+        reverseChargeNote: paymentCalc.reverseChargeNote,
+      },
+      include: {
+        supplier: { select: { id: true, name: true } },
+        contract: { select: { id: true, title: true } },
+      },
+    });
+
+    console.log(`[payment-applications] Payment manually recalculated for application ${id}: MCD ${paymentCalc.mcdAmount}, CIS ${paymentCalc.cisDeduction}, VAT ${paymentCalc.vatAmount}`);
+
+    const result = safeJson(updated);
+    result.links = buildLinks('applicationForPayment', result);
+
+    res.json(result);
+  } catch (e) {
+    if (sendCommercialLock(res, e)) return;
+    if (e?.status) return res.status(e.status).json({ error: e.code || 'REQUEST_FAILED', message: e.message });
+    console.error('[payment-applications] CIS recalculation error:', e?.message, e?.stack);
     next(e);
   }
 });
@@ -605,6 +1230,8 @@ router.delete('/applications/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Payment application not found' });
     }
 
+    await enforceApplicationUnlocked(req, id, 'delete', {});
+
     // Only allow deletion in DRAFT status
     if (existing.status !== 'DRAFT') {
       return res.status(400).json({
@@ -617,6 +1244,8 @@ router.delete('/applications/:id', async (req, res, next) => {
 
     res.json({ success: true, message: 'Payment application deleted' });
   } catch (e) {
+    if (sendCommercialLock(res, e)) return;
+    if (e?.status) return res.status(e.status).json({ error: e.code || 'REQUEST_FAILED', message: e.message });
     console.error('[payment-applications] Delete error:', e?.message, e?.stack);
     next(e);
   }
@@ -638,6 +1267,7 @@ router.post('/applications/:id/submit', async (req, res, next) => {
 
     const application = await prisma.applicationForPayment.findFirst({
       where: { id, tenantId },
+      select: applicationTransitionSelect,
     });
 
     if (!application) {
@@ -665,10 +1295,7 @@ router.post('/applications/:id/submit', async (req, res, next) => {
         submittedBy: userId,
         submittedAt: new Date(),
       },
-      include: {
-        supplier: { select: { id: true, name: true } },
-        contract: { select: { id: true, title: true } },
-      },
+      select: applicationTransitionSelect,
     });
 
     const result = safeJson(updated);
@@ -693,6 +1320,7 @@ router.post('/applications/:id/review', async (req, res, next) => {
 
     const application = await prisma.applicationForPayment.findFirst({
       where: { id, tenantId },
+      select: applicationTransitionSelect,
     });
 
     if (!application) {
@@ -714,10 +1342,7 @@ router.post('/applications/:id/review', async (req, res, next) => {
         reviewedAt: new Date(),
         qsNotes: req.body.qsNotes,
       },
-      include: {
-        supplier: { select: { id: true, name: true } },
-        contract: { select: { id: true, title: true } },
-      },
+      select: applicationTransitionSelect,
     });
 
     const result = safeJson(updated);
@@ -741,6 +1366,7 @@ router.get('/applications/:id/line-items', async (req, res, next) => {
 
     const application = await prisma.applicationForPayment.findFirst({
       where: { id, tenantId },
+      select: applicationTransitionSelect,
     });
 
     if (!application) {
@@ -776,6 +1402,7 @@ router.post('/applications/:id/save-certification-draft', async (req, res, next)
 
     const application = await prisma.applicationForPayment.findFirst({
       where: { id, tenantId },
+      select: applicationTransitionSelect,
     });
 
     if (!application) {
@@ -829,6 +1456,7 @@ router.post('/applications/:id/certify', async (req, res, next) => {
 
     const application = await prisma.applicationForPayment.findFirst({
       where: { id, tenantId },
+      select: applicationTransitionSelect,
     });
 
     if (!application) {
@@ -836,9 +1464,9 @@ router.post('/applications/:id/certify', async (req, res, next) => {
     }
 
     // Allow certification from SUBMITTED or UNDER_REVIEW status
-    if (!['SUBMITTED', 'UNDER_REVIEW'].includes(application.status)) {
+    if (!['SUBMITTED', 'UNDER_REVIEW', 'CERTIFIED'].includes(application.status)) {
       return res.status(400).json({
-        error: 'Can only certify applications in SUBMITTED or UNDER_REVIEW status',
+        error: 'Can only certify applications in SUBMITTED, UNDER_REVIEW, or CERTIFIED status',
         currentStatus: application.status,
       });
     }
@@ -889,10 +1517,7 @@ router.post('/applications/:id/certify', async (req, res, next) => {
         reviewedAt: new Date(),
         certificationNotes: fullNotes,
       },
-      include: {
-        supplier: { select: { id: true, name: true } },
-        contract: { select: { id: true, title: true } },
-      },
+      select: applicationTransitionSelect,
     });
 
     // Create CVR Actual entries for the certified amount
@@ -983,6 +1608,7 @@ router.post('/applications/:id/certify', async (req, res, next) => {
             increment: Number(req.body.certifiedThisPeriod),
           },
         },
+        select: { id: true },
       });
       console.log(`[Certification] Updated contract ${application.contractId} totalCertifiedToDate by £${req.body.certifiedThisPeriod}`);
     }
@@ -995,6 +1621,16 @@ router.post('/applications/:id/certify', async (req, res, next) => {
     } catch (cvrErr) {
       console.error('[CVR] Error creating actual for AfP:', cvrErr.message);
       // Don't fail certification if CVR creation fails
+    }
+
+    // CVR Phase A: Update CVR Snapshot with PA actuals
+    try {
+      const { onPaymentApplicationStatusChange } = require('../services/cvrActualsService.cjs');
+      await onPaymentApplicationStatusChange(id);
+      console.log(`[CVR Phase A] Updated CVR snapshot for certified PA ${application.applicationNo}`);
+    } catch (cvrPhaseAErr) {
+      console.error('[CVR Phase A] Error updating CVR snapshot:', cvrPhaseAErr.message);
+      // Don't fail certification if CVR snapshot update fails
     }
 
     // TASK 7: Auto-issue payment notice after certification (UK Construction Act compliance)
@@ -1027,10 +1663,7 @@ router.post('/applications/:id/certify', async (req, res, next) => {
           payLessNoticeReason: `Certified amount (${fmt(certifiedAmount)}) differs from claimed amount (${fmt(claimedAmount)}). Variance: ${fmt(variance)} (${variancePercentage.toFixed(2)}%)`,
         }),
       },
-      include: {
-        supplier: { select: { id: true, name: true } },
-        contract: { select: { id: true, title: true } },
-      },
+      select: applicationTransitionSelect,
     });
 
     console.log(`✅ [Auto-Issued ${noticeType}] ${application.applicationNo}:`, {
@@ -1263,7 +1896,7 @@ router.post('/applications/:id/record-payment', async (req, res, next) => {
       return res.status(400).json({ error: 'Payment method required' });
     }
 
-    const result = await paymentRecording.recordPayment({
+    const result = await getPaymentRecordingService().recordPayment({
       paymentApplicationId: Number(id),
       amount,
       paymentDate,
@@ -1306,8 +1939,8 @@ router.get('/applications/:id/payments', async (req, res, next) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const payments = await paymentRecording.getPaymentHistory(Number(id), tenantId);
-    const summary = await paymentRecording.getPaymentSummary(Number(id), tenantId);
+    const payments = await getPaymentRecordingService().getPaymentHistory(Number(id), tenantId);
+    const summary = await getPaymentRecordingService().getPaymentSummary(Number(id), tenantId);
 
     res.json({
       payments: safeJson(payments),
@@ -1338,7 +1971,7 @@ router.post('/applications/:id/payments/:paymentId/reverse', async (req, res, ne
       return res.status(400).json({ error: 'Reversal reason required' });
     }
 
-    await paymentRecording.reversePayment(Number(paymentId), reason, userId, tenantId);
+    await getPaymentRecordingService().reversePayment(Number(paymentId), reason, userId, tenantId);
 
     res.json({
       success: true,
@@ -1563,14 +2196,6 @@ router.post('/applications/:id/raise-dispute', async (req, res, next) => {
 // PAYMENT DOCUMENT GENERATION ENDPOINTS (UK Construction Act)
 // ==============================================================================
 
-const {
-  generatePaymentCertificate,
-  generatePaymentNotice,
-  generatePayLessNotice,
-  getPaymentDocuments,
-  checkConstructionActCompliance,
-} = require('../services/paymentDocuments.cjs');
-
 /**
  * POST /api/applications/:id/certificate/generate
  * Generate Payment Certificate PDF/HTML
@@ -1585,7 +2210,9 @@ router.post('/applications/:id/certificate/generate', async (req, res, next) => 
     res.json({
       success: true,
       message: 'Payment certificate generated successfully',
-      document: result,
+      document: result
+        ? { ...result, docId: result.docId != null ? String(result.docId) : result.docId }
+        : result,
     });
   } catch (e) {
     console.error('[payment-applications] Generate certificate error:', e?.message, e?.stack);
@@ -1602,17 +2229,15 @@ router.get('/applications/:id/certificate/download', async (req, res, next) => {
     const id = Number(req.params.id);
     const tenantId = req.user?.tenantId || 'demo';
 
-    const paymentApp = await prisma.applicationForPayment.findFirst({
+    const paymentAppRaw = await prisma.applicationForPayment.findFirst({
       where: { id, tenantId },
-      include: {
-        contract: { include: { supplier: true } },
-        project: true
-      }
+      select: certificateApplicationSelect,
     });
 
-    if (!paymentApp) {
+    if (!paymentAppRaw) {
       return res.status(404).json({ error: 'Payment application not found' });
     }
+    const paymentApp = normaliseCertificateApplication(paymentAppRaw);
 
     // Generate PDF on-the-fly
     const pdfBuffer = await generatePaymentCertificatePdf(paymentApp, {
@@ -1622,13 +2247,10 @@ router.get('/applications/:id/certificate/download', async (req, res, next) => {
     });
 
     // Update download tracking
-    await prisma.applicationForPayment.update({
-      where: { id },
-      data: {
-        paymentCertificateSentAt: new Date(),
-        paymentCertificateSentBy: req.user?.id ? String(req.user.id) : null,
-        paymentCertificateSentMethod: 'DOWNLOAD'
-      }
+    await updateApplicationIfColumnsExist(id, {
+      paymentCertificateSentAt: new Date(),
+      paymentCertificateSentBy: req.user?.id ? String(req.user.id) : null,
+      paymentCertificateSentMethod: 'DOWNLOAD'
     });
 
     // Send PDF as download
@@ -1653,20 +2275,18 @@ router.post('/applications/:id/certificate/send', async (req, res, next) => {
     const tenantId = req.user?.tenantId || 'demo';
     const userId = req.user?.id || null;
 
-    const paymentApp = await prisma.applicationForPayment.findFirst({
+    const paymentAppRaw = await prisma.applicationForPayment.findFirst({
       where: { id, tenantId },
-      include: {
-        contract: { include: { supplier: true } },
-        project: true
-      }
+      select: certificateApplicationSelect,
     });
 
-    if (!paymentApp) {
+    if (!paymentAppRaw) {
       return res.status(404).json({ error: 'Payment application not found' });
     }
+    const paymentApp = normaliseCertificateApplication(paymentAppRaw);
 
     // Determine recipient email
-    const recipientEmail = email || paymentApp.contract?.supplier?.email;
+    const recipientEmail = email || paymentApp.supplier?.email || paymentApp.contract?.supplier?.email;
 
     if (!recipientEmail) {
       return res.status(400).json({ error: 'No email address available for supplier' });
@@ -1700,14 +2320,11 @@ router.post('/applications/:id/certificate/send', async (req, res, next) => {
     });
 
     // Update record with send details
-    await prisma.applicationForPayment.update({
-      where: { id },
-      data: {
-        paymentCertificateSentAt: new Date(),
-        paymentCertificateSentBy: userId ? String(userId) : null,
-        paymentCertificateSentMethod: 'EMAIL',
-        paymentCertificateSentTo: recipientEmail
-      }
+    await updateApplicationIfColumnsExist(id, {
+      paymentCertificateSentAt: new Date(),
+      paymentCertificateSentBy: userId ? String(userId) : null,
+      paymentCertificateSentMethod: 'EMAIL',
+      paymentCertificateSentTo: recipientEmail
     });
 
     res.json({
@@ -1733,7 +2350,8 @@ router.post('/applications/:id/certificate/mark-sent', async (req, res, next) =>
     const userId = req.user?.id || null;
 
     const paymentApp = await prisma.applicationForPayment.findFirst({
-      where: { id, tenantId }
+      where: { id, tenantId },
+      select: { id: true },
     });
 
     if (!paymentApp) {
@@ -1741,19 +2359,17 @@ router.post('/applications/:id/certificate/mark-sent', async (req, res, next) =>
     }
 
     // Update record with manual send tracking
-    await prisma.applicationForPayment.update({
-      where: { id },
-      data: {
-        paymentCertificateSentAt: new Date(),
-        paymentCertificateSentBy: userId ? String(userId) : null,
-        paymentCertificateSentMethod: method || 'MANUAL',
-        paymentCertificateSentTo: sentTo || null
-      }
+    const trackingUpdate = await updateApplicationIfColumnsExist(id, {
+      paymentCertificateSentAt: new Date(),
+      paymentCertificateSentBy: userId ? String(userId) : null,
+      paymentCertificateSentMethod: method || 'MANUAL',
+      paymentCertificateSentTo: sentTo || null
     });
 
     res.json({
       success: true,
-      markedAt: new Date().toISOString()
+      markedAt: new Date().toISOString(),
+      trackingStored: !!trackingUpdate,
     });
   } catch (e) {
     console.error('[payment-applications] Mark certificate as sent error:', e?.message, e?.stack);
@@ -1823,7 +2439,7 @@ router.get('/applications/:id/pay-less/download', async (req, res, next) => {
 
     const application = await prisma.applicationForPayment.findFirst({
       where: { id, tenantId },
-      select: { payLessNoticeDocument: true, appNumber: true },
+      select: { payLessNoticeDocument: true, applicationNo: true, applicationNumber: true },
     });
 
     if (!application || !application.payLessNoticeDocument) {
@@ -1833,7 +2449,7 @@ router.get('/applications/:id/pay-less/download', async (req, res, next) => {
     // Return the URL/path for download
     res.json({
       url: application.payLessNoticeDocument,
-      filename: `Pay-Less-Notice-${application.appNumber || id}.pdf`,
+      filename: `Pay-Less-Notice-${application.applicationNo || application.applicationNumber || id}.pdf`,
     });
   } catch (e) {
     console.error('[payment-applications] Download pay-less notice error:', e?.message, e?.stack);
@@ -2274,17 +2890,15 @@ router.post('/applications/:id/certificate/generate-full', async (req, res, next
     const { id } = req.params;
     const tenantId = req.user?.tenantId || 'demo';
 
-    const paymentApp = await prisma.applicationForPayment.findFirst({
+    const paymentAppRaw = await prisma.applicationForPayment.findFirst({
       where: { id: Number(id), tenantId },
-      include: {
-        contract: { include: { supplier: true } },
-        project: true
-      }
+      select: certificateApplicationSelect,
     });
 
-    if (!paymentApp) {
+    if (!paymentAppRaw) {
       return res.status(404).json({ error: 'Payment application not found' });
     }
+    const paymentApp = normaliseCertificateApplication(paymentAppRaw);
 
     // Generate PDF using pdfkit
     const pdfBuffer = await generatePaymentCertificatePdf(paymentApp, {
@@ -2302,12 +2916,10 @@ router.post('/applications/:id/certificate/generate-full', async (req, res, next
     const url = doc?.storageKey || '';
 
     // Update record with certificate URL and generation timestamp
-    await prisma.applicationForPayment.update({
-      where: { id: Number(id) },
-      data: {
-        paymentCertificateUrl: url,
-        paymentCertificateGeneratedAt: new Date()
-      }
+    await updateApplicationIfColumnsExist(id, {
+      paymentCertificateUrl: url,
+      valuationDocument: url,
+      paymentCertificateGeneratedAt: new Date()
     });
 
     res.json({
@@ -2331,17 +2943,15 @@ router.get('/:id/certificate/download', async (req, res, next) => {
     const { id } = req.params;
     const tenantId = req.user?.tenantId || 'demo';
 
-    const paymentApp = await prisma.applicationForPayment.findFirst({
+    const paymentAppRaw = await prisma.applicationForPayment.findFirst({
       where: { id: Number(id), tenantId },
-      include: {
-        contract: { include: { supplier: true } },
-        project: true
-      }
+      select: certificateApplicationSelect,
     });
 
-    if (!paymentApp) {
+    if (!paymentAppRaw) {
       return res.status(404).json({ error: 'Payment application not found' });
     }
+    const paymentApp = normaliseCertificateApplication(paymentAppRaw);
 
     // Generate PDF on-the-fly
     const pdfBuffer = await generatePaymentCertificatePdf(paymentApp, {
@@ -2351,13 +2961,10 @@ router.get('/:id/certificate/download', async (req, res, next) => {
     });
 
     // Update download tracking
-    await prisma.applicationForPayment.update({
-      where: { id: Number(id) },
-      data: {
-        paymentCertificateSentAt: new Date(),
-        paymentCertificateSentBy: req.user?.id || null,
-        paymentCertificateSentMethod: 'DOWNLOAD'
-      }
+    await updateApplicationIfColumnsExist(id, {
+      paymentCertificateSentAt: new Date(),
+      paymentCertificateSentBy: req.user?.id ? String(req.user.id) : null,
+      paymentCertificateSentMethod: 'DOWNLOAD'
     });
 
     // Send PDF as download
@@ -2382,20 +2989,18 @@ router.post('/:id/certificate/send', async (req, res, next) => {
     const tenantId = req.user?.tenantId || 'demo';
     const userId = req.user?.id || null;
 
-    const paymentApp = await prisma.applicationForPayment.findFirst({
+    const paymentAppRaw = await prisma.applicationForPayment.findFirst({
       where: { id: Number(id), tenantId },
-      include: {
-        contract: { include: { supplier: true } },
-        project: true
-      }
+      select: certificateApplicationSelect,
     });
 
-    if (!paymentApp) {
+    if (!paymentAppRaw) {
       return res.status(404).json({ error: 'Payment application not found' });
     }
+    const paymentApp = normaliseCertificateApplication(paymentAppRaw);
 
     // Determine recipient email
-    const recipientEmail = email || paymentApp.contract?.supplier?.email;
+    const recipientEmail = email || paymentApp.supplier?.email || paymentApp.contract?.supplier?.email;
 
     if (!recipientEmail) {
       return res.status(400).json({ error: 'No email address available for supplier' });
@@ -2409,7 +3014,7 @@ router.post('/:id/certificate/send', async (req, res, next) => {
     });
 
     // Store PDF if not already stored
-    let url = paymentApp.paymentCertificateUrl;
+    let url = paymentApp.paymentCertificateUrl || paymentApp.valuationDocument;
     let docId;
     if (!url) {
       const filename = `Payment-Certificate-${paymentApp.applicationNo || paymentApp.id}.pdf`;
@@ -2442,15 +3047,13 @@ router.post('/:id/certificate/send', async (req, res, next) => {
     await sendEmail(emailData);
 
     // Update record with send details
-    await prisma.applicationForPayment.update({
-      where: { id: Number(id) },
-      data: {
-        paymentCertificateUrl: url,
-        paymentCertificateSentAt: new Date(),
-        paymentCertificateSentBy: userId,
-        paymentCertificateSentMethod: 'EMAIL',
-        paymentCertificateSentTo: recipientEmail
-      }
+    await updateApplicationIfColumnsExist(id, {
+      paymentCertificateUrl: url,
+      valuationDocument: url,
+      paymentCertificateSentAt: new Date(),
+      paymentCertificateSentBy: userId ? String(userId) : null,
+      paymentCertificateSentMethod: 'EMAIL',
+      paymentCertificateSentTo: recipientEmail
     });
 
     res.json({
@@ -2476,7 +3079,8 @@ router.post('/:id/certificate/mark-sent', async (req, res, next) => {
     const userId = req.user?.id || null;
 
     const paymentApp = await prisma.applicationForPayment.findFirst({
-      where: { id: Number(id), tenantId }
+      where: { id: Number(id), tenantId },
+      select: { id: true },
     });
 
     if (!paymentApp) {
@@ -2484,19 +3088,17 @@ router.post('/:id/certificate/mark-sent', async (req, res, next) => {
     }
 
     // Update record with manual send tracking
-    await prisma.applicationForPayment.update({
-      where: { id: Number(id) },
-      data: {
-        paymentCertificateSentAt: new Date(),
-        paymentCertificateSentBy: userId,
-        paymentCertificateSentMethod: method || 'MANUAL',
-        paymentCertificateSentTo: sentTo || null
-      }
+    const trackingUpdate = await updateApplicationIfColumnsExist(id, {
+      paymentCertificateSentAt: new Date(),
+      paymentCertificateSentBy: userId ? String(userId) : null,
+      paymentCertificateSentMethod: method || 'MANUAL',
+      paymentCertificateSentTo: sentTo || null
     });
 
     res.json({
       success: true,
-      markedAt: new Date().toISOString()
+      markedAt: new Date().toISOString(),
+      trackingStored: !!trackingUpdate,
     });
   } catch (error) {
     console.error('[payment-applications] Error marking certificate as sent:', error);
@@ -2518,22 +3120,41 @@ router.get('/applications/:id/invoices', async (req, res, next) => {
       return res.status(401).json({ error: 'Unauthorized - no tenant' });
     }
 
+    if (!(await hasInvoiceColumn('paymentApplicationId'))) {
+      return res.json({ invoices: [], compatibility: { paymentApplicationLinkMissing: true } });
+    }
+
     // Find all invoices linked to this payment application
     const invoices = await prisma.invoice.findMany({
       where: {
         paymentApplicationId: Number(id),
         tenantId
       },
-      include: {
-        supplier: true,
-        project: true
+      select: {
+        id: true,
+        tenantId: true,
+        projectId: true,
+        supplierId: true,
+        number: true,
+        issueDate: true,
+        dueDate: true,
+        net: true,
+        vat: true,
+        gross: true,
+        status: true,
+        paidAmount: true,
+        paidDate: true,
+        createdAt: true,
+        updatedAt: true,
+        supplier: { select: { id: true, name: true } },
+        project: { select: { id: true, name: true } },
       },
       orderBy: {
         createdAt: 'desc'
       }
     });
 
-    res.json({ invoices });
+    res.json({ invoices: safeJson(invoices) });
   } catch (error) {
     console.error('[payment-applications] Error fetching linked invoices:', error);
     next(error);

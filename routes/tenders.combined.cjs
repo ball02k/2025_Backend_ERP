@@ -18,26 +18,82 @@ const { buildTenderQuestionSuggestions } = require('../services/tenderQuestionSu
 router.use(requireAuth);
 const t = (req) => getTenantId(req);
 
+function toMoneyNumber(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function packageBudgetValue(pkg) {
+  if (!pkg) return null;
+
+  const directValue = [
+    pkg.budgetValue,
+    pkg.estimatedValue,
+    pkg.budgetEstimate,
+    pkg.awardedValue,
+    pkg.awardValue,
+  ]
+    .map(toMoneyNumber)
+    .find((value) => value != null && value > 0);
+
+  if (directValue != null) return directValue;
+
+  const linkedBudgetTotal = Array.isArray(pkg.budgetItems)
+    ? pkg.budgetItems.reduce((sum, item) => {
+        const line = item?.budgetLine || {};
+        return sum + (toMoneyNumber(line.amount) ?? toMoneyNumber(line.total) ?? 0);
+      }, 0)
+    : 0;
+
+  return linkedBudgetTotal > 0 ? linkedBudgetTotal : null;
+}
+
 // GET full tender (settings + questions + invites + criteria + responses + qna)
 // NOTE: Using Request table (existing tender system) not Rfx table
 router.get('/:tenderId/full', async (req, res, next) => {
   try {
     const id = Number(req.params.tenderId);
-    const data = await prisma.request.findFirst({
-      where: { id, tenantId: t(req) },
-      include: {
-        package: true,
-      },
-    });
+    const [data, submissionsCount, invitesCount] = await Promise.all([
+      prisma.request.findFirst({
+        where: { id, tenantId: t(req) },
+        include: {
+          package: {
+            include: {
+              budgetItems: {
+                include: {
+                  budgetLine: {
+                    select: { amount: true, total: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+      prisma.requestResponse.count({ where: { requestId: id, tenantId: t(req), status: 'submitted' } }),
+      prisma.requestInvite.count({ where: { requestId: id, tenantId: t(req) } }),
+    ]);
     if (!data) return res.status(404).json({ message: 'Not found' });
+    const latestContract = data.packageId
+      ? await prisma.contract.findFirst({
+          where: { tenantId: t(req), packageId: data.packageId },
+          orderBy: { id: 'desc' },
+          select: { id: true, contractRef: true, status: true },
+        })
+      : null;
 
     // Transform to expected format
     const result = {
       ...data,
       deadline: data.deadline || data.issueDate,
-      budget: data.package?.budget || null,
+      budget: packageBudgetValue(data.package),
       reviewers: null, // Not stored on Request model
       description: data.addenda || null, // Using addenda as description
+      submissionsCount,
+      invitesCount,
+      contractId: latestContract?.id || null,
+      contract: latestContract,
     };
 
     res.json(result);
@@ -74,7 +130,7 @@ router.post('/:tenderId/publish', async (req, res, next) => {
     const id = Number(req.params.tenderId);
     const tender = await prisma.request.findFirst({ where: { id, tenantId: t(req) }});
     if (!tender || (tender.status !== 'draft' && tender.status !== 'open')) return res.status(409).json({ message: 'Not draft/open' });
-    const updated = await prisma.request.update({ where: { id }, data: { status: 'issued', issuedAt: new Date() }});
+    const updated = await prisma.request.update({ where: { id }, data: { status: 'published', issuedAt: new Date() }});
     res.json(updated);
   } catch (e) { next(e); }
 });
@@ -85,10 +141,52 @@ router.post('/:tenderId/extend', async (req, res, next) => {
     const id = Number(req.params.tenderId);
     const { deadline } = req.body;
     const tender = await prisma.request.findFirst({ where: { id, tenantId: t(req) }});
-    if (!tender || tender.status !== 'issued') return res.status(409).json({ message: 'Not issued' });
+    if (!tender || !['issued', 'published'].includes(String(tender.status || '').toLowerCase())) return res.status(409).json({ message: 'Not issued' });
     const updated = await prisma.request.update({
       where: { id },
       data: { deadline: new Date(deadline) },
+    });
+    res.json(updated);
+  } catch (e) { next(e); }
+});
+
+// Roll back to draft (issued only)
+router.post('/:tenderId/rollback-to-draft', async (req, res, next) => {
+  try {
+    const id = Number(req.params.tenderId);
+    const tender = await prisma.request.findFirst({ where: { id, tenantId: t(req) }});
+    if (!tender) return res.status(404).json({ message: 'Tender not found' });
+    if (!['issued', 'published'].includes(String(tender.status || '').toLowerCase())) return res.status(409).json({ message: 'Can only rollback issued tenders' });
+
+    const updated = await prisma.request.update({
+      where: { id },
+      data: {
+        status: 'draft',
+        issuedAt: null,
+      },
+    });
+    res.json(updated);
+  } catch (e) { next(e); }
+});
+
+// Cancel tender
+router.post('/:tenderId/cancel', async (req, res, next) => {
+  try {
+    const id = Number(req.params.tenderId);
+    const { reason } = req.body;
+    const tender = await prisma.request.findFirst({ where: { id, tenantId: t(req) }});
+    if (!tender) return res.status(404).json({ message: 'Tender not found' });
+    if (tender.status === 'cancelled') return res.status(409).json({ message: 'Already cancelled' });
+
+    const updated = await prisma.request.update({
+      where: { id },
+      data: {
+        status: 'cancelled',
+        // Store cancellation reason in addenda if not already used, or append
+        addenda: tender.addenda
+          ? `${tender.addenda}\n\n--- Cancelled: ${reason} ---`
+          : `Cancelled: ${reason}`,
+      },
     });
     res.json(updated);
   } catch (e) { next(e); }

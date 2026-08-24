@@ -3,6 +3,12 @@ const router = express.Router({ mergeParams: true });
 const { prisma, toDecimal, Prisma } = require('../lib/prisma.js');
 const { writeAudit } = require('../lib/audit.cjs');
 const { requireProjectMember } = require('../middleware/membership.cjs');
+const {
+  evaluateBudgetLineLock,
+  evaluateBudgetLinesLock,
+  enforceDecision,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
 
 function toErr(e, fallback = 'INTERNAL') {
   const code = e?.code || fallback;
@@ -409,6 +415,16 @@ router.patch('/:projectId/budgets/:id', requireProjectMember, async (req, res) =
       data.amount = totalDec;
     }
 
+    const lockDecision = await evaluateBudgetLineLock({
+      prisma,
+      tenantId,
+      projectId: Number(req.params.projectId),
+      budgetLineId: id,
+      action: 'update',
+      proposedChanges: data,
+    });
+    await enforceDecision(req, 'BudgetLine', id, 'UPDATE', lockDecision);
+
     const updated = await prisma.budgetLine.update({
       where: { id },
       data,
@@ -442,6 +458,7 @@ router.patch('/:projectId/budgets/:id', requireProjectMember, async (req, res) =
 
     res.json(shapeLine(updated));
   } catch (e) {
+    if (sendCommercialLock(res, e)) return;
     console.error('[budgets/update]', e);
     res.status(500).json({ error: 'Failed to update budget line' });
   }
@@ -451,7 +468,17 @@ router.patch('/:projectId/budgets/:id', requireProjectMember, async (req, res) =
 router.delete('/:projectId/budgets/:id', requireProjectMember, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
+    const projectId = Number(req.params.projectId);
     const id = Number(req.params.id);
+
+    const lockDecision = await evaluateBudgetLineLock({
+      prisma,
+      tenantId,
+      projectId,
+      budgetLineId: id,
+      action: 'delete',
+    });
+    await enforceDecision(req, 'BudgetLine', id, 'DELETE', lockDecision);
 
     // Check linked packages and variations
     const [packages, varCount] = await Promise.all([
@@ -492,6 +519,7 @@ router.delete('/:projectId/budgets/:id', requireProjectMember, async (req, res) 
     });
     res.json({ ok: true });
   } catch (e) {
+    if (sendCommercialLock(res, e)) return;
     console.error('[budgets/delete]', e);
     res.status(500).json({ error: 'Failed to delete budget line' });
   }
@@ -641,12 +669,24 @@ router.delete('/:projectId/budget-groups/:groupId', requireProjectMember, async 
     const groupId = Number(req.params.groupId);
     const withLines = String(req.query.withLines || '').toLowerCase() === 'true';
 
-    const count = await prisma.budgetLine.count({ where: { groupId } });
+    const lines = await prisma.budgetLine.findMany({
+      where: { tenantId, projectId, groupId },
+      select: { id: true },
+    });
+    const count = lines.length;
     if (count > 0 && !withLines) {
       return res.status(409).json({ error: 'GROUP_NOT_EMPTY', message: 'Move lines to another group or choose delete with lines.' });
     }
     if (withLines) {
-      await prisma.budgetLine.deleteMany({ where: { groupId } });
+      const lockDecision = await evaluateBudgetLinesLock({
+        prisma,
+        tenantId,
+        projectId,
+        budgetLineIds: lines.map((line) => line.id),
+        action: 'delete',
+      });
+      await enforceDecision(req, 'BudgetGroup', groupId, 'DELETE_WITH_LINES', lockDecision);
+      await prisma.budgetLine.deleteMany({ where: { tenantId, projectId, groupId } });
     }
     await prisma.budgetGroup.delete({ where: { id: groupId } });
 
@@ -662,6 +702,7 @@ router.delete('/:projectId/budget-groups/:groupId', requireProjectMember, async 
 
     res.json({ ok: true });
   } catch (e) {
+    if (sendCommercialLock(res, e)) return;
     console.error('[budget-groups/delete]', e);
     res.status(500).json({ error: 'Failed to delete group' });
   }

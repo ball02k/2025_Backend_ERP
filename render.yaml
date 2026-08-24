@@ -8,10 +8,10 @@ services:
     startCommand: npm run render-start
     envVars:
       - key: NODE_VERSION
-        value: 18
+        value: 20.16.0
       - key: DATABASE_URL
         sync: false
-      - key: SHADOW_DATABASE_URL
+      - key: PRISMA_MIGRATE_SHADOW_DATABASE_URL
         sync: false
       - key: MODEL_PROVIDER
         value: ollama

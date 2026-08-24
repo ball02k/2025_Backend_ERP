@@ -17,6 +17,18 @@ const { makeStorageKey, signKey, writeLocalFile } = require('../utils/storage.cj
 router.use(requireAuth);
 
 const tenantIdOf = (req) => req.user && req.user.tenantId;
+const toSafeIntOrNull = (value) => {
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : null;
+};
+
+const toBigIntOrNull = (value) => {
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+};
 
 // Configure multer for memory storage (optional - install with: npm install multer)
 let upload;
@@ -76,21 +88,27 @@ router.get('/:tenderId/documents', async (req, res, next) => {
         })
       : [];
 
-    // Get download counts
+    // Get download counts for generic documents linked to this tender.
     const downloadCounts = {};
     if (docIds.length > 0) {
       try {
-        const downloads = await prisma.tenderDocumentDownload.groupBy({
-          by: ['documentId'],
-          where: {
-            tenantId,
-            documentId: { in: docIds }
-          },
-          _count: { documentId: true }
-        }).catch(() => []);
+        const documentPlaceholders = docIds.map((_, index) => `$${index + 4}`).join(', ');
+        const downloads = await prisma.$queryRawUnsafe(
+          `SELECT "documentId", COUNT(*)::int AS "downloadCount"
+             FROM "DocumentDownloadEvent"
+            WHERE "tenantId" = $1
+              AND "entityType" = $2
+              AND "entityId" = $3
+              AND "documentId" IN (${documentPlaceholders})
+            GROUP BY "documentId"`,
+          tenantId,
+          'request',
+          requestId,
+          ...docIds
+        );
 
         downloads.forEach(d => {
-          downloadCounts[String(d.documentId)] = d._count.documentId;
+          downloadCounts[String(d.documentId)] = Number(d.downloadCount || 0);
         });
       } catch (e) {
         console.warn('Download tracking not available:', e.message);
@@ -267,28 +285,54 @@ router.post('/:tenderId/documents/:documentId/track-download', async (req, res, 
   try {
     const tenantId = tenantIdOf(req);
     const requestId = Number(req.params.tenderId);
-    const documentId = BigInt(req.params.documentId);
-    const userId = req.user?.id;
-    const supplierId = req.user?.supplierId;
+    const documentId = toBigIntOrNull(req.params.documentId);
+    const supplierIdRaw = req.body?.supplierId ?? req.user?.supplierId;
+    const supplierId = toSafeIntOrNull(supplierIdRaw);
+    const userId = toSafeIntOrNull(req.user?.id);
 
-    // Create download tracking record
+    if (!Number.isSafeInteger(requestId) || !documentId || !tenantId) {
+      return res.json({ success: true, tracked: false });
+    }
+
+    // Create a generic download event for documents linked via DocumentLink.
     try {
-      await prisma.tenderDocumentDownload.create({
-        data: {
+      const tender = await prisma.request.findFirst({
+        where: { id: requestId, tenantId },
+        select: { id: true }
+      });
+      if (!tender) return res.status(404).json({ error: 'Tender not found' });
+
+      const link = await prisma.documentLink.findFirst({
+        where: {
           tenantId,
           documentId,
-          supplierId: supplierId || null,
-          userId: userId || null,
-          ipAddress: req.ip || req.connection?.remoteAddress || null,
-          userAgent: req.headers['user-agent'] || null
-        }
+          entityType: 'request',
+          entityId: requestId
+        },
+        select: { id: true }
       });
+      if (!link) return res.status(404).json({ error: 'Document not found' });
+
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "DocumentDownloadEvent"
+          ("tenantId", "documentId", "entityType", "entityId", "linkId", "supplierId", "userId", "ipAddress", "userAgent")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        tenantId,
+        documentId,
+        'request',
+        requestId,
+        link.id,
+        supplierId,
+        userId,
+        req.ip || req.connection?.remoteAddress || null,
+        req.get('user-agent') || null
+      );
+      return res.json({ success: true, tracked: true });
     } catch (e) {
-      // If model doesn't exist, just log
       console.warn('Download tracking not available:', e.message);
     }
 
-    res.json({ success: true });
+    res.json({ success: true, tracked: false });
   } catch (e) {
     console.error('Error tracking download:', e);
     // Don't fail - tracking is optional
@@ -324,6 +368,22 @@ router.delete('/:tenderId/documents/:documentId', async (req, res, next) => {
 
     if (!link) {
       return res.status(404).json({ error: 'Document not found' });
+    }
+
+    try {
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM "DocumentDownloadEvent"
+          WHERE "tenantId" = $1
+            AND "documentId" = $2
+            AND "entityType" = $3
+            AND "entityId" = $4`,
+        tenantId,
+        documentId,
+        'request',
+        requestId
+      );
+    } catch (e) {
+      console.warn('Download event cleanup not available:', e.message);
     }
 
     // Delete the link (not the document itself, as it might be linked elsewhere)

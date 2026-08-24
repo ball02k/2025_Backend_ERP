@@ -9,6 +9,12 @@ const requireAuth = require('../middleware/requireAuth.cjs');
 const { requirePerm } = require('../middleware/checkPermission.cjs');
 const { writeAudit, auditReject } = require('../lib/audit.cjs');
 const { makeStorageKey, localPath } = require('../utils/storage.cjs');
+const {
+  evaluateContractLock,
+  evaluateContractLineLock,
+  enforceDecision,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
 
 const router = express.Router();
 
@@ -84,6 +90,10 @@ function mapContract(contract) {
     value: contract.value instanceof Prisma.Decimal ? Number(contract.value) : contract.value,
     currency: contract.currency,
     status: contract.status,
+    signedAt: contract.signedAt,
+    signedBy: contract.signedBy,
+    issuedAt: contract.issuedAt,
+    issuedBy: contract.issuedBy,
     startDate: contract.startDate,
     endDate: contract.endDate,
     retentionPct: contract.retentionPct instanceof Prisma.Decimal ? Number(contract.retentionPct) : contract.retentionPct,
@@ -200,7 +210,7 @@ function mapContract(contract) {
   return mapped;
 }
 
-const contractInclude = {
+const contractRelationSelect = {
   supplier: { select: { id: true, name: true } },
   package: {
     select: {
@@ -231,9 +241,66 @@ const contractInclude = {
   },
 };
 
-const contractWithLinesInclude = {
-  ...contractInclude,
-  lineItems: { orderBy: { id: 'asc' } },
+const contractBaseSelect = {
+  id: true,
+  projectId: true,
+  packageId: true,
+  supplierId: true,
+  internalTeam: true,
+  contractRef: true,
+  title: true,
+  value: true,
+  currency: true,
+  status: true,
+  signedAt: true,
+  signedBy: true,
+  issuedAt: true,
+  issuedBy: true,
+  startDate: true,
+  endDate: true,
+  retentionPct: true,
+  paymentTerms: true,
+  notes: true,
+  tenantId: true,
+  createdAt: true,
+  updatedAt: true,
+  draftCreatedAt: true,
+  lockedAt: true,
+  sourceMode: true,
+  documentSource: true,
+  draftDocumentUrl: true,
+  draftDocumentName: true,
+  signedDocumentUrl: true,
+  signedDocumentName: true,
+  signedDocumentUploadedAt: true,
+  signedDocumentUploadedBy: true,
+  ocrStatus: true,
+  ocrExtractedData: true,
+  ocrConfidence: true,
+  contractTypeId: true,
+  retentionPercentage: true,
+  ...contractRelationSelect,
+};
+
+const contractWithLinesSelect = {
+  ...contractBaseSelect,
+  lineItems: {
+    orderBy: { id: 'asc' },
+    select: {
+      id: true,
+      contractId: true,
+      description: true,
+      qty: true,
+      rate: true,
+      total: true,
+      costCode: true,
+      budgetLineId: true,
+      packageLineItemId: true,
+      tenantId: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  },
   // applications: {
   //   select: {
   //     id: true,
@@ -279,7 +346,7 @@ const contractWithLinesInclude = {
 async function fetchContract(tenantId, id, includeLines = false) {
   return prisma.contract.findFirst({
     where: { id, tenantId },
-    include: includeLines ? contractWithLinesInclude : contractInclude,
+    select: includeLines ? contractWithLinesSelect : contractBaseSelect,
   });
 }
 
@@ -343,11 +410,10 @@ router.get('/contracts', async (req, res) => {
       const statuses = status.split(',').map(s => s.trim());
       where.status = statuses.length === 1 ? statuses[0] : { in: statuses };
     }
-
     const contracts = await prisma.contract.findMany({
       where,
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      include: contractInclude,
+      select: contractBaseSelect,
     });
     res.json({ items: contracts.map(mapContract) });
   } catch (err) {
@@ -368,10 +434,12 @@ router.get('/projects/:projectId/contracts', async (req, res) => {
     return res.status(400).json({ error: 'Invalid project id' });
   }
   try {
+    const where = { tenantId, projectId };
+
     const contracts = await prisma.contract.findMany({
-      where: { tenantId, projectId },
+      where,
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      include: contractInclude,
+      select: contractBaseSelect,
     });
     res.json({ items: contracts.map(mapContract) });
   } catch (err) {
@@ -416,12 +484,20 @@ router.get('/contracts/:id/line-items-summary', async (req, res) => {
     // Get contract with line items
     const contract = await prisma.contract.findFirst({
       where: { id, tenantId },
-      include: {
+      select: {
+        id: true,
         lineItems: {
           orderBy: { id: 'asc' },
-          include: {
+          select: {
+            id: true,
+            description: true,
+            qty: true,
+            rate: true,
+            total: true,
+            budgetLineId: true,
+            costCode: true,
             budgetLine: {
-              select: { id: true, name: true }
+              select: { id: true, description: true }
             }
           }
         }
@@ -433,24 +509,31 @@ router.get('/contracts/:id/line-items-summary', async (req, res) => {
     }
 
     // Get certified amounts per line item from all certified payment applications
-    const certifiedLineItems = await prisma.paymentApplicationLineItem.findMany({
-      where: {
-        tenantId,
-        contractLineItemId: { in: contract.lineItems.map(li => li.id) },
-        paymentApplication: {
-          status: { in: ['CERTIFIED', 'PAYMENT_NOTICE_SENT', 'APPROVED', 'PAID', 'PARTIALLY_PAID'] }
-        }
-      },
-      select: {
-        contractLineItemId: true,
-        qsCertifiedValue: true,
-      }
-    });
+    const budgetLineIds = contract.lineItems
+      .map((li) => li.budgetLineId)
+      .filter((id) => id != null && Number.isFinite(Number(id)))
+      .map((id) => Number(id));
+    const certifiedLineItems = budgetLineIds.length
+      ? await prisma.paymentApplicationLineItem.findMany({
+          where: {
+            tenantId,
+            budgetLineId: { in: budgetLineIds },
+            application: {
+              contractId: id,
+              status: { in: ['CERTIFIED', 'PAYMENT_NOTICE_SENT', 'APPROVED', 'PAID', 'PARTIALLY_PAID'] }
+            }
+          },
+          select: {
+            budgetLineId: true,
+            qsCertifiedValue: true,
+          }
+        })
+      : [];
 
     // Calculate previously certified per line item
     const certifiedByLineItem = {};
     certifiedLineItems.forEach(item => {
-      const lineItemId = item.contractLineItemId;
+      const lineItemId = item.budgetLineId;
       if (!certifiedByLineItem[lineItemId]) {
         certifiedByLineItem[lineItemId] = 0;
       }
@@ -460,7 +543,7 @@ router.get('/contracts/:id/line-items-summary', async (req, res) => {
     // Map to contract line items with progress
     const lineItemsWithProgress = contract.lineItems.map(item => {
       const contractValue = item.total instanceof Prisma.Decimal ? Number(item.total) : Number(item.total || 0);
-      const previouslyCertified = certifiedByLineItem[item.id] || 0;
+      const previouslyCertified = certifiedByLineItem[item.budgetLineId] || 0;
       const remainingValue = contractValue - previouslyCertified;
 
       return {
@@ -620,16 +703,72 @@ router.post('/contracts', async (req, res) => {
       paymentTerms: paymentTerms,
       contractTypeId: contractTypeId,
 
+      // Main Contractor Discount - Task 1.6
+      mainContractorDiscount: body.mainContractorDiscount != null ? toDecimal(body.mainContractorDiscount, { allowNull: true }) : null,
+      mcdDescription: body.mcdDescription || null,
+
       notes: body.notes || null,
       sourceMode,
       draftCreatedAt: now,
       lockedAt: now,
     };
 
-    const created = await prisma.contract.create({
-      data: contractData,
-      include: contractInclude,
+    let createdId;
+    await prisma.$transaction(async (tx) => {
+      const created = await tx.contract.create({
+        data: contractData,
+        select: { id: true },
+      });
+      createdId = created.id;
+
+      if (packageId) {
+        const packageItems = await tx.packageItem.findMany({
+          where: { tenantId, packageId },
+          include: {
+            budgetLine: {
+              select: {
+                id: true,
+                code: true,
+                description: true,
+                qty: true,
+                rate: true,
+                total: true,
+                amount: true,
+                costCode: { select: { code: true } },
+              },
+            },
+          },
+          orderBy: { id: 'asc' },
+        });
+
+        for (const item of packageItems) {
+          const line = item.budgetLine;
+          if (!line) continue;
+          const rawTotal = Number(line.total || 0) || Number(line.amount || 0);
+          const rawQty = Number(line.qty || 0);
+          const qty = rawQty > 0 ? rawQty : 1;
+          const rawRate = Number(line.rate || 0);
+          const rate = rawRate > 0 ? rawRate : rawTotal / qty;
+
+          await tx.contractLineItem.create({
+            data: {
+              tenantId,
+              contractId: created.id,
+              budgetLineId: line.id,
+              packageLineItemId: null,
+              description: line.description || line.code || `Budget line ${line.id}`,
+              qty: toDecimal(qty),
+              rate: toDecimal(rate),
+              total: toDecimal(rawTotal),
+              costCode: line.costCode?.code || line.code || null,
+            },
+            select: { id: true },
+          });
+        }
+      }
     });
+
+    const created = await fetchContract(tenantId, createdId, true);
 
     await writeAudit({
       prisma,
@@ -663,6 +802,15 @@ router.put('/contracts/:id', async (req, res) => {
   try {
     const existing = await fetchContract(tenantId, id, false);
     if (!existing) return res.status(404).json({ error: 'Contract not found' });
+
+    const commercialDecision = await evaluateContractLock({
+      prisma,
+      tenantId,
+      contractId: id,
+      action: 'update',
+      proposedChanges: body,
+    });
+    await enforceDecision(req, 'Contract', id, 'UPDATE', commercialDecision);
 
     // NEVER allow contractType or contractTypeId to be changed - it comes from Package
     if (body.contractType !== undefined || body.contractTypeId !== undefined) {
@@ -711,7 +859,8 @@ router.put('/contracts/:id', async (req, res) => {
         'contractTypeId',
         'paymentTerms',
         'retentionPct',
-        'retentionPercentage'
+        'retentionPercentage',
+        'mainContractorDiscount' // Task 1.6 - MCD is a commercial term
       ];
 
       const attemptedLockedChanges = LOCKED_FIELDS_AFTER_SIGNING.filter(field => {
@@ -768,6 +917,10 @@ router.put('/contracts/:id', async (req, res) => {
     if (body.value !== undefined) patch.value = toDecimal(body.value, { allowNull: true });
     if (body.retentionPct !== undefined) patch.retentionPct = toDecimal(body.retentionPct, { allowNull: true });
 
+    // Main Contractor Discount - Task 1.6
+    if (body.mainContractorDiscount !== undefined) patch.mainContractorDiscount = toDecimal(body.mainContractorDiscount, { allowNull: true });
+    if (body.mcdDescription !== undefined) patch.mcdDescription = body.mcdDescription == null ? null : String(body.mcdDescription);
+
     // Only allow packageId update if not locked
     if (body.packageId !== undefined && !existing.draftCreatedAt) {
       patch.packageId = body.packageId != null ? Number(body.packageId) : null;
@@ -789,7 +942,7 @@ router.put('/contracts/:id', async (req, res) => {
       return res.status(400).json({ error: 'No changes supplied' });
     }
 
-    const updated = await prisma.contract.update({ where: { id }, data: patch, include: contractWithLinesInclude });
+    const updated = await prisma.contract.update({ where: { id }, data: patch, select: contractWithLinesSelect });
 
     await writeAudit({
       prisma,
@@ -802,6 +955,7 @@ router.put('/contracts/:id', async (req, res) => {
 
     res.json(mapContract(updated));
   } catch (err) {
+    if (sendCommercialLock(res, err)) return;
     if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error('[contracts.update] failed', err);
     res.status(500).json({ error: 'Failed to update contract' });
@@ -932,6 +1086,15 @@ router.put('/contract-line-items/:id', async (req, res) => {
 
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'No changes supplied' });
 
+    const commercialDecision = await evaluateContractLineLock({
+      prisma,
+      tenantId,
+      contractLineItemId: id,
+      action: 'update',
+      proposedChanges: patch,
+    });
+    await enforceDecision(req, 'ContractLineItem', id, 'UPDATE', commercialDecision);
+
     const updated = await prisma.contractLineItem.update({ where: { id }, data: patch });
 
     await writeAudit({
@@ -945,6 +1108,7 @@ router.put('/contract-line-items/:id', async (req, res) => {
 
     res.json(mapLineItem(updated));
   } catch (err) {
+    if (sendCommercialLock(res, err)) return;
     if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error('[contracts.lineItem.update] failed', err);
     res.status(500).json({ error: 'Failed to update line item' });
@@ -968,6 +1132,14 @@ router.delete('/contract-line-items/:id', async (req, res) => {
     });
     if (!line) return res.status(404).json({ error: 'Line item not found' });
 
+    const commercialDecision = await evaluateContractLineLock({
+      prisma,
+      tenantId,
+      contractLineItemId: id,
+      action: 'delete',
+    });
+    await enforceDecision(req, 'ContractLineItem', id, 'DELETE', commercialDecision);
+
     await prisma.contractLineItem.delete({ where: { id } });
 
     await writeAudit({
@@ -981,6 +1153,7 @@ router.delete('/contract-line-items/:id', async (req, res) => {
 
     res.json({ ok: true });
   } catch (err) {
+    if (sendCommercialLock(res, err)) return;
     if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error('[contracts.lineItem.delete] failed', err);
     res.status(500).json({ error: 'Failed to delete line item' });
@@ -1122,10 +1295,65 @@ async function updateContractStatus(req, res, status) {
     const contract = await fetchContract(tenantId, id, false);
     if (!contract) return res.status(404).json({ error: 'Contract not found' });
 
-    const updated = await prisma.contract.update({ where: { id }, data: { status }, include: contractWithLinesInclude });
+    const currentStatus = String(contract.status || '').toLowerCase();
+    const nextStatus = String(status || '').toLowerCase();
+    if (['signed', 'active'].includes(currentStatus) && ['draft', 'issued', 'sent_for_signature'].includes(nextStatus)) {
+      return res.status(409).json({
+        error: 'Signed contracts cannot be moved backwards. Cancel/archive the contract or raise a variation instead.',
+        code: 'CONTRACT_STATUS_LOCKED',
+        currentStatus: contract.status,
+        requestedStatus: status,
+      });
+    }
+    if (['archived', 'cancelled', 'void'].includes(currentStatus) && currentStatus !== nextStatus) {
+      return res.status(409).json({
+        error: 'Closed contracts cannot be reopened through status update.',
+        code: 'CONTRACT_STATUS_CLOSED',
+        currentStatus: contract.status,
+        requestedStatus: status,
+      });
+    }
+
+    const userId = req.user?.id != null ? String(req.user.id) : null;
+    const updateData = { status };
+    if (status === 'issued') {
+      updateData.issuedAt = contract.issuedAt || new Date();
+      updateData.issuedBy = contract.issuedBy || userId;
+    }
+    if (status === 'signed') {
+      updateData.signedAt = contract.signedAt || new Date();
+      updateData.signedBy = contract.signedBy || userId;
+      if (req.body?.signedDocumentUrl) {
+        updateData.signedDocumentUrl = String(req.body.signedDocumentUrl);
+        updateData.signedDocumentName = req.body.signedDocumentName ? String(req.body.signedDocumentName) : contract.signedDocumentName;
+        updateData.signedDocumentUploadedAt = new Date();
+        updateData.signedDocumentUploadedBy = userId;
+        updateData.documentSource = 'UPLOADED_SIGNED';
+      }
+    }
+
+    const updated = await prisma.contract.update({ where: { id }, data: updateData, select: contractWithLinesSelect });
 
     // Create CVR Commitment when contract is signed (awarded)
     if (status === 'signed' && contract.status !== 'signed' && updated.value && updated.projectId) {
+      if (updated.packageId) {
+        try {
+          await prisma.package.updateMany({
+            where: { id: updated.packageId, projectId: updated.projectId },
+            data: {
+              status: 'contracted',
+              awardSupplierId: updated.supplierId || null,
+              awardedToSupplierId: updated.supplierId || null,
+              awardValue: updated.value,
+              awardedValue: updated.value,
+              awardedAt: new Date(),
+            },
+          });
+        } catch (pkgErr) {
+          console.error('[contracts.status] Error updating package after signing:', pkgErr.message);
+        }
+      }
+
       try {
         await prisma.cVRCommitment.create({
           data: {
@@ -1140,7 +1368,7 @@ async function updateContractStatus(req, res, status) {
             status: 'COMMITTED',
             description: `Contract: ${updated.contractRef || updated.title}`,
             reference: updated.contractRef,
-            committedDate: new Date(),
+            commitmentDate: new Date(),
           },
         });
         console.log(`[CVR] Created commitment for contract ${updated.id}: £${Number(updated.value).toFixed(2)}`);
@@ -1170,7 +1398,7 @@ async function updateContractStatus(req, res, status) {
       entity: 'Contract',
       entityId: id,
       action: `status.${status}`,
-      changes: { status },
+      changes: { from: contract.status, to: status, signedDocumentUrl: updateData.signedDocumentUrl || null },
     });
 
     res.json(mapContract(updated));
@@ -1181,30 +1409,312 @@ async function updateContractStatus(req, res, status) {
   }
 }
 
-router.post('/contracts/:id/issue', (req, res) => updateContractStatus(req, res, 'issued'));
-router.post('/contracts/:id/send-for-signature', (req, res) => updateContractStatus(req, res, 'sent_for_signature'));
-router.post('/contracts/:id/mark-signed', (req, res) => updateContractStatus(req, res, 'signed'));
-router.post('/contracts/:id/revert-to-draft', (req, res) => updateContractStatus(req, res, 'draft'));
-router.post('/contracts/:id/archive', (req, res) => updateContractStatus(req, res, 'archived'));
+router.post('/contracts/:id/issue', requirePerm('contracts:issue'), (req, res) => updateContractStatus(req, res, 'issued'));
+router.post('/contracts/:id/send-for-signature', requirePerm('contracts:issue'), (req, res) => updateContractStatus(req, res, 'sent_for_signature'));
+router.post('/contracts/:id/mark-signed', requirePerm('contracts:sign'), (req, res) => updateContractStatus(req, res, 'signed'));
+router.post('/contracts/:id/revert-to-draft', requirePerm('contracts:edit'), (req, res) => updateContractStatus(req, res, 'draft'));
+router.post('/contracts/:id/archive', requirePerm('contracts:edit'), (req, res) => updateContractStatus(req, res, 'archived'));
 
 // DELETE /contracts/:id
 router.delete('/contracts/:id', requireAuth, requirePerm('contracts:delete'), async (req, res) => {
-  const tenantId  = req.tenant.id;
-  const userId    = req.user.id;
+  try {
+    const tenantId = req.tenant?.id || req.user?.tenantId || req.tenantId;
+    const userId = req.user?.id ? Number(req.user.id) : null;
+    const contractId = Number(req.params.id);
+    if (!tenantId) {
+      return res.status(401).json({ code: 'TENANT_REQUIRED', message: 'Tenant context required' });
+    }
+    if (!Number.isFinite(contractId)) {
+      return res.status(400).json({ code: 'BAD_REQUEST', message: 'Invalid contract id' });
+    }
+
+    const ctr = await prisma.contract.findFirst({ where: { id: contractId, tenantId } });
+    if (!ctr) return res.status(404).json({ code: 'NOT_FOUND', message: 'Contract not found' });
+
+    const commercialDecision = await evaluateContractLock({
+      prisma,
+      tenantId,
+      contractId,
+      action: 'delete',
+    });
+    await enforceDecision(req, 'Contract', contractId, 'DELETE', commercialDecision);
+
+    if (String(ctr.status || '').toLowerCase() === 'signed') {
+      return res.status(409).json({ code: 'NOT_ALLOWED', message: 'Cannot delete a signed contract' });
+    }
+
+    // If you have POs/invoices linked, check here and block if references exist
+
+    await prisma.contract.delete({ where: { id: contractId } });
+    await writeAudit(tenantId, userId, 'ContractDeleted', 'Contract', contractId, {});
+    res.json({ ok: true });
+  } catch (err) {
+    if (sendCommercialLock(res, err)) return;
+    console.error('[contracts.delete] failed', err);
+    return res.status(err.status || 500).json({ code: err.code || 'CONTRACT_DELETE_FAILED', message: err.message || 'Failed to delete contract' });
+  }
+});
+
+// GET /contracts/:id/applications
+// Get payment applications for a contract
+router.get('/contracts/:id/applications', async (req, res) => {
+  let tenantId;
+  try {
+    tenantId = requireTenant(req);
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message || 'Tenant context required' });
+  }
   const contractId = Number(req.params.id);
+  if (!Number.isFinite(contractId)) return res.status(400).json({ error: 'Invalid contract id' });
 
-  const ctr = await prisma.contract.findFirst({ where: { id: contractId, tenantId } });
-  if (!ctr) return res.status(404).json({ code: 'NOT_FOUND', message: 'Contract not found' });
+  try {
+    const applications = await prisma.applicationForPayment.findMany({
+      where: {
+        tenantId,
+        contractId
+      },
+      orderBy: { applicationNumber: 'desc' },
+      select: {
+        id: true,
+        tenantId: true,
+        projectId: true,
+        supplierId: true,
+        contractId: true,
+        applicationNumber: true,
+        applicationNo: true,
+        reference: true,
+        title: true,
+        applicationDate: true,
+        valuationDate: true,
+        dueDate: true,
+        finalPaymentDate: true,
+        periodStart: true,
+        periodEnd: true,
+        status: true,
+        currency: true,
+        claimedGrossValue: true,
+        claimedRetention: true,
+        claimedNetValue: true,
+        claimedPreviouslyPaid: true,
+        claimedThisPeriod: true,
+        grossToDate: true,
+        variationsValue: true,
+        prelimsValue: true,
+        retentionValue: true,
+        deductionsValue: true,
+        netClaimed: true,
+        certifiedGrossValue: true,
+        certifiedRetention: true,
+        certifiedNetValue: true,
+        certifiedPreviouslyPaid: true,
+        certifiedThisPeriod: true,
+        certifiedAmount: true,
+        certifiedDate: true,
+        amountPaid: true,
+        paidDate: true,
+        paymentReference: true,
+        notes: true,
+        submittedAt: true,
+        reviewedAt: true,
+        approvedAt: true,
+        paymentNoticeSent: true,
+        paymentNoticeSentAt: true,
+        paymentNoticeAmount: true,
+        payLessNoticeSent: true,
+        payLessNoticeSentAt: true,
+        payLessNoticeAmount: true,
+        createdAt: true,
+        updatedAt: true,
+        supplier: {
+          select: { id: true, name: true }
+        }
+      }
+    });
 
-  if (ctr.status === 'Signed') {
-    return res.status(409).json({ code: 'NOT_ALLOWED', message: 'Cannot delete a signed contract' });
+    res.json({ applications });
+  } catch (err) {
+    console.error('[contracts.applications.get] failed', err);
+    res.status(500).json({ error: 'Failed to load applications' });
+  }
+});
+
+// POST /contracts/:id/applications
+// Create a new payment application for a contract
+router.post('/contracts/:id/applications', async (req, res) => {
+  let tenantId;
+  try {
+    tenantId = requireTenant(req);
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message || 'Tenant context required' });
   }
 
-  // If you have POs/invoices linked, check here and block if references exist
+  const contractId = Number(req.params.id);
+  if (!Number.isFinite(contractId)) return res.status(400).json({ error: 'Invalid contract id' });
 
-  await prisma.contract.delete({ where: { id: contractId } });
-  await writeAudit(tenantId, userId, 'ContractDeleted', 'Contract', contractId, {});
-  res.json({ ok: true });
+  try {
+    // Validate contract exists
+    const contract = await prisma.contract.findFirst({
+      where: { id: contractId, tenantId },
+      select: {
+        id: true,
+        tenantId: true,
+        projectId: true,
+        supplierId: true,
+        contractRef: true,
+        title: true,
+        value: true,
+      }
+    });
+
+    if (!contract) {
+      return res.status(404).json({ error: 'Contract not found' });
+    }
+
+    const {
+      claimedGrossValue,
+      claimedRetention,
+      claimedNetValue,
+      periodStart,
+      periodEnd,
+      contractLineItemAllocations,
+      applicationDate,
+      valuationDate,
+      dueDate,
+      direction,
+      paymentCertificateUrl,
+      paymentCertificateGeneratedAt,
+      paymentCertificateSentAt,
+      paymentCertificateSentBy,
+      paymentCertificateSentMethod,
+      paymentCertificateSentTo,
+      ...otherData
+    } = req.body;
+
+    // Get the next application number
+    const lastApplication = await prisma.applicationForPayment.findFirst({
+      where: {
+        tenantId,
+        contractId
+      },
+      orderBy: { applicationNumber: 'desc' },
+      select: { applicationNumber: true }
+    });
+
+    const nextNumber = (lastApplication?.applicationNumber || 0) + 1;
+
+    // Create the payment application with line items in a transaction
+    const application = await prisma.$transaction(async (tx) => {
+      // Create main application
+      const applicationNo = `PA-${contractId}-${String(nextNumber).padStart(3, '0')}`;
+      const applicationDateValue = applicationDate ? new Date(applicationDate) : new Date();
+      const periodStartValue = periodStart ? new Date(periodStart) : new Date();
+      const periodEndValue = periodEnd ? new Date(periodEnd) : new Date();
+      const valuationDateValue = valuationDate ? new Date(valuationDate) : null;
+      const dueDateValue = dueDate ? new Date(dueDate) : null;
+      const now = new Date();
+      const grossClaimed = toDecimal(claimedGrossValue || 0);
+      const retentionClaimed = toDecimal(claimedRetention || 0);
+      const netClaimed = toDecimal(claimedNetValue || 0);
+
+      const rows = await tx.$queryRaw`
+        INSERT INTO "ApplicationForPayment" (
+          "tenantId",
+          "projectId",
+          "contractId",
+          "supplierId",
+          "applicationNumber",
+          "applicationNo",
+          "reference",
+          "title",
+          "applicationDate",
+          "periodStart",
+          "periodEnd",
+          "valuationDate",
+          "dueDate",
+          "claimedGrossValue",
+          "claimedThisPeriod",
+          "claimedRetention",
+          "claimedNetValue",
+          "status",
+          "notes",
+          "updatedAt"
+        )
+        VALUES (
+          ${tenantId},
+          ${contract.projectId},
+          ${contractId},
+          ${contract.supplierId},
+          ${nextNumber},
+          ${applicationNo},
+          ${otherData.reference ?? null},
+          ${otherData.title ?? null},
+          ${applicationDateValue},
+          ${periodStartValue},
+          ${periodEndValue},
+          ${valuationDateValue},
+          ${dueDateValue},
+          ${grossClaimed},
+          ${grossClaimed},
+          ${retentionClaimed},
+          ${netClaimed},
+          ${'DRAFT'},
+          ${otherData.notes ?? null},
+          ${now}
+        )
+        RETURNING
+          "id",
+          "tenantId",
+          "projectId",
+          "supplierId",
+          "contractId",
+          "applicationNumber",
+          "applicationNo",
+          "applicationDate",
+          "valuationDate",
+          "periodStart",
+          "periodEnd",
+          "dueDate",
+          "claimedGrossValue",
+          "claimedRetention",
+          "claimedNetValue",
+          "claimedThisPeriod",
+          "status",
+          "createdAt",
+          "updatedAt"
+      `;
+      const app = rows[0];
+
+      // Create line item allocations if provided
+      if (contractLineItemAllocations && contractLineItemAllocations.length > 0) {
+        for (const allocation of contractLineItemAllocations) {
+          const claimedAmount = toDecimal(allocation.claimedAmount || 0);
+          await tx.paymentApplicationLineItem.create({
+            data: {
+              tenantId,
+              applicationId: app.id,
+              packageId: contract.packageId || null,
+              budgetLineId: allocation.budgetLineId || null,
+              description: allocation.description || `Line item ${allocation.contractLineItemId || allocation.budgetLineId || ''}`.trim(),
+              contractValue: claimedAmount,
+              quantityThisPeriod: toDecimal(1),
+              quantityCumulative: toDecimal(1),
+              unit: allocation.unit || 'item',
+              rate: claimedAmount,
+              valueThisPeriod: claimedAmount,
+              valueCumulative: claimedAmount
+            }
+          });
+        }
+      }
+
+      return app;
+    });
+
+    res.status(201).json(application);
+  } catch (err) {
+    console.error('[contracts.applications.post] failed', err);
+    res.status(500).json({ error: err.message || 'Failed to create application' });
+  }
 });
 
 module.exports = router;

@@ -5,6 +5,44 @@ const { checkSupplierCompliance } = require('../services/compliance.service.cjs'
 const jwt = require('jsonwebtoken');
 const requireAuth = require('../middleware/requireAuth.cjs') || { requireAuth: (_req,_res,next)=>next() };
 
+// CIS Validation Functions
+function validateUTR(utr) {
+  if (!utr) return { valid: true }; // Optional field
+  const cleaned = String(utr).replace(/\s/g, '');
+  if (!/^\d{10}$/.test(cleaned)) {
+    return { valid: false, error: 'UTR must be exactly 10 digits' };
+  }
+  return { valid: true, value: cleaned };
+}
+
+function validateNINumber(ni) {
+  if (!ni) return { valid: true }; // Optional field
+  const cleaned = String(ni).replace(/\s/g, '').toUpperCase();
+  // UK NI format: 2 letters, 6 digits, 1 letter (e.g., AB123456C)
+  if (!/^[A-Z]{2}\d{6}[A-Z]$/.test(cleaned)) {
+    return { valid: false, error: 'NI Number must be in format: 2 letters + 6 digits + 1 letter (e.g., AB123456C)' };
+  }
+  return { valid: true, value: cleaned };
+}
+
+function validateCISStatus(status) {
+  if (!status) return { valid: true };
+  const validStatuses = ['GROSS', 'NET', 'UNVERIFIED'];
+  if (!validStatuses.includes(String(status).toUpperCase())) {
+    return { valid: false, error: `CIS status must be one of: ${validStatuses.join(', ')}` };
+  }
+  return { valid: true, value: String(status).toUpperCase() };
+}
+
+function validatePercentage(value, fieldName = 'Percentage') {
+  if (value == null || value === '') return { valid: true }; // Optional field
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0 || num > 100) {
+    return { valid: false, error: `${fieldName} must be between 0 and 100` };
+  }
+  return { valid: true, value: num };
+}
+
 // Read-only Suppliers API (tenant-scoped)
 
 // GET /api/suppliers?q=&status=&limit=&offset=&projectId=&hasContracts=
@@ -54,7 +92,15 @@ router.get('/', async (req, res, next) => {
     const rows = await prisma.supplier.findMany({
       where,
       orderBy: [{ name: 'asc' }],
-      include: { capabilities: true },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        performanceScore: true,
+        insuranceExpiry: true,
+        hsAccreditations: true,
+        capabilities: { select: { tag: true } },
+      },
       take: Math.min(Number(req.query.limit) || 200, 500),
       skip: Math.max(Number(req.query.offset) || 0, 0),
     });
@@ -62,6 +108,7 @@ router.get('/', async (req, res, next) => {
     const data = rows.map((s) => {
       const capabilityTags = s.capabilities.map((c) => c.tag);
       const category = capabilityTags.find((t) => t.toLowerCase().startsWith('category:'))?.split(':', 2)?.[1] || null;
+
       const row = {
         id: s.id,
         name: s.name,
@@ -76,6 +123,10 @@ router.get('/', async (req, res, next) => {
               .map((a) => a.trim())
               .filter(Boolean)
           : [],
+        // CIS fields
+        cisRegistered: false,
+        cisVerificationStatus: null,
+        cisExpiryWarning: false,
       };
       // Standardise links field
       row.links = [];
@@ -231,6 +282,55 @@ router.get('/qualified', async (req, res, next) => {
   }
 });
 
+// GET /api/suppliers/cis-expiring - Suppliers with CIS verification expiring within 30 days
+// IMPORTANT: This must be BEFORE /:id route to avoid "cis-expiring" being treated as an ID
+router.get('/cis-expiring', async (req, res, next) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const daysAhead = Number(req.query.days) || 30; // Default 30 days
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + daysAhead);
+
+    const suppliers = await prisma.supplier.findMany({
+      where: {
+        tenantId,
+        cisRegistered: true,
+        cisVerificationExpiry: {
+          lte: expiryDate,
+          gte: new Date(), // Not already expired
+        },
+      },
+      include: { capabilities: true },
+      orderBy: { cisVerificationExpiry: 'asc' },
+    });
+
+    const data = suppliers.map((s) => {
+      const daysUntilExpiry = Math.ceil(
+        (new Date(s.cisVerificationExpiry) - new Date()) / (1000 * 60 * 60 * 24)
+      );
+      const capabilityTags = s.capabilities.map((c) => c.tag);
+      const category = capabilityTags.find((t) => t.toLowerCase().startsWith('category:'))?.split(':', 2)?.[1] || null;
+
+      return {
+        id: s.id,
+        name: s.name,
+        status: s.status,
+        category,
+        cisVerificationStatus: s.cisVerificationStatus,
+        cisVerificationExpiry: s.cisVerificationExpiry,
+        daysUntilExpiry,
+        utr: s.utr,
+        companyUtr: s.companyUtr,
+        niNumber: s.niNumber,
+      };
+    });
+
+    res.json({ items: data, total: data.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/suppliers/:id
 router.get('/:id', async (req, res, next) => {
   try {
@@ -253,6 +353,11 @@ router.get('/:id', async (req, res, next) => {
       prisma.purchaseOrder.count({ where: { tenantId, supplierId: id, status: { in: ['Open', 'Pending'] } } }),
       prisma.purchaseOrder.aggregate({ _sum: { total: true }, where: { tenantId, supplierId: id, status: { in: ['Open', 'Pending'] } } }),
     ]);
+    // CIS expiry warning
+    const cisExpiryWarning = row.cisVerificationExpiry
+      ? (new Date(row.cisVerificationExpiry) - new Date()) / (1000 * 60 * 60 * 24) <= 30
+      : false;
+
     const data = {
       id: row.id,
       name: row.name,
@@ -275,6 +380,19 @@ router.get('/:id', async (req, res, next) => {
         openPOs: poOpenCount,
         outstandingInvoices: 0,
         total: Number(poOpenTotal._sum.total || 0),
+      },
+      // CIS details
+      cis: {
+        cisRegistered: row.cisRegistered ?? false,
+        cisVerificationStatus: row.cisVerificationStatus || null,
+        cisVerificationDate: row.cisVerificationDate || null,
+        cisVerificationExpiry: row.cisVerificationExpiry || null,
+        utr: row.utr || null,
+        companyUtr: row.companyUtr || null,
+        niNumber: row.niNumber || null,
+        cisNotes: row.cisNotes || null,
+        defaultLabourPercentage: row.defaultLabourPercentage ? Number(row.defaultLabourPercentage) : 100,
+        cisExpiryWarning,
       },
     };
     res.json({ data });
@@ -299,20 +417,57 @@ router.get('/:id/compliance', async (req, res) => {
 });
 
 // POST /api/suppliers
-// Body: { name, status?, category?, rating? }
+// Body: { name, status?, category?, rating?, cis fields... }
 router.post('/', async (req, res, next) => {
   try {
     const tenantId = req.user.tenantId;
-    const { name, status, category, rating } = req.body || {};
+    const {
+      name, status, category, rating,
+      cisRegistered, cisVerificationStatus, cisVerificationDate, cisVerificationExpiry,
+      utr, companyUtr, niNumber, cisNotes, defaultLabourPercentage
+    } = req.body || {};
+
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
     }
+
+    // Validate CIS fields
+    const utrValidation = validateUTR(utr);
+    if (!utrValidation.valid) {
+      return res.status(400).json({ error: utrValidation.error });
+    }
+
+    const niValidation = validateNINumber(niNumber);
+    if (!niValidation.valid) {
+      return res.status(400).json({ error: niValidation.error });
+    }
+
+    const statusValidation = validateCISStatus(cisVerificationStatus);
+    if (!statusValidation.valid) {
+      return res.status(400).json({ error: statusValidation.error });
+    }
+
+    const labourPercentageValidation = validatePercentage(defaultLabourPercentage, 'Default Labour Percentage');
+    if (!labourPercentageValidation.valid) {
+      return res.status(400).json({ error: labourPercentageValidation.error });
+    }
+
     const created = await prisma.supplier.create({
       data: {
         tenantId,
         name: name.trim(),
         status: status ? String(status) : undefined,
         performanceScore: Number.isFinite(Number(rating)) ? Number(rating) : undefined,
+        // CIS fields
+        cisRegistered: cisRegistered === true || cisRegistered === 'true',
+        cisVerificationStatus: statusValidation.value || null,
+        cisVerificationDate: cisVerificationDate ? new Date(cisVerificationDate) : null,
+        cisVerificationExpiry: cisVerificationExpiry ? new Date(cisVerificationExpiry) : null,
+        utr: utrValidation.value || null,
+        companyUtr: companyUtr ? String(companyUtr).replace(/\s/g, '') : null,
+        niNumber: niValidation.value || null,
+        cisNotes: cisNotes ? String(cisNotes) : null,
+        defaultLabourPercentage: labourPercentageValidation.value || null,
       },
     });
     // Store a simple category tag if provided
@@ -328,22 +483,93 @@ router.post('/', async (req, res, next) => {
 });
 
 // PUT /api/suppliers/:id
-// Body: { name?, status?, category?, rating? }
+// Body: { name?, status?, category?, rating?, cis fields... }
 router.put('/:id', async (req, res, next) => {
   try {
     const tenantId = req.user.tenantId;
     const id = Number(req.params.id);
     const existing = await prisma.supplier.findFirst({ where: { id, tenantId } });
     if (!existing) return res.status(404).json({ error: 'Not found' });
-    const { name, status, category, rating } = req.body || {};
+
+    const {
+      name, status, category, rating,
+      cisRegistered, cisVerificationStatus, cisVerificationDate, cisVerificationExpiry,
+      utr, companyUtr, niNumber, cisNotes, defaultLabourPercentage
+    } = req.body || {};
+
+    // Validate CIS fields if provided
+    if (utr !== undefined) {
+      const utrValidation = validateUTR(utr);
+      if (!utrValidation.valid) {
+        return res.status(400).json({ error: utrValidation.error });
+      }
+    }
+
+    if (niNumber !== undefined) {
+      const niValidation = validateNINumber(niNumber);
+      if (!niValidation.valid) {
+        return res.status(400).json({ error: niValidation.error });
+      }
+    }
+
+    if (cisVerificationStatus !== undefined) {
+      const statusValidation = validateCISStatus(cisVerificationStatus);
+      if (!statusValidation.valid) {
+        return res.status(400).json({ error: statusValidation.error });
+      }
+    }
+
+    if (defaultLabourPercentage !== undefined) {
+      const labourPercentageValidation = validatePercentage(defaultLabourPercentage, 'Default Labour Percentage');
+      if (!labourPercentageValidation.valid) {
+        return res.status(400).json({ error: labourPercentageValidation.error });
+      }
+    }
+
+    const updateData = {
+      ...(name !== undefined ? { name: String(name) } : {}),
+      ...(status !== undefined ? { status: String(status) } : {}),
+      ...(rating !== undefined ? { performanceScore: Number.isFinite(Number(rating)) ? Number(rating) : null } : {}),
+    };
+
+    // Add CIS fields if provided
+    if (cisRegistered !== undefined) {
+      updateData.cisRegistered = cisRegistered === true || cisRegistered === 'true';
+    }
+    if (cisVerificationStatus !== undefined) {
+      const validation = validateCISStatus(cisVerificationStatus);
+      updateData.cisVerificationStatus = validation.value || null;
+    }
+    if (cisVerificationDate !== undefined) {
+      updateData.cisVerificationDate = cisVerificationDate ? new Date(cisVerificationDate) : null;
+    }
+    if (cisVerificationExpiry !== undefined) {
+      updateData.cisVerificationExpiry = cisVerificationExpiry ? new Date(cisVerificationExpiry) : null;
+    }
+    if (utr !== undefined) {
+      const validation = validateUTR(utr);
+      updateData.utr = validation.value || null;
+    }
+    if (companyUtr !== undefined) {
+      updateData.companyUtr = companyUtr ? String(companyUtr).replace(/\s/g, '') : null;
+    }
+    if (niNumber !== undefined) {
+      const validation = validateNINumber(niNumber);
+      updateData.niNumber = validation.value || null;
+    }
+    if (cisNotes !== undefined) {
+      updateData.cisNotes = cisNotes ? String(cisNotes) : null;
+    }
+    if (defaultLabourPercentage !== undefined) {
+      const validation = validatePercentage(defaultLabourPercentage, 'Default Labour Percentage');
+      updateData.defaultLabourPercentage = validation.value || null;
+    }
+
     const updated = await prisma.supplier.update({
       where: { id },
-      data: {
-        ...(name !== undefined ? { name: String(name) } : {}),
-        ...(status !== undefined ? { status: String(status) } : {}),
-        ...(rating !== undefined ? { performanceScore: Number.isFinite(Number(rating)) ? Number(rating) : null } : {}),
-      },
+      data: updateData,
     });
+
     // Upsert a category tag if provided
     if (category !== undefined) {
       const tag = `category:${String(category).trim()}`;

@@ -8,6 +8,11 @@ const router = express.Router();
 const { prisma, Prisma } = require('../utils/prisma.cjs');
 const { computeRequestScore } = require('../services/rfx_scoring.cjs');
 const { requirePerm } = require('../middleware/checkPermission.cjs');
+const { assertProjectMember } = require('../middleware/membership.cjs');
+const { checkSupplierCompliance } = require('../services/compliance.service.cjs');
+const { createDraftContract } = require('../lib/contractWrites.cjs');
+
+const ID_SELECT = { id: true };
 
 function toInt(v) {
   const n = Number(v);
@@ -16,6 +21,48 @@ function toInt(v) {
 
 function assertTenant(where, tenantId) {
   return { ...where, tenantId };
+}
+
+function hasAdminBypass(user) {
+  const roles = Array.isArray(user?.roles) ? user.roles : user?.role ? [user.role] : [];
+  return roles.includes('dev') || roles.includes('admin');
+}
+
+function isRequestOpenStatus(status) {
+  return ['published', 'issued', 'live', 'open'].includes(String(status || '').toLowerCase());
+}
+
+function isRequestScorableStatus(status) {
+  const statusLower = String(status || '').toLowerCase();
+  return isRequestOpenStatus(statusLower) || statusLower === 'awarded';
+}
+
+function readMoney(value) {
+  if (value == null || value === '') return null;
+  const num = Number(String(value).replace(/[£,]/g, ''));
+  return Number.isFinite(num) ? num : null;
+}
+
+function pickAwardValue(body = {}, response = null) {
+  const answers = response?.answers && typeof response.answers === 'object' ? response.answers : {};
+  const candidates = [
+    body.awardValue,
+    body.value,
+    body.price,
+    body.totalPrice,
+    body.total,
+    answers.awardValue,
+    answers.value,
+    answers.price,
+    answers.totalPrice,
+    answers.priceTotal,
+    answers.total,
+  ];
+  for (const value of candidates) {
+    const parsed = readMoney(value);
+    if (parsed != null) return parsed;
+  }
+  return null;
 }
 
 // ---- Requests CRUD ----
@@ -504,7 +551,7 @@ router.post('/:id/responses/submit', async (req, res, next) => {
     if (!Number.isFinite(sid)) return res.status(400).json({ error: 'supplierId is required' });
     const reqRow = await prisma.request.findFirst({ where: { tenantId, id: requestId } });
     if (!reqRow) return res.status(404).json({ error: 'Request not found' });
-    if (reqRow.status !== 'published') return res.status(400).json({ error: 'REQUEST_NOT_PUBLISHED' });
+    if (!isRequestOpenStatus(reqRow.status)) return res.status(400).json({ error: 'REQUEST_NOT_PUBLISHED' });
     if (Number.isFinite(reqRow.totalStages) && stg > reqRow.totalStages) return res.status(400).json({ error: 'INVALID_STAGE' });
     if (reqRow.deadline && new Date(reqRow.deadline) < new Date()) return res.status(400).json({ error: 'DEADLINE_PASSED' });
 
@@ -634,7 +681,7 @@ router.get('/:id/scoring/status', async (req, res, next) => {
       canScoreNow = isClosed;
       if (!canScoreNow) reason = 'WAIT_UNTIL_CLOSED_OR_AWARDED';
     } else {
-      canScoreNow = statusLower === 'published' || statusLower === 'awarded';
+      canScoreNow = isRequestScorableStatus(statusLower);
       if (!canScoreNow) reason = 'REQUEST_NOT_PUBLISHED';
     }
 
@@ -682,7 +729,7 @@ router.get('/:id/score/:supplierId/preview', async (req, res, next) => {
       if (scoringPolicy === 'closed_only') {
         if (!isClosed) return res.status(400).json({ error: 'SCORING_NOT_AVAILABLE', policy: 'closed_only', deadline: requestRow.deadline || null });
       } else {
-        if (statusLower !== 'published' && statusLower !== 'awarded') return res.status(400).json({ error: 'REQUEST_NOT_PUBLISHED_FOR_SCORING' });
+        if (!isRequestScorableStatus(statusLower)) return res.status(400).json({ error: 'REQUEST_NOT_PUBLISHED_FOR_SCORING' });
       }
     }
 
@@ -724,8 +771,8 @@ router.post('/:id/score/:supplierId', async (req, res, next) => {
           return res.status(400).json({ error: 'SCORING_NOT_AVAILABLE', policy: 'closed_only', deadline: requestRow.deadline || null });
         }
       } else {
-        // 'open' policy: must be published
-        if (statusLower !== 'published' && statusLower !== 'awarded') {
+        // 'open' policy: must be issued/published/open or already awarded
+        if (!isRequestScorableStatus(statusLower)) {
           return res.status(400).json({ error: 'REQUEST_NOT_PUBLISHED_FOR_SCORING' });
         }
       }
@@ -746,40 +793,198 @@ router.post('/:id/score/:supplierId', async (req, res, next) => {
 router.post('/:id/award', requirePerm('procurement:award'), async (req, res, next) => {
   try {
     const tenantId = req.user.tenantId;
+    const userId = req.user?.id ? Number(req.user.id) : null;
     const requestId = toInt(req.params.id);
-    const { supplierId, reason } = req.body || {};
+    const awardInput = { ...(req.query || {}), ...(req.body || {}) };
+    const { supplierId, reason, complianceOverrideReason } = awardInput;
     if (!supplierId) return res.status(400).json({ error: 'supplierId is required' });
-    const reqRow = await prisma.request.findFirst({ where: { tenantId, id: requestId } });
-    if (!reqRow) return res.status(404).json({ error: 'Request not found' });
+    const supplierIdNum = Number(supplierId);
+    if (!Number.isFinite(supplierIdNum)) return res.status(400).json({ error: 'supplierId must be numeric' });
 
-    // Upsert winner
-    const winner = await prisma.awardDecision.upsert({
-      where: { id: 0 }, // force create via try-find-then-update pattern
-      update: {},
-      create: { tenantId, requestId, supplierId: Number(supplierId), decision: 'awarded', reason: reason ? String(reason) : null, decidedBy: Number(req.user.id), decidedAt: new Date() },
-    }).catch(async () => {
-      const existing = await prisma.awardDecision.findFirst({ where: { tenantId, requestId, supplierId: Number(supplierId) } });
-      if (existing) {
-        return prisma.awardDecision.update({ where: { id: existing.id }, data: { decision: 'awarded', reason: reason ? String(reason) : null, decidedBy: Number(req.user.id), decidedAt: new Date() } });
-      }
-      return prisma.awardDecision.create({ data: { tenantId, requestId, supplierId: Number(supplierId), decision: 'awarded', reason: reason ? String(reason) : null, decidedBy: Number(req.user.id), decidedAt: new Date() } });
+    const reqRow = await prisma.request.findFirst({
+      where: { tenantId, id: requestId },
+      include: {
+        package: {
+          include: {
+            project: { select: { id: true, code: true, name: true } },
+            contractType: true,
+          },
+        },
+      },
     });
+    if (!reqRow) return res.status(404).json({ error: 'Request not found' });
+    if (!reqRow.package) return res.status(400).json({ error: 'PACKAGE_REQUIRED_FOR_AWARD' });
 
-    // Decline all others
-    const others = await prisma.awardDecision.findMany({ where: { tenantId, requestId, NOT: { supplierId: Number(supplierId) } } });
-    const otherSupplierIds = new Set(others.map((o) => o.supplierId));
-    // Update existing others
-    await prisma.awardDecision.updateMany({ where: { tenantId, requestId, NOT: { supplierId: Number(supplierId) } }, data: { decision: 'declined', decidedAt: new Date() } });
-    // Optionally create declined rows for invitees without decisions
-    const invitees = await prisma.requestInvite.findMany({ where: { tenantId, requestId } });
-    const toCreate = invitees.map((i) => i.supplierId).filter((sid) => sid !== Number(supplierId) && !otherSupplierIds.has(sid));
-    for (const sid of toCreate) {
-      await prisma.awardDecision.create({ data: { tenantId, requestId, supplierId: sid, decision: 'declined', decidedAt: new Date() } });
+    const pkg = reqRow.package;
+    if (pkg.awardedToSupplierId) {
+      return res.status(409).json({ error: 'ALREADY_AWARDED', message: 'Package already awarded' });
+    }
+    if (!hasAdminBypass(req.user)) {
+      const membership = await assertProjectMember({ userId, projectId: pkg.projectId, tenantId });
+      if (!membership) return res.status(403).json({ error: 'NOT_A_PROJECT_MEMBER' });
     }
 
-    // Update request status
-    await prisma.request.update({ where: { id: requestId }, data: { status: 'awarded' } });
-    res.json({ data: { winner } });
+    const supplier = await prisma.supplier.findFirst({ where: { tenantId, id: supplierIdNum }, select: { id: true, name: true } });
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+
+    const latestResponse = await prisma.requestResponse.findFirst({
+      where: { tenantId, requestId, supplierId: supplierIdNum },
+      orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
+    });
+
+    const rawAwardValue = pickAwardValue(awardInput, latestResponse);
+    if (rawAwardValue == null || rawAwardValue <= 0) {
+      return res.status(400).json({
+        error: 'AWARD_VALUE_REQUIRED',
+        message: 'Award value is required before creating a contract from this RFx.',
+      });
+    }
+
+    const compliance = await checkSupplierCompliance(tenantId, supplierIdNum);
+    if (!compliance.ok && !complianceOverrideReason) {
+      return res.status(409).json({
+        error: 'COMPLIANCE_BLOCK',
+        message: compliance.summary || 'Supplier compliance is incomplete',
+        details: compliance,
+      });
+    }
+
+    const awardValue = new Prisma.Decimal(rawAwardValue);
+    const awardDate = awardInput.awardDate ? new Date(awardInput.awardDate) : new Date();
+    const projectCode = pkg.project?.code || `P${pkg.projectId}`;
+    const contractRef = awardInput.contractRef || awardInput.awardRef || `${projectCode}-PKG${pkg.id}-RFX-${Date.now().toString().slice(-6)}`;
+    const title = awardInput.title || `${pkg.name || reqRow.title || 'Package'} - RFx Award`;
+    const retention = awardInput.retentionPct != null && awardInput.retentionPct !== ''
+      ? new Prisma.Decimal(awardInput.retentionPct)
+      : (pkg.retentionPct ?? pkg.contractType?.retentionRate ?? new Prisma.Decimal(5));
+    const paymentTerms = awardInput.paymentTerms || pkg.paymentTerms || pkg.contractType?.paymentTerms || null;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const award = await tx.award.create({
+        data: {
+          tenantId,
+          projectId: pkg.projectId,
+          packageId: pkg.id,
+          supplierId: supplierIdNum,
+          awardValue,
+          awardDate,
+          overrideUsed: Boolean(!compliance.ok),
+          overrideReason: complianceOverrideReason || null,
+        },
+        select: ID_SELECT,
+      });
+
+      const awardDecision = await tx.awardDecision.create({
+        data: {
+          tenantId,
+          projectId: pkg.projectId,
+          packageId: pkg.id,
+          supplierId: supplierIdNum,
+          awardType: 'tender',
+          decision: compliance.ok ? 'approved' : 'approved_with_override',
+          reason: reason ? String(reason) : complianceOverrideReason || null,
+          decidedById: userId,
+          decidedAt: awardDate,
+        },
+        select: ID_SELECT,
+      });
+
+      const contract = await createDraftContract(tx, {
+        tenantId,
+        projectId: pkg.projectId,
+        packageId: pkg.id,
+        supplierId: supplierIdNum,
+        title,
+        contractRef,
+        value: awardValue,
+        currency: awardInput.currency || pkg.currency || 'GBP',
+        status: 'draft',
+        startDate: awardInput.startDate ? new Date(awardInput.startDate) : awardDate,
+        endDate: awardInput.endDate ? new Date(awardInput.endDate) : null,
+        retentionPct: retention,
+        retentionPercentage: retention,
+        paymentTerms,
+        contractTypeId: awardInput.contractTypeId || pkg.contractTypeId || null,
+        notes: awardInput.notes || null,
+        sourceMode: 'rfx_award',
+        awardId: award.id,
+        rfxId: null,
+        draftCreatedAt: new Date(),
+      });
+
+      await tx.contractLineItem.create({
+        data: {
+          tenantId,
+          contractId: contract.id,
+          description: `RFx award - ${reqRow.title}`,
+          qty: new Prisma.Decimal(1),
+          rate: awardValue,
+          total: awardValue,
+          costCode: null,
+          packageLineItemId: null,
+          budgetLineId: null,
+        },
+        select: ID_SELECT,
+      });
+
+      const contractDoc = await tx.contractDocument.create({
+        data: {
+          tenantId,
+          contractId: contract.id,
+          title,
+          editorType: 'prosemirror',
+          active: true,
+        },
+        select: ID_SELECT,
+      });
+
+      await tx.contractVersion.create({
+        data: {
+          tenantId,
+          contractDocId: contractDoc.id,
+          versionNo: 1,
+          contentJson: {
+            type: 'doc',
+            content: [
+              { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: title }] },
+              { type: 'paragraph', content: [{ type: 'text', text: `Contract Reference: ${contractRef}` }] },
+              { type: 'paragraph', content: [{ type: 'text', text: `RFx: ${reqRow.title}` }] },
+              { type: 'paragraph', content: [{ type: 'text', text: `Value: ${contract.currency || 'GBP'} ${Number(awardValue).toLocaleString('en-GB')}` }] },
+            ],
+          },
+          baseVersionId: null,
+          redlinePatch: null,
+          createdBy: userId,
+        },
+        select: ID_SELECT,
+      });
+
+      await tx.package.update({
+        where: { id: pkg.id },
+        data: {
+          status: 'awarded',
+          awardSupplierId: supplierIdNum,
+          awardedToSupplierId: supplierIdNum,
+          awardValue,
+          awardedValue: awardValue,
+          awardedAt: awardDate,
+        },
+        select: ID_SELECT,
+      });
+
+      await tx.request.update({ where: { id: requestId }, data: { status: 'awarded' }, select: ID_SELECT });
+
+      return { award, awardDecision, contract };
+    });
+
+    res.status(201).json({
+      data: {
+        awardId: result.award.id,
+        awardDecisionId: result.awardDecision.id,
+        contractId: result.contract.id,
+        contractRef: result.contract.contractRef,
+      },
+    });
   } catch (e) { next(e); }
 });
 

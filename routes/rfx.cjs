@@ -14,6 +14,20 @@ module.exports = (prisma) => {
   const router = express.Router();
 
   function getTenantId(req) { return req.user && req.user.tenantId; }
+  const requestInviteSummarySelect = {
+    id: true,
+    tenantId: true,
+    requestId: true,
+    supplierId: true,
+    email: true,
+    supplierName: true,
+    contactFirstName: true,
+    contactLastName: true,
+    status: true,
+    respondedAt: true,
+    responseToken: true,
+    lastSentAt: true,
+  };
 
   // Generate a unique response token for supplier invite portal access
   async function generateUniqueResponseToken(tenantId, maxAttempts = 5) {
@@ -36,6 +50,28 @@ module.exports = (prisma) => {
     }
 
     throw new Error('Failed to generate unique response token after multiple attempts');
+  }
+
+  function readMoney(value) {
+    if (value == null || value === '') return null;
+    const parsed = Number(String(value).replace(/[£,\s]/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function responseTotalPrice(answers = {}) {
+    const candidates = [
+      answers.totalPrice,
+      answers.priceTotal,
+      answers.awardValue,
+      answers.price,
+      answers.total,
+      answers.tenderSum,
+    ];
+    for (const value of candidates) {
+      const parsed = readMoney(value);
+      if (parsed != null) return parsed;
+    }
+    return null;
   }
 
   // GET /api/projects/:projectId/rfx — list RFx (Requests) for a project
@@ -200,6 +236,7 @@ module.exports = (prisma) => {
       const invites = await prisma.requestInvite.findMany({
         where: { tenantId, requestId: rfxId },
         orderBy: { id: 'desc' },
+        select: requestInviteSummarySelect,
       });
 
       // Fetch supplier details for each invite
@@ -222,6 +259,183 @@ module.exports = (prisma) => {
     }
   });
 
+  // GET /api/rfx/:rfxId/responses — list all supplier responses for buyer review/scoring
+  router.get('/rfx/:rfxId/responses', requireProjectMember, async (req, res) => {
+    try {
+      const tenantId = getTenantId(req);
+      const rfxId = Number(req.params.rfxId);
+      if (!Number.isFinite(rfxId)) return res.status(400).json({ error: 'Invalid rfxId' });
+
+      // Verify RFx exists and belongs to tenant
+      const rfx = await prisma.request.findFirst({
+        where: { id: rfxId, tenantId },
+        select: { id: true, title: true, status: true },
+      });
+      if (!rfx) return res.status(404).json({ error: 'RFx not found' });
+
+      // Get all responses for this RFx
+      const responses = await prisma.requestResponse.findMany({
+        where: { tenantId, requestId: rfxId },
+        orderBy: { submittedAt: 'desc' },
+      });
+
+      // Get all invites to match with responses
+      const invites = await prisma.requestInvite.findMany({
+        where: { tenantId, requestId: rfxId },
+        select: requestInviteSummarySelect,
+      });
+
+      // Get supplier details
+      const supplierIds = [
+        ...new Set([
+          ...responses.map((r) => r.supplierId).filter((id) => id && id !== -1),
+          ...invites.map((inv) => inv.supplierId).filter((id) => id && id !== -1),
+        ]),
+      ];
+
+      const suppliers = await prisma.supplier.findMany({
+        where: { id: { in: supplierIds }, tenantId },
+        select: { id: true, name: true, email: true, status: true },
+      });
+
+      const supplierMap = new Map(suppliers.map((s) => [s.id, s]));
+      const inviteMap = new Map(invites.map((inv) => [inv.supplierId || -1, inv]));
+
+      // Build response summary
+      const items = responses.map((resp) => {
+        const supplier = supplierMap.get(resp.supplierId);
+        const invite = inviteMap.get(resp.supplierId);
+        const answers = resp.answers || {};
+        const totalPrice = responseTotalPrice(answers);
+
+        return {
+          id: resp.id,
+          requestId: resp.requestId,
+          supplierId: resp.supplierId === -1 ? null : resp.supplierId,
+          supplierName: answers.supplierName || supplier?.name || 'Unknown',
+          contactName: [answers.contactFirstName, answers.contactLastName]
+            .filter(Boolean)
+            .join(' ') || null,
+          email: invite?.email || supplier?.email || null,
+          status: resp.status,
+          submittedAt: resp.submittedAt,
+          totalPrice,
+          priceTotal: totalPrice,
+          score: resp.score,
+          answers,
+          files: resp.files || [],
+          stage: resp.stage,
+          // Summary fields for quick view
+          programmeStart: answers.programmeStart || null,
+          programmeEnd: answers.programmeEnd || null,
+          hasMethodStatement: Boolean(answers.methodStatement),
+          hasHsqNotes: Boolean(answers.hsqNotes),
+          hasClarifications: Boolean(answers.clarifications),
+        };
+      });
+
+      res.json({
+        rfx: {
+          id: rfx.id,
+          title: rfx.title,
+          status: rfx.status,
+        },
+        items,
+        total: items.length,
+        submitted: items.filter((r) => r.status === 'submitted').length,
+        inProgress: items.filter((r) => r.status === 'in_progress').length,
+      });
+    } catch (err) {
+      console.error('GET rfx responses error', err);
+      res.status(500).json({ error: 'Failed to list responses' });
+    }
+  });
+
+  // GET /api/rfx/:rfxId/responses/:responseId — get full response details for scoring
+  router.get('/rfx/:rfxId/responses/:responseId', requireProjectMember, async (req, res) => {
+    try {
+      const tenantId = getTenantId(req);
+      const rfxId = Number(req.params.rfxId);
+      const responseId = Number(req.params.responseId);
+
+      if (!Number.isFinite(rfxId) || !Number.isFinite(responseId)) {
+        return res.status(400).json({ error: 'Invalid rfxId or responseId' });
+      }
+
+      // Verify RFx exists and belongs to tenant
+      const rfx = await prisma.request.findFirst({
+        where: { id: rfxId, tenantId },
+        select: { id: true, title: true, status: true },
+      });
+      if (!rfx) return res.status(404).json({ error: 'RFx not found' });
+
+      // Get response
+      const response = await prisma.requestResponse.findFirst({
+        where: { id: responseId, requestId: rfxId, tenantId },
+      });
+      if (!response) return res.status(404).json({ error: 'Response not found' });
+
+      // Get supplier details
+      let supplier = null;
+      if (response.supplierId && response.supplierId !== -1) {
+        supplier = await prisma.supplier.findFirst({
+          where: { id: response.supplierId, tenantId },
+          select: { id: true, name: true, email: true, status: true },
+        });
+      }
+
+      // Get invite
+      const invite = await prisma.requestInvite.findFirst({
+        where: {
+          tenantId,
+          requestId: rfxId,
+          supplierId: response.supplierId === -1 ? null : response.supplierId,
+        },
+      });
+
+      const answers = response.answers || {};
+
+      res.json({
+        id: response.id,
+        requestId: response.requestId,
+        supplierId: response.supplierId === -1 ? null : response.supplierId,
+        supplier,
+        invite: invite ? {
+          id: invite.id,
+          email: invite.email,
+          supplierName: invite.supplierName,
+          contactFirstName: invite.contactFirstName,
+          contactLastName: invite.contactLastName,
+          status: invite.status,
+          respondedAt: invite.respondedAt,
+          submittedAt: invite.submittedAt,
+          lastOpenedAt: invite.lastOpenedAt,
+          lastSavedAt: invite.lastSavedAt,
+        } : null,
+        status: response.status,
+        stage: response.stage,
+        submittedAt: response.submittedAt,
+        score: response.score,
+        // Full answer details
+        supplierName: answers.supplierName,
+        contactFirstName: answers.contactFirstName,
+        contactLastName: answers.contactLastName,
+        totalPrice: answers.totalPrice,
+        programmeStart: answers.programmeStart,
+        programmeEnd: answers.programmeEnd,
+        methodStatement: answers.methodStatement,
+        hsqNotes: answers.hsqNotes,
+        clarifications: answers.clarifications,
+        // Include full answers object for any custom fields
+        answers,
+        files: response.files || [],
+      });
+    } catch (err) {
+      console.error('GET rfx response detail error', err);
+      res.status(500).json({ error: 'Failed to get response' });
+    }
+  });
+
   // POST /api/rfx/:rfxId/invites — invite existing suppliers to an RFx
   router.post('/rfx/:rfxId/invites', requireProjectMember, async (req, res) => {
     try {
@@ -238,6 +452,7 @@ module.exports = (prisma) => {
 
       // Extract supplier IDs from request body
       const { supplierIds } = req.body;
+      const inviteStatus = req.body?.status === 'draft' ? 'draft' : 'invited';
       if (!Array.isArray(supplierIds) || supplierIds.length === 0) {
         return res.status(400).json({ error: 'supplierIds array required' });
       }
@@ -263,43 +478,45 @@ module.exports = (prisma) => {
         // Generate unique response token for new invites
         const responseToken = await generateUniqueResponseToken(tenantId);
 
-        const data = {
-          tenantId,
-          requestId: rfxId,
-          supplierId: supplier.id,
-          email: supplier.email || '',
-          status: 'invited',
-          responseToken,
-        };
-
-        const invite = await prisma.requestInvite.upsert({
+        const existing = await prisma.requestInvite.findFirst({
           where: {
-            // Composite unique constraint if exists, otherwise use findFirst + create pattern
-            requestId_supplierId: { requestId: data.requestId, supplierId: data.supplierId },
+            tenantId,
+            requestId: rfxId,
+            supplierId: supplier.id,
           },
-          update: { status: 'invited' },
-          create: data,
-        }).catch(async () => {
-          // Fallback if unique constraint doesn't exist
-          const existing = await prisma.requestInvite.findFirst({
-            where: {
-              tenantId: data.tenantId,
-              requestId: data.requestId,
-              supplierId: data.supplierId,
-            },
-          });
-          if (existing) {
-            // Update existing invite with new token if it doesn't have one
-            if (!existing.responseToken) {
-              return prisma.requestInvite.update({
-                where: { id: existing.id },
-                data: { status: 'invited', responseToken },
-              });
-            }
-            return existing;
-          }
-          return prisma.requestInvite.create({ data });
+          select: requestInviteSummarySelect,
         });
+
+        let invite;
+        if (existing) {
+          const updateData = {
+            email: supplier.email || existing.email || '',
+          };
+
+          if (!existing.responseToken) {
+            updateData.responseToken = responseToken;
+          }
+          if (inviteStatus === 'invited' && existing.status === 'draft') {
+            updateData.status = 'invited';
+          }
+
+          invite = Object.keys(updateData).length
+            ? await prisma.requestInvite.update({ where: { id: existing.id }, data: updateData, select: requestInviteSummarySelect })
+            : existing;
+        } else {
+          invite = await prisma.requestInvite.create({
+            data: {
+              tenantId,
+              requestId: rfxId,
+              supplierId: supplier.id,
+              email: supplier.email || '',
+              status: inviteStatus,
+              responseToken,
+            },
+            select: requestInviteSummarySelect,
+          });
+        }
+
         created.push(invite);
       }
 
@@ -311,7 +528,7 @@ module.exports = (prisma) => {
         'invite_suppliers_to_rfx',
         'Request',
         rfxId,
-        { supplierIds: validIds, count: created.length }
+        { supplierIds: validIds, count: created.length, status: inviteStatus }
       );
 
       res.json({ created, count: created.length });
@@ -336,7 +553,8 @@ module.exports = (prisma) => {
       if (!rfx) return res.status(404).json({ error: 'RFx not found' });
 
       // Extract supplier details from request body
-      const { name, email } = req.body;
+      const { name, email, phone, trade } = req.body || {};
+      const inviteStatus = req.body?.status === 'draft' ? 'draft' : 'invited';
       if (!email || !email.trim()) {
         return res.status(400).json({ error: 'Email is required' });
       }
@@ -351,14 +569,34 @@ module.exports = (prisma) => {
         where: { tenantId, email: normalizedEmail },
       });
 
+      let supplierCreated = false;
       if (!supplier) {
         supplier = await prisma.supplier.create({
           data: {
             tenantId,
             name: name.trim(),
             email: normalizedEmail,
+            phone: phone?.trim() || null,
             status: 'pending',
           },
+        });
+        supplierCreated = true;
+      } else if (phone?.trim() && !supplier.phone) {
+        supplier = await prisma.supplier.update({
+          where: { id: supplier.id },
+          data: { phone: phone.trim() },
+        });
+      }
+
+      if (trade?.trim()) {
+        await prisma.supplierCapability.create({
+          data: {
+            tenantId,
+            supplierId: supplier.id,
+            tag: `category:${trade.trim()}`,
+          },
+        }).catch(() => {
+          // Capability tagging should not block an invite.
         });
       }
 
@@ -366,46 +604,43 @@ module.exports = (prisma) => {
       const responseToken = await generateUniqueResponseToken(tenantId);
 
       // Create or update invite
-      const invite = await prisma.requestInvite.upsert({
-        where: {
-          requestId_supplierId: { requestId: rfxId, supplierId: supplier.id },
-        },
-        update: { status: 'invited', email: normalizedEmail },
-        create: {
-          tenantId,
-          requestId: rfxId,
-          supplierId: supplier.id,
+      const existingInvite = await prisma.requestInvite.findFirst({
+        where: { tenantId, requestId: rfxId, supplierId: supplier.id },
+        select: requestInviteSummarySelect,
+      });
+
+      let invite;
+      if (existingInvite) {
+        const updateData = {
           email: normalizedEmail,
-          status: 'invited',
-          responseToken,
-        },
-      }).catch(async () => {
-        // Fallback if unique constraint doesn't exist
-        const existing = await prisma.requestInvite.findFirst({
-          where: { tenantId, requestId: rfxId, supplierId: supplier.id },
-        });
-        if (existing) {
-          // Update existing invite, add token if missing
-          const updateData = { status: 'invited', email: normalizedEmail };
-          if (!existing.responseToken) {
-            updateData.responseToken = responseToken;
-          }
-          return prisma.requestInvite.update({
-            where: { id: existing.id },
-            data: updateData,
-          });
+          supplierName: name.trim(),
+        };
+        if (!existingInvite.responseToken) {
+          updateData.responseToken = responseToken;
         }
-        return prisma.requestInvite.create({
+        if (inviteStatus === 'invited' && existingInvite.status === 'draft') {
+          updateData.status = 'invited';
+        }
+
+        invite = await prisma.requestInvite.update({
+          where: { id: existingInvite.id },
+          data: updateData,
+          select: requestInviteSummarySelect,
+        });
+      } else {
+        invite = await prisma.requestInvite.create({
           data: {
             tenantId,
             requestId: rfxId,
             supplierId: supplier.id,
             email: normalizedEmail,
-            status: 'invited',
+            supplierName: name.trim(),
+            status: inviteStatus,
             responseToken,
           },
+          select: requestInviteSummarySelect,
         });
-      });
+      }
 
       // Audit log
       const { writeAudit } = require('../lib/audit.cjs');
@@ -415,7 +650,7 @@ module.exports = (prisma) => {
         'quick_invite_to_rfx',
         'Request',
         rfxId,
-        { supplierId: supplier.id, email: normalizedEmail, name: name.trim(), supplierCreated: !supplier }
+        { supplierId: supplier.id, email: normalizedEmail, name: name.trim(), status: inviteStatus, supplierCreated }
       );
 
       res.json({ invite, supplier });

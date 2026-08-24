@@ -8,9 +8,21 @@ const {
   updateJobSchema,
   changeStatusSchema,
 } = require('../lib/validation.jobs.cjs');
+const { sseEmitter, EventTypes } = require('../services/eventEmitter.cjs');
 
 module.exports = (prisma) => {
   const router = express.Router();
+
+  function parseOptionalPositiveInt(value, label) {
+    if (value === undefined || value === null || value === '') return undefined;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      const error = new Error(`${label} must be a positive integer`);
+      error.statusCode = 400;
+      throw error;
+    }
+    return parsed;
+  }
 
   // ============================================================================
   // GET /api/jobs - List jobs with filters
@@ -26,11 +38,17 @@ module.exports = (prisma) => {
         isDeleted: false,
       };
 
-      if (query.status) where.status = query.status;
+      if (query.status) {
+        const statuses = String(query.status)
+          .split(',')
+          .map((status) => status.trim())
+          .filter(Boolean);
+        where.status = statuses.length > 1 ? { in: statuses } : statuses[0];
+      }
       if (query.priority) where.priority = query.priority;
       if (query.jobType) where.jobType = query.jobType;
-      if (query.clientId) where.clientId = query.clientId;
-      if (query.projectId) where.projectId = query.projectId;
+      if (query.clientId) where.clientId = parseOptionalPositiveInt(query.clientId, 'clientId');
+      if (query.projectId) where.projectId = parseOptionalPositiveInt(query.projectId, 'projectId');
       if (query.packageId) where.packageId = query.packageId;
       if (query.contractId) where.contractId = query.contractId;
 
@@ -108,6 +126,12 @@ module.exports = (prisma) => {
           details: error.errors,
         });
       }
+      if (error.statusCode === 400) {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+        });
+      }
       res.status(500).json({
         success: false,
         error: 'Failed to fetch jobs',
@@ -165,6 +189,11 @@ module.exports = (prisma) => {
           checklists: {
             orderBy: { displayOrder: 'asc' },
           },
+          jobAssets: {
+            include: {
+              asset: true,
+            },
+          },
         },
       });
 
@@ -194,7 +223,8 @@ module.exports = (prisma) => {
   router.post('/', requirePerm('jobs:create'), async (req, res) => {
     try {
       const { tenantId, id: userId } = req.user;
-      const data = createJobSchema.parse(req.body);
+      const { assetIds, ...jobData } = req.body;
+      const data = createJobSchema.parse(jobData);
 
       // Generate job number
       const jobNumber = await generateJobNumber(tenantId);
@@ -214,8 +244,25 @@ module.exports = (prisma) => {
         include: {
           schedules: true,
           materials: true,
+          jobAssets: {
+            include: {
+              asset: true,
+            },
+          },
         },
       });
+
+      // Create job-asset relationships if assetIds provided
+      if (assetIds && Array.isArray(assetIds) && assetIds.length > 0) {
+        await prisma.jobAsset.createMany({
+          data: assetIds.map((assetId) => ({
+            tenantId,
+            jobId: job.id,
+            assetId,
+            createdBy: String(userId),
+          })),
+        });
+      }
 
       // Create initial status history
       await prisma.jobStatusHistory.create({
@@ -229,9 +276,31 @@ module.exports = (prisma) => {
         },
       });
 
+      // Fetch the complete job with assets
+      const completeJob = await prisma.job.findUnique({
+        where: { id: job.id },
+        include: {
+          schedules: true,
+          materials: true,
+          jobAssets: {
+            include: {
+              asset: true,
+            },
+          },
+        },
+      });
+
+      // Emit real-time event
+      sseEmitter.emitToTenant(tenantId, EventTypes.JOB_CREATED, {
+        job: completeJob,
+        jobId: completeJob.id,
+        jobNumber: completeJob.jobNumber,
+        status: completeJob.status,
+      });
+
       res.status(201).json({
         success: true,
-        data: job,
+        data: completeJob,
         message: `Job ${jobNumber} created successfully`,
       });
     } catch (error) {
@@ -287,6 +356,15 @@ module.exports = (prisma) => {
         },
       });
 
+      // Emit real-time event
+      sseEmitter.emitToTenant(tenantId, EventTypes.JOB_UPDATED, {
+        job,
+        jobId: job.id,
+        jobNumber: job.jobNumber,
+        changes: Object.keys(data),
+        oldJob: existingJob,
+      });
+
       res.json({
         success: true,
         data: job,
@@ -336,6 +414,13 @@ module.exports = (prisma) => {
           deletedAt: new Date(),
           deletedBy: String(userId),
         },
+      });
+
+      // Emit real-time event
+      sseEmitter.emitToTenant(tenantId, EventTypes.JOB_DELETED, {
+        jobId: id,
+        jobNumber: existingJob.jobNumber,
+        deletedBy: userId,
       });
 
       res.json({
@@ -397,6 +482,17 @@ module.exports = (prisma) => {
           changeReason: reason,
           changedBy: String(userId),
         },
+      });
+
+      // Emit real-time event
+      sseEmitter.emitToTenant(tenantId, EventTypes.JOB_STATUS_CHANGED, {
+        job: updatedJob,
+        jobId: updatedJob.id,
+        jobNumber: updatedJob.jobNumber,
+        oldStatus,
+        newStatus,
+        reason,
+        changedBy: userId,
       });
 
       res.json({

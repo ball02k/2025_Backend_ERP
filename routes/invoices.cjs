@@ -8,10 +8,13 @@
 const express = require('express');
 const multer = require('multer');
 const invoiceService = require('../services/invoice.cjs');
-const { getInvoiceOcrService } = require('../services/invoiceOcr.cjs');
 const { makeStorageKey, writeLocalFile, localPath } = require('../utils/storage.cjs');
 const invoiceMatching = require('../services/invoiceMatching.cjs');
 const certificateMatching = require('../services/certificateMatching.cjs');
+
+function getInvoiceOcrServiceLazy() {
+  return require('../services/invoiceOcr.cjs').getInvoiceOcrService();
+}
 
 // Configure multer for file uploads
 const upload = multer({
@@ -53,6 +56,7 @@ module.exports = function invoicesRouter(prisma) {
         status: req.query.status,
         supplierId: req.query.supplierId ? Number(req.query.supplierId) : undefined,
         budgetLineId: req.query.budgetLineId ? Number(req.query.budgetLineId) : undefined,
+        direction: req.query.direction, // Task 2.5: Direction filtering
         limit: req.query.limit ? Number(req.query.limit) : 50,
         offset: req.query.offset ? Number(req.query.offset) : 0,
       };
@@ -287,7 +291,7 @@ module.exports = function invoicesRouter(prisma) {
       let fileType = ext.substring(1); // Remove the dot
 
       // Extract invoice data using OCR service
-      const ocrService = getInvoiceOcrService();
+      const ocrService = getInvoiceOcrServiceLazy();
       const ocrResult = await ocrService.extractInvoiceData(req.file.buffer, fileType, req.file.originalname);
 
       if (!ocrResult.success) {
@@ -500,7 +504,7 @@ module.exports = function invoicesRouter(prisma) {
       console.log(`📤 [CSV Import] File: ${req.file.originalname}`);
 
       // Parse CSV
-      const ocrService = getInvoiceOcrService();
+      const ocrService = getInvoiceOcrServiceLazy();
       const parseResult = await ocrService.parseInvoiceCsv(req.file.buffer);
 
       if (!parseResult.success) {

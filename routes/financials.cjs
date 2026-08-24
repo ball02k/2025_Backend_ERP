@@ -3,6 +3,11 @@ const router = express.Router();
 const { prisma } = require('../utils/prisma.cjs');
 const { recomputeFinancials } = require('../services/projectSnapshot');
 const { assertProjectMember } = require('../middleware/membership.cjs');
+const {
+  evaluateBudgetLineLock,
+  enforceDecision,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
 
 async function ensureMember(req, projectId) {
   const member = await assertProjectMember({
@@ -121,6 +126,17 @@ router.put('/budgets/:id', async (req, res) => {
     await ensureMember(req, existing.projectId);
 
     const { code, category, description, amount } = req.body;
+    const proposedChanges = { code, category, description, amount };
+    const lockDecision = await evaluateBudgetLineLock({
+      prisma,
+      tenantId,
+      projectId: existing.projectId,
+      budgetLineId: id,
+      action: 'update',
+      proposedChanges,
+    });
+    await enforceDecision(req, 'BudgetLine', id, 'UPDATE', lockDecision);
+
     const row = await prisma.budgetLine.update({
       where: { id },
       data: { code, category, description, amount },
@@ -128,6 +144,7 @@ router.put('/budgets/:id', async (req, res) => {
     await recomputeFinancials(existing.projectId, tenantId);
     res.json({ data: row });
   } catch (e) {
+    if (sendCommercialLock(res, e)) return;
     if (e.status) return res.status(e.status).json({ error: e.message });
     res.status(500).json({ error: 'Failed to update budget' });
   }
@@ -141,10 +158,20 @@ router.delete('/budgets/:id', async (req, res) => {
     if (!existing) return res.status(404).json({ error: 'Not found' });
     await ensureMember(req, existing.projectId);
 
+    const lockDecision = await evaluateBudgetLineLock({
+      prisma,
+      tenantId,
+      projectId: existing.projectId,
+      budgetLineId: id,
+      action: 'delete',
+    });
+    await enforceDecision(req, 'BudgetLine', id, 'DELETE', lockDecision);
+
     await prisma.budgetLine.delete({ where: { id } });
     await recomputeFinancials(existing.projectId, tenantId);
     res.status(204).end();
   } catch (e) {
+    if (sendCommercialLock(res, e)) return;
     if (e.status) return res.status(e.status).json({ error: e.message });
     res.status(500).json({ error: 'Failed to delete budget' });
   }

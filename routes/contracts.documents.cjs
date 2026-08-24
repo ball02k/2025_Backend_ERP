@@ -14,13 +14,8 @@ const cvrService = require('../services/cvr.cjs');
 const poGeneration = require('../services/poGeneration.cjs');
 const multer = require('multer');
 
-// Lazy load OCR service (optional dependency)
-let processContractOcr;
-try {
-  processContractOcr = require('../services/contractOcr.cjs').processContractOcr;
-} catch (err) {
-  console.warn('[ContractDocuments] OCR service not available:', err.message);
-  processContractOcr = null;
+function processContractOcrLazy(contractId, tenantId) {
+  return require('../services/contractOcr.cjs').processContractOcr(contractId, tenantId);
 }
 
 // Configure multer for file uploads (memory storage)
@@ -184,8 +179,8 @@ router.post('/contracts/:id/documents/upload-signed', requireAuth, upload.single
 
     // Trigger OCR processing asynchronously (fire and forget)
     // Don't await - let it run in background
-    if (processContractOcr) {
-      processContractOcr(contractId, tenantId)
+    try {
+      processContractOcrLazy(contractId, tenantId)
         .then((result) => {
           if (result.success) {
             console.log(`✅ [ContractDocs] OCR completed for contract ${contractId}`);
@@ -196,8 +191,8 @@ router.post('/contracts/:id/documents/upload-signed', requireAuth, upload.single
         .catch((error) => {
           console.error(`❌ [ContractDocs] OCR processing error for contract ${contractId}:`, error);
         });
-    } else {
-      console.warn(`⚠️  [ContractDocs] OCR service not available - skipping OCR for contract ${contractId}`);
+    } catch (err) {
+      console.warn(`[ContractDocs] OCR service not available - skipping OCR for contract ${contractId}:`, err.message);
     }
 
     return res.json({
@@ -386,8 +381,8 @@ router.post('/contracts/:id/ocr-retry', requireAuth, async (req, res) => {
     });
 
     // Trigger OCR processing
-    if (processContractOcr) {
-      processContractOcr(contractId, tenantId)
+    try {
+      processContractOcrLazy(contractId, tenantId)
         .then((result) => {
           if (result.success) {
             console.log(`✅ [ContractDocs] OCR retry completed for contract ${contractId}`);
@@ -398,8 +393,8 @@ router.post('/contracts/:id/ocr-retry', requireAuth, async (req, res) => {
         .catch((error) => {
           console.error(`❌ [ContractDocs] OCR retry error for contract ${contractId}:`, error);
         });
-    } else {
-      console.warn(`⚠️  [ContractDocs] OCR service not available - cannot retry OCR for contract ${contractId}`);
+    } catch (err) {
+      console.warn(`[ContractDocs] OCR service not available - cannot retry OCR for contract ${contractId}:`, err.message);
     }
 
     return res.json({

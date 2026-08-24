@@ -2,6 +2,12 @@ const router = require('express').Router({ mergeParams: true });
 const { randomUUID } = require('crypto');
 const { prisma } = require('../lib/prisma.js');
 const { generatePackageSuggestions } = require('../lib/packageSuggestor.cjs');
+const {
+  evaluateBudgetLineLock,
+  evaluatePackageLock,
+  enforceDecision,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
 
 const scopeRuns = new Map();
 const scopeRunResults = new Map();
@@ -190,6 +196,34 @@ router.patch('/projects/:projectId/scope/runs/:runId/accept', async (req, res, n
         }
       }
 
+      const budgetDecision = await evaluateBudgetLineLock({
+        prisma,
+        tenantId,
+        projectId,
+        budgetLineId: budgetId,
+        action: 'scope_mapping',
+        proposedChanges: { amount: true },
+      });
+      await enforceDecision(req, 'BudgetLine', budgetId, 'scope.accept.mapping', budgetDecision);
+
+      const existingPackageItems = await prisma.packageItem.findMany({
+        where: { tenantId, budgetLineId: budgetId },
+        select: { packageId: true },
+      });
+      const packageIdsToCheck = new Set(existingPackageItems.map((item) => Number(item.packageId)).filter(Number.isFinite));
+      if (targetPackageId) packageIdsToCheck.add(targetPackageId);
+      for (const packageId of packageIdsToCheck) {
+        const packageDecision = await evaluatePackageLock({
+          prisma,
+          tenantId,
+          projectId,
+          packageId,
+          action: 'scope_mapping',
+          proposedChanges: { budgetEstimate: true },
+        });
+        await enforceDecision(req, 'Package', packageId, 'scope.accept.package_link', packageDecision);
+      }
+
       await prisma.packageItem.deleteMany({
         where: { tenantId, budgetLineId: budgetId },
       });
@@ -207,6 +241,7 @@ router.patch('/projects/:projectId/scope/runs/:runId/accept', async (req, res, n
 
     res.json({ success: true, applied: mappings.length, packagesCreated: createPackages.length });
   } catch (err) {
+    if (sendCommercialLock(res, err)) return;
     next(err);
   }
 });

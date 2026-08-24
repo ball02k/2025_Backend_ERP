@@ -5,6 +5,12 @@ const { Prisma } = require('@prisma/client');
 const { isPackageSourced } = require('../lib/sourcing.cjs');
 const { getTenantId } = require('../middleware/tenant.cjs');
 const { writeAudit } = require('../lib/audit.cjs');
+const {
+  evaluateBudgetLinesLock,
+  evaluatePackageLock,
+  enforceDecision,
+  sendCommercialLock,
+} = require('../services/commercialLockService.cjs');
 
 function toDecimal(value, options = {}) {
   const { fallback = null, allowNull = false } = options;
@@ -233,22 +239,44 @@ function mapUnsourced(pkg) {
 router.patch(
   '/packages/:id',
   wrap(async (req, res) => {
-    const id = toInt(req.params.id);
-    const body = req.body || {};
-    const data = {};
+    try {
+      const tenantId = resolveTenantId(req);
+      const id = toInt(req.params.id);
+      const body = req.body || {};
+      const data = {};
 
-    if (body.route !== undefined) data.route = body.route == null ? null : String(body.route).toLowerCase();
-    if (body.status !== undefined) data.status = body.status == null ? null : String(body.status);
-    if (body.name !== undefined) data.name = body.name == null ? null : String(body.name);
-    if (body.trade !== undefined) data.trade = body.trade == null ? null : String(body.trade);
-    if (body.scopeSummary !== undefined) data.scopeSummary = body.scopeSummary == null ? null : String(body.scopeSummary);
+      if (body.route !== undefined) data.route = body.route == null ? null : String(body.route).toLowerCase();
+      if (body.status !== undefined) data.status = body.status == null ? null : String(body.status);
+      if (body.name !== undefined) data.name = body.name == null ? null : String(body.name);
+      if (body.trade !== undefined) data.trade = body.trade == null ? null : String(body.trade);
+      if (body.scopeSummary !== undefined) data.scopeSummary = body.scopeSummary == null ? null : String(body.scopeSummary);
 
-    if (!Object.keys(data).length) {
-      throw Object.assign(new Error('No fields to update'), { status: 400 });
+      if (!Object.keys(data).length) {
+        throw Object.assign(new Error('No fields to update'), { status: 400 });
+      }
+
+      const existing = await prisma.package.findFirst({
+        where: { id, project: { tenantId } },
+        select: { id: true, projectId: true },
+      });
+      if (!existing) throw Object.assign(new Error('Package not found'), { status: 404 });
+
+      const lockDecision = await evaluatePackageLock({
+        prisma,
+        tenantId,
+        projectId: existing.projectId,
+        packageId: id,
+        action: 'update',
+        proposedChanges: data,
+      });
+      await enforceDecision(req, 'Package', id, 'UPDATE', lockDecision);
+
+      const updated = await updatePackage({ id }, data);
+      res.json(normalizePackage(updated));
+    } catch (err) {
+      if (sendCommercialLock(res, err)) return;
+      throw err;
     }
-
-    const updated = await updatePackage({ id }, data);
-    res.json(normalizePackage(updated));
   }),
 );
 
@@ -597,6 +625,15 @@ router.post('/packages/:packageId/add-budget-lines', async (req, res, next) => {
       });
     }
 
+    const lockDecision = await evaluateBudgetLinesLock({
+      prisma,
+      tenantId,
+      projectId: pkg.projectId,
+      budgetLineIds: linesToAdd.map((line) => line.id),
+      action: 'link_to_package',
+    });
+    await enforceDecision(req, 'Package', pkg.id, 'ADD_BUDGET_LINES', lockDecision);
+
     const created = await prisma.$transaction(async (tx) => {
       const items = [];
       for (const line of linesToAdd) {
@@ -650,6 +687,7 @@ router.post('/packages/:packageId/add-budget-lines', async (req, res, next) => {
 
     res.status(201).json({ added: created.length, items: created, skipped: Array.from(existingSet) });
   } catch (err) {
+    if (sendCommercialLock(res, err)) return;
     next(err);
   }
 });

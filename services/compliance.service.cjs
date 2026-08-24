@@ -18,7 +18,6 @@ async function checkSupplierCompliance(tenantId, supplierId) {
         name: true,
         status: true,
         insuranceExpiry: true,
-        hsExpiry: true,
         hsAccreditations: true,
       },
     });
@@ -45,14 +44,6 @@ async function checkSupplierCompliance(tenantId, supplierId) {
       const expiryDate = new Date(supplier.insuranceExpiry);
       if (expiryDate < now) {
         warnings.push('INSURANCE_EXPIRED');
-      }
-    }
-
-    // Warnings only - H&S expiry
-    if (supplier.hsExpiry) {
-      const hsExpiryDate = new Date(supplier.hsExpiry);
-      if (hsExpiryDate < now) {
-        warnings.push('HS_CERTIFICATION_EXPIRED');
       }
     }
 

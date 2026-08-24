@@ -324,7 +324,7 @@ async function deletePurchaseOrder(id, tenantId) {
  * Get Purchase Orders with filters
  */
 async function getPurchaseOrders(tenantId, filters = {}) {
-  const { projectId, status, supplierId, budgetLineId, limit = 50, offset = 0 } = filters;
+  const { projectId, status, supplierId, budgetLineId, direction, limit = 50, offset = 0 } = filters;
 
   const where = {
     tenantId,
@@ -332,6 +332,8 @@ async function getPurchaseOrders(tenantId, filters = {}) {
     ...(status && { status }),
     ...(supplierId && { supplierId }),
     ...(budgetLineId && { budgetLineId }),
+    // Task 2.5: Direction filtering - OUTBOUND (POs we issue to subs) or INBOUND (POs from MC/client - rare)
+    ...(direction && (direction === 'OUTBOUND' || direction === 'INBOUND') && { direction }),
   };
 
   const [items, total] = await Promise.all([

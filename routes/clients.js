@@ -4,6 +4,32 @@ const { clientsQuerySchema, clientBodySchema, contactBodySchema } = require('../
 
 module.exports = (prisma) => {
   const router = express.Router();
+  const clientListSelect = {
+    id: true,
+    name: true,
+    companyRegNo: true,
+    vatNo: true,
+    address1: true,
+    address2: true,
+    city: true,
+    county: true,
+    postcode: true,
+    createdAt: true,
+    updatedAt: true,
+  };
+  const contactSelect = {
+    id: true,
+    clientId: true,
+    tenantId: true,
+    firstName: true,
+    lastName: true,
+    email: true,
+    phone: true,
+    role: true,
+    isPrimary: true,
+    createdAt: true,
+    updatedAt: true,
+  };
   function toCsvRow(values) {
     return values
       .map((v) => {
@@ -99,7 +125,8 @@ module.exports = (prisma) => {
           orderBy: { [sort]: order },
           skip: (page - 1) * pageSize,
           take: pageSize,
-          include: {
+          select: {
+            ...clientListSelect,
             projects: {
               where: { tenantId: tenant, deletedAt: null },
               select: { id: true },
@@ -128,6 +155,7 @@ module.exports = (prisma) => {
       const rows = await prisma.client.findMany({
         where: { deletedAt: null, projects: { some: { tenantId: tenant, deletedAt: null } } },
         orderBy: { createdAt: 'desc' },
+        select: clientListSelect,
       });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="clients.csv"');
@@ -279,7 +307,7 @@ module.exports = (prisma) => {
           // Upsert by id if provided, else by (name, companyRegNo) heuristics
           const id = r.id ? Number(r.id) : null;
           const where = id && Number.isFinite(id) ? { id, deletedAt: null } : { name, deletedAt: null };
-          const existing = await prisma.client.findFirst({ where });
+          const existing = await prisma.client.findFirst({ where, select: { id: true } });
           const data = {
             name,
             companyRegNo: r.companyRegNo || null,
@@ -311,8 +339,11 @@ module.exports = (prisma) => {
       if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
       const row = await prisma.client.findFirst({
         where: { id, deletedAt: null },
-        include: {
-          contacts: true,
+        select: {
+          ...clientListSelect,
+          contacts: {
+            select: contactSelect,
+          },
           projects: {
             where: { tenantId: tenant, deletedAt: null },
             select: { id: true, code: true, name: true, status: true },
@@ -341,7 +372,10 @@ module.exports = (prisma) => {
             create: [{ ...primaryContact, isPrimary: true, tenantId: req.user?.tenantId }],
           } : undefined,
         },
-        include: { contacts: true },
+        select: {
+          ...clientListSelect,
+          contacts: { select: contactSelect },
+        },
       });
       res.status(201).json(created);
     } catch (err) {
@@ -357,13 +391,13 @@ router.put('/:id', async (req, res) => {
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
       const tenant = req.user && req.user.tenantId;
-      const existing = await prisma.client.findFirst({ where: { id, deletedAt: null, projects: { some: { tenantId: tenant, deletedAt: null } } } });
+      const existing = await prisma.client.findFirst({ where: { id, deletedAt: null, projects: { some: { tenantId: tenant, deletedAt: null } } }, select: { id: true } });
       if (!existing) return res.status(404).json({ error: 'Client not found' });
       const body = clientBodySchema.partial().parse(req.body);
 
       // ignore `primaryContact` on update for now
       const { primaryContact: _pc, ...data } = body;
-      const updated = await prisma.client.update({ where: { id }, data });
+      const updated = await prisma.client.update({ where: { id }, data, select: clientListSelect });
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed', details: err.errors });
@@ -379,7 +413,7 @@ router.patch('/:id', async (req, res) => {
     const tenantId = req.user && req.user.tenantId;
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
-    const existing = await prisma.client.findFirst({ where: { id, deletedAt: null } });
+    const existing = await prisma.client.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
     if (!existing) return res.status(404).json({ error: 'Client not found' });
     const body = req.body || {};
     const reason = typeof body?.reason === 'string' ? body.reason : null;
@@ -389,7 +423,7 @@ router.patch('/:id', async (req, res) => {
     if (body.industry !== undefined) data.industry = body.industry == null ? null : String(body.industry);
     if (body.companyNumber !== undefined) data.companyRegNo = body.companyNumber == null ? null : String(body.companyNumber);
     if (body.vatNo !== undefined) data.vatNo = body.vatNo == null ? null : String(body.vatNo);
-    const updated = await prisma.client.update({ where: { id }, data });
+    const updated = await prisma.client.update({ where: { id }, data, select: clientListSelect });
     try {
       await prisma.auditLog.create({
         data: {
@@ -414,7 +448,7 @@ router.patch('/:id', async (req, res) => {
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
       const tenant = req.user && req.user.tenantId;
-      const existing = await prisma.client.findFirst({ where: { id, deletedAt: null, projects: { some: { tenantId: tenant, deletedAt: null } } } });
+      const existing = await prisma.client.findFirst({ where: { id, deletedAt: null, projects: { some: { tenantId: tenant, deletedAt: null } } }, select: { id: true } });
       if (!existing) return res.status(404).json({ error: 'Client not found' });
       await prisma.client.update({ where: { id }, data: { deletedAt: new Date() } });
       res.status(204).end();

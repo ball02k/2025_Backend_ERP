@@ -167,7 +167,7 @@ router.get('/variations', async (req, res, next) => {
         contract: {
           select: {
             id: true,
-            number: true,
+            contractRef: true,
             title: true,
             supplierId: true,
             supplier: {
@@ -176,13 +176,6 @@ router.get('/variations', async (req, res, next) => {
                 name: true,
               },
             },
-          },
-        },
-        budgetLine: {
-          select: {
-            id: true,
-            code: true,
-            description: true,
           },
         },
         documents: {
@@ -452,14 +445,28 @@ router.post('/contracts/:contractId/variations', async (req, res, next) => {
         where: { id: contractId, tenantId },
         include: {
           project: true,
-          package: { include: { supplier: true } },
+          package: {
+            include: {
+              awardSupplier: true,
+              awardedToSupplier: true,
+            },
+          },
         },
       });
 
-      const creator = await prisma.user.findFirst({
+      const creatorUser = await prisma.user.findFirst({
         where: { id: userId },
-        select: { firstName: true, lastName: true, email: true },
+        select: { name: true, email: true },
       });
+      const creatorName = creatorUser?.name || creatorUser?.email || 'System User';
+      const [creatorFirstName, ...creatorLastNameParts] = creatorName.split(' ');
+      const creator = creatorUser
+        ? {
+            firstName: creatorFirstName || creatorName,
+            lastName: creatorLastNameParts.join(' '),
+            email: creatorUser.email,
+          }
+        : null;
 
       // Notify Project Manager
       await sendVariationCreated({
@@ -470,13 +477,14 @@ router.post('/contracts/:contractId/variations', async (req, res, next) => {
       });
 
       // If quotation requested, notify contractor
-      if (requestQuotation && fullContract?.package?.supplier?.email) {
+      const packageSupplier = fullContract?.package?.awardedToSupplier || fullContract?.package?.awardSupplier;
+      if (requestQuotation && packageSupplier?.email) {
         await sendQuotationRequest({
           variation: created,
           contract: fullContract,
           project: fullContract?.project,
-          contractorEmail: fullContract.package.supplier.email,
-          contractorName: fullContract.package.supplier.name || 'Contractor',
+          contractorEmail: packageSupplier.email,
+          contractorName: packageSupplier.name || 'Contractor',
         });
       }
     } catch (emailError) {
@@ -821,7 +829,12 @@ router.post('/variations/:id/approve', async (req, res, next) => {
           where: { id: existing.contractId, tenantId },
           include: {
             project: true,
-            package: { include: { supplier: true } },
+            package: {
+              include: {
+                awardSupplier: true,
+                awardedToSupplier: true,
+              },
+            },
           },
         });
 

@@ -58,6 +58,31 @@ enum RetentionReleaseType {
   RETENTION_BOND
 }
 
+// CVR Phase B: Forecast enums
+enum ForecastMethod {
+  COMMITTED // Forecast = Committed (default, no manual adjustment)
+  MANUAL // QS manually set the anticipated final
+  COMMITTED_PLUS_ADJ // Forecast = Committed + Manual Adjustment
+  CALCULATED // System calculated based on trends
+}
+
+enum ForecastStatus {
+  ON_TRACK // Forecast ≤ Budget
+  AT_RISK // Forecast within 5% over budget
+  OVER_BUDGET // Forecast > Budget
+  UNDER_BUDGET // Forecast significantly under budget (>10%)
+  REQUIRES_REVIEW // Flagged for QS review
+}
+
+enum ForecastChangeType {
+  MANUAL_ADJUSTMENT // QS manually changed forecast
+  CONTRACT_AWARDED // New contract affected forecast
+  VARIATION_APPROVED // Variation approval changed forecast
+  PERIOD_END_REVIEW // Monthly/quarterly forecast review
+  SYSTEM_RECALCULATION // Automated recalculation
+  INITIAL_SETUP // First forecast set
+}
+
 // Supplier Onboarding
 model OnboardingProject {
   id        Int      @id @default(autoincrement())
@@ -153,7 +178,7 @@ model TaskStatus {
 }
 
 model Client {
-  id           Int       @id @default(autoincrement())
+  id           Int     @id @default(autoincrement())
   name         String
   companyRegNo String?
   vatNo        String?
@@ -162,15 +187,32 @@ model Client {
   city         String?
   county       String?
   postcode     String?
-  deletedAt    DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  projects     Project[]
-  contacts     Contact[] // REQUIRED for includes/counts
+
+  // Task 2.1: Support dual role - same entity can be client AND main contractor
+  clientType String @default("CLIENT") // CLIENT, MAIN_CONTRACTOR, BOTH
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  projects  Project[]
+  contacts  Contact[] // REQUIRED for includes/counts
+
+  // Task 2.1: Projects where this Client is the upstream party (MC or client)
+  upstreamProjects Project[] @relation("UpstreamParty")
+
+  // Task 2.2: Upstream contracts where this Client is the main contractor
+  upstreamContractsAsMC UpstreamContract[] @relation("UpstreamContractMainContractor")
+
+  // Task 2.3: Import mappings for this main contractor
+  importMappings ImportMapping[] @relation("ImportMappingMainContractor")
+
+  // Task 2.4: Applications where this Client is the recipient
+  applicationsAsRecipient ApplicationForPayment[] @relation("ApplicationRecipient")
 
   @@index([name])
   @@index([vatNo])
   @@index([companyRegNo])
+  @@index([clientType])
 }
 
 model Project {
@@ -217,6 +259,20 @@ model Project {
   endActual              DateTime?
   labels                 Json?
 
+  // Task 2.1: Project role determines workflow and capabilities
+  projectRole String @default("PRINCIPAL_CONTRACTOR") // PRINCIPAL_CONTRACTOR, SUBCONTRACTOR, DIRECT_TO_CLIENT
+
+  // Upstream party (who you report to) - used when SUBCONTRACTOR or DIRECT_TO_CLIENT
+  upstreamPartyType   String? // CLIENT, MAIN_CONTRACTOR
+  upstreamPartyId     Int? // FK to Client record (Client can represent both clients and MCs)
+  upstreamContactId   Int? // FK to Contact - primary person for submissions
+  upstreamContractRef String? // Their reference for this contract/project
+  upstreamPoNumber    String? // Their PO number if applicable
+
+  // Relations for upstream party
+  upstreamParty   Client?  @relation("UpstreamParty", fields: [upstreamPartyId], references: [id])
+  upstreamContact Contact? @relation("Project_UpstreamContact", fields: [upstreamContactId], references: [id])
+
   // Existing financial/schedule fields retained
   budget      Decimal?  @db.Decimal(18, 2)
   actualSpend Decimal?  @db.Decimal(18, 2)
@@ -254,6 +310,7 @@ model Project {
   hsEvents              HsEvent[]
   carbonEntries         CarbonEntry[]
   ApplicationForPayment ApplicationForPayment[]
+  paymentCertificates   PaymentCertificate[] // Task 3.1: Certificates received
   // MVP additive
   tenders               Tender[]
   // CVR tracking
@@ -271,8 +328,22 @@ model Project {
   projectRoles      ProjectRole[]      @relation("ProjectRoles")
   approvalWorkflows ApprovalWorkflow[] @relation("ProjectApprovalWorkflows")
 
+  // Task 2.2: Upstream contract terms (when acting as subcontractor)
+  upstreamContract UpstreamContract?
+
+  // Task 3.4: Upstream retention tracking (retention held by MC from you)
+  upstreamRetentionReleases UpstreamRetentionRelease[] @relation("UpstreamRetentionReleases")
+  upstreamRetentionBonds    UpstreamRetentionBond[]    @relation("UpstreamRetentionBonds")
+
+  // Task 4.2: Enhanced CVR cost tracking
+  projectCosts    ProjectCost[]    @relation("ProjectCosts")
+  cvrSnapshots    CVRSnapshot[]    @relation("ProjectCVRSnapshots")
+  // CVR Phase B: Project forecast
+  projectForecast ProjectForecast?
+
   @@index([tenantId, status])
   @@index([tenantId, name])
+  @@index([tenantId, projectRole]) // Task 2.1: Filter projects by role
   // Hot paths: client-filtered project lists and planned end sorting
   @@index([tenantId, clientId])
   @@index([tenantId, endPlanned])
@@ -280,6 +351,89 @@ model Project {
   @@index([tenantId, clientContactId])
   @@index([tenantId, projectManagerUserId])
   @@index([tenantId, quantitySurveyorUserId])
+}
+
+// ==============================================================================
+// UPSTREAM CONTRACT - CONTRACT TERMS WHEN ACTING AS SUBCONTRACTOR
+// Task 2.2: Capture MC contract terms for automated retention & payment tracking
+// ==============================================================================
+
+model UpstreamContract {
+  id        String @id @default(cuid())
+  tenantId  String
+  projectId Int    @unique // One upstream contract per project
+
+  // Link to who gave you this contract
+  mainContractorId Int? // FK to Client (where clientType includes MC)
+
+  // Contract basics
+  contractValue Decimal @db.Decimal(18, 2)
+  contractType  String? // NEC4_OPTION_A, JCT_DB, etc.
+  contractRef   String? // MC's contract reference
+  poNumber      String? // MC's PO number
+  description   String? @db.Text
+
+  // Retention terms
+  retentionPercentage Decimal  @default(0) @db.Decimal(5, 2)
+  retentionCap        Decimal? @db.Decimal(18, 2)
+  retentionCapAuto    Boolean  @default(true)
+  retentionReleasePC  Decimal? @db.Decimal(5, 2) // % released at PC
+  retentionReleaseDLP Decimal? @db.Decimal(5, 2) // % released at DLP end
+
+  // Payment terms
+  applicationDueDay  Int? // Day of month (1-31)
+  applicationDueDays Int? // OR days after period end
+  paymentTermsDays   Int  @default(30)
+  payLessNoticeDays  Int? // Days before due date
+  paymentNoticeDays  Int? // Days after application
+
+  // Main Contractor Discount
+  mainContractorDiscount Decimal @default(0) @db.Decimal(5, 2)
+  mcdDescription         String?
+
+  // CIS (does MC deduct CIS from you?)
+  mcDeductsCIS Boolean @default(false)
+
+  // Key dates
+  startDate               DateTime?
+  plannedCompletionDate   DateTime?
+  actualCompletionDate    DateTime?
+  practicalCompletionDate DateTime?
+  dlpMonths               Int?
+  dlpEndDate              DateTime?
+
+  // Status
+  status String @default("ACTIVE") // DRAFT, ACTIVE, COMPLETE, DISPUTED, TERMINATED
+
+  // Documents
+  contractDocumentUrl String?
+
+  // Audit
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById Int?
+  updatedById Int?
+
+  // Relations
+  project        Project @relation(fields: [projectId], references: [id])
+  mainContractor Client? @relation("UpstreamContractMainContractor", fields: [mainContractorId], references: [id])
+  createdBy      User?   @relation("UpstreamContractCreatedBy", fields: [createdById], references: [id])
+  updatedBy      User?   @relation("UpstreamContractUpdatedBy", fields: [updatedById], references: [id])
+
+  // Task 2.4: Applications raised against this upstream contract
+  applications ApplicationForPayment[]
+
+  // Task 3.1: Certificates received for this upstream contract
+  certificates PaymentCertificate[]
+
+  // Task 3.4: Retention releases and bonds
+  retentionReleases UpstreamRetentionRelease[] @relation("UpstreamContractRetentionReleases")
+  retentionBonds    UpstreamRetentionBond[]    @relation("UpstreamContractRetentionBonds")
+
+  @@index([tenantId])
+  @@index([tenantId, projectId])
+  @@index([tenantId, mainContractorId])
+  @@index([tenantId, status])
 }
 
 model CostCode {
@@ -340,27 +494,65 @@ model Contact {
   role      String?
   isPrimary Boolean @default(false)
 
+  // Customer Portal Access
+  portalEnabled Boolean   @default(false)
+  passwordHash  String? // Hashed password for portal login
+  portalToken   String? // Magic link token for passwordless login
+  tokenExpiry   DateTime?
+  lastLoginAt   DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Back-relation to projects where this contact is the client contact
   projectsAsClientContact Project[] @relation("Project_ClientContact")
 
+  // Task 2.1: Back-relation to projects where this contact is the upstream contact (MC or client)
+  projectsAsUpstreamContact Project[] @relation("Project_UpstreamContact")
+
+  // Task 2.4: Back-relation to applications where this contact is the recipient
+  applicationsAsRecipient ApplicationForPayment[] @relation("ApplicationRecipientContact")
+
+  // Customer portal sessions
+  portalSessions CustomerPortalSession[]
+
   @@unique([clientId, email])
   @@index([tenantId, clientId])
   @@index([clientId, isPrimary])
   @@index([email])
   @@index([role])
+  @@index([portalToken])
+}
+
+// Customer Portal Session Tracking
+model CustomerPortalSession {
+  id        String @id @default(uuid())
+  contactId Int
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  expiresAt DateTime
+  lastActivityAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+
+  @@index([contactId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("customer_portal_sessions")
 }
 
 model Variation {
-  id           Int     @id @default(autoincrement())
+  id           Int       @id @default(autoincrement())
   projectId    Int
   tenantId     String
-  project      Project @relation(fields: [projectId], references: [id])
+  project      Project   @relation(fields: [projectId], references: [id])
   packageId    Int?
   budgetLineId Int?
   contractId   Int?
+  contract     Contract? @relation(fields: [contractId], references: [id])
 
   // Core identifiers
   reference       String? @db.VarChar(64)
@@ -682,6 +874,26 @@ model DocumentLink {
   @@index([tenantId, poId])
 }
 
+model DocumentDownloadEvent {
+  id           Int      @id @default(autoincrement())
+  tenantId     String
+  documentId   BigInt
+  entityType   String?
+  entityId     Int?
+  linkId       Int?
+  supplierId   Int?
+  userId       Int?
+  ipAddress    String?
+  userAgent    String?
+  downloadedAt DateTime @default(now())
+
+  @@index([tenantId, documentId])
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, supplierId])
+  @@index([tenantId, userId])
+  @@index([tenantId, downloadedAt])
+}
+
 // --- Additive optional links to new modules ---
 // Extend DocumentLink with nullable foreign keys to RFI/QA/H&S/Carbon entries
 // Note: This is additive; existing behavior remains unchanged
@@ -886,6 +1098,20 @@ model User {
   approvalStepsDelegated ApprovalStep[]    @relation("ApprovalStepDelegation")
   approvalHistoryActions ApprovalHistory[] @relation("ApprovalHistoryUser")
 
+  // Task 2.2: Upstream Contract audit relations
+  upstreamContractsCreated UpstreamContract[] @relation("UpstreamContractCreatedBy")
+  upstreamContractsUpdated UpstreamContract[] @relation("UpstreamContractUpdatedBy")
+
+  // Task 2.6: Payment Application Status History
+  paymentApplicationStatusChanges PaymentApplicationStatusHistory[] @relation("PaymentApplicationStatusHistoryChangedBy")
+
+  // Task 3.1: Payment Certificate relations
+  paymentCertificatesCreated PaymentCertificate[] @relation("PaymentCertificateCreatedBy")
+  certificatePaymentsCreated CertificatePayment[] @relation("CertificatePaymentCreatedBy")
+
+  // Task 3.4: Upstream Retention Release relations
+  upstreamRetentionReleasesCreated UpstreamRetentionRelease[] @relation("UpstreamRetentionReleaseCreatedBy")
+
   @@index([tenantId, email])
 }
 
@@ -943,23 +1169,38 @@ model RolePermission {
 
 // Supplier Management
 model Supplier {
-  id                    Int       @id @default(autoincrement())
-  tenantId              String
-  name                  String
-  status                String    @default("active")
+  id                      Int       @id @default(autoincrement())
+  tenantId                String
+  name                    String
+  status                  String    @default("active")
   // Contact details (additive)
-  email                 String?
-  phone                 String?
-  companyRegNo          String?
-  vatNo                 String?
+  email                   String?
+  phone                   String?
+  companyRegNo            String?
+  vatNo                   String?
   // Insurance details (additive)
-  insurancePolicyNumber String?
-  insuranceExpiry       DateTime?
-  hsAccreditations      String?
-  performanceScore      Decimal?
-  complianceStatus      String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  insurancePolicyNumber   String?
+  insuranceExpiry         DateTime?
+  hsAccreditations        String?
+  performanceScore        Decimal?
+  complianceStatus        String?
+  // CIS (Construction Industry Scheme) details (additive)
+  cisRegistered           Boolean?  @default(false)
+  cisVerificationStatus   String? // GROSS | NET | UNVERIFIED
+  cisVerificationDate     DateTime?
+  cisVerificationExpiry   DateTime?
+  utr                     String? // Unique Taxpayer Reference (10 digits)
+  companyUtr              String? // Company UTR for limited companies
+  niNumber                String? // National Insurance Number (UK format: AB123456C)
+  cisNotes                String?
+  defaultLabourPercentage Decimal?  @default(100) // Default labour % for CIS calculation (0-100)
+
+  // VAT (Value Added Tax) - Task 1.5
+  vatRegistered Boolean? @default(false) // Is supplier VAT registered?
+  vatNumber     String? // UK VAT number (GB format: GB123456789 or GB123456789012)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   capabilities          SupplierCapability[]
   prequalification      SupplierPrequalification?
@@ -1011,6 +1252,27 @@ model SupplierCapability {
   @@index([tenantId, supplierId, tag])
 }
 
+model ProjectSupplier {
+  id              Int      @id @default(autoincrement())
+  tenantId        String
+  projectId       Int
+  supplierId      Int
+  status          String   @default("active")
+  trade           String?
+  role            String?
+  source          String   @default("manual")
+  notes           String?
+  createdByUserId String?
+  updatedByUserId String?
+  isDeleted       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tenantId, projectId, supplierId])
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, supplierId])
+}
+
 model ProjectMembership {
   id        Int      @id @default(autoincrement())
   tenantId  String   @default("demo")
@@ -1027,9 +1289,13 @@ model ProjectMembership {
 }
 
 model PurchaseOrder {
-  id            Int       @id @default(autoincrement())
-  tenantId      String    @default("demo")
-  projectId     Int
+  id        Int    @id @default(autoincrement())
+  tenantId  String @default("demo")
+  projectId Int
+
+  // Task 2.5: Purchase Order Direction
+  direction String @default("OUTBOUND") // OUTBOUND (POs we issue to subs), INBOUND (POs we receive from MC/client - rare)
+
   code          String
   supplier      String
   supplierId    Int?
@@ -1047,14 +1313,14 @@ model PurchaseOrder {
   cancelReason  String?
 
   // Supplier communication tracking
-  sentAt        DateTime?
-  sentBy        String?
-  sentMethod    String?   // "EMAIL" | "DOWNLOAD" | "MANUAL"
+  sentAt         DateTime?
+  sentBy         String?
+  sentMethod     String? // "EMAIL" | "DOWNLOAD" | "MANUAL"
   acknowledgedAt DateTime?
 
   // Payment tracking
-  paidAt        DateTime?
-  paidAmount    Decimal?  @default(0)
+  paidAt     DateTime?
+  paidAmount Decimal?  @default(0)
 
   // NEW: PO Strategy & Milestone Support
   poType          String? @default("FULL_CONTRACT") // "FULL_CONTRACT" | "MILESTONE" | "CALL_OFF"
@@ -1096,6 +1362,7 @@ model PurchaseOrder {
   @@index([tenantId, supplierId])
   @@index([tenantId, contractId])
   @@index([tenantId, budgetLineId])
+  @@index([tenantId, projectId, direction])
 }
 
 model POLine {
@@ -1241,10 +1508,16 @@ model RequestInvite {
   respondedAt      DateTime?
   responseToken    String?   @unique
   lastSentAt       DateTime? // Track when invite was last sent/resent
+  expiresAt        DateTime? // Token expiry (null = never expires)
+  revokedAt        DateTime? // Token revocation (null = not revoked)
+  lastOpenedAt     DateTime? // Last time supplier opened portal
+  lastSavedAt      DateTime? // Last time supplier saved draft
+  submittedAt      DateTime? // When supplier submitted (clarity alias for respondedAt)
 
   @@index([tenantId, requestId, status])
   @@index([tenantId, responseToken])
   @@index([tenantId, requestId, email])
+  @@index([tenantId, expiresAt])
 }
 
 model RequestResponse {
@@ -1550,6 +1823,21 @@ model BudgetLine {
   lastForecastUpdated DateTime?
   forecastNotes       String?   @db.Text
 
+  // CVR Phase B: Enhanced Forecasting
+  forecastMethod          ForecastMethod? @default(COMMITTED)
+  forecastAdjustment      Decimal         @default(0) @db.Decimal(18, 2)
+  forecastAdjustmentNotes String?         @db.Text
+  anticipatedVariations   Decimal         @default(0) @db.Decimal(18, 2)
+  riskAllowance           Decimal         @default(0) @db.Decimal(18, 2)
+  forecastUpdatedBy       String?
+  forecastStatus          ForecastStatus? @default(ON_TRACK)
+  costToComplete          Decimal?        @db.Decimal(18, 2)
+
+  // Task 2.3: Budget Import fields for Subcontractor Mode
+  source              String? @default("INTERNAL") // INTERNAL, IMPORTED_MC, IMPORTED_CLIENT
+  externalRef         String? // MC's reference for this line
+  originalDescription String? @db.Text // MC's original description (preserved)
+
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   costCodeId Int?
@@ -1559,22 +1847,28 @@ model BudgetLine {
   sortOrder  Int?     @default(0)
   position   Int      @default(0)
 
-  project            Project                @relation(fields: [projectId], references: [id])
-  costCode           CostCode?              @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
-  budgetCategory     BudgetCategory?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  group              BudgetGroup?           @relation(fields: [groupId], references: [id])
+  project                 Project                      @relation(fields: [projectId], references: [id])
+  costCode                CostCode?                    @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  budgetCategory          BudgetCategory?              @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  group                   BudgetGroup?                 @relation(fields: [groupId], references: [id])
   // Link budget lines to procurement packages
-  packageItems       PackageItem[]
-  contractLines      ContractLineItem[]     @relation("BudgetLineContractLines")
+  packageItems            PackageItem[]
+  contractLines           ContractLineItem[]           @relation("BudgetLineContractLines")
   // CVR tracking
-  cvrCommitments     CVRCommitment[]
-  cvrActuals         CVRActual[]
-  contractValuations ContractValuation[]    @relation("BudgetLineValuations")
-  purchaseOrders     PurchaseOrder[]
-  invoices           Invoice[]
-  invoiceLines       InvoiceLine[]
+  cvrCommitments          CVRCommitment[]
+  cvrActuals              CVRActual[]
+  contractValuations      ContractValuation[]          @relation("BudgetLineValuations")
+  purchaseOrders          PurchaseOrder[]
+  invoices                Invoice[]
+  invoiceLines            InvoiceLine[]
   // Category allocations
-  allocations        BudgetLineAllocation[]
+  allocations             BudgetLineAllocation[]
+  // Task 2.5: Link to outbound payment application lines
+  paymentApplicationLines PaymentApplicationLineItem[]
+  // Task 4.2: Direct cost entries
+  projectCosts            ProjectCost[]                @relation("BudgetLineCosts")
+  // CVR Phase B: Forecast history tracking
+  forecastHistory         BudgetLineForecastHistory[]
 
   @@index([tenantId, projectId])
   @@index([tenantId, projectId, periodMonth])
@@ -1599,6 +1893,23 @@ model BudgetGroup {
   budgetLines BudgetLine[]
 
   @@index([tenantId, projectId])
+}
+
+// Task 2.3: Import Mapping - Save column mappings for budget import reuse
+model ImportMapping {
+  id               String   @id @default(cuid())
+  tenantId         String
+  name             String // "Balfour Beatty Standard Format"
+  mainContractorId Int? // Optional - tie to specific MC
+  mappings         Json // { reference: "Item Ref", description: "Description", ... }
+  isDefault        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  mainContractor Client? @relation("ImportMappingMainContractor", fields: [mainContractorId], references: [id])
+
+  @@index([tenantId])
+  @@index([mainContractorId])
 }
 
 model Commitment {
@@ -1676,63 +1987,67 @@ model FinancialItem {
 
 // Invoices (project-scoped)
 model Invoice {
-  id            Int         @id @default(autoincrement())
-  tenantId      String
-  projectId     Int
-  project       Project     @relation(fields: [projectId], references: [id])
-  supplierId    Int?
-  supplier      Supplier?   @relation(fields: [supplierId], references: [id])
-  budgetLineId  Int? // CVR: Link to budget line
-  budgetLine    BudgetLine? @relation(fields: [budgetLineId], references: [id])
-  number        String
+  id        Int    @id @default(autoincrement())
+  tenantId  String
+  projectId Int
+
+  // Task 2.5: Invoice Direction
+  direction String @default("INBOUND") // OUTBOUND (invoices we raise to MC/client), INBOUND (invoices we receive from subs)
+
+  project            Project     @relation(fields: [projectId], references: [id])
+  supplierId         Int?
+  supplier           Supplier?   @relation(fields: [supplierId], references: [id])
+  budgetLineId       Int? // CVR: Link to budget line
+  budgetLine         BudgetLine? @relation(fields: [budgetLineId], references: [id])
+  number             String
   supplierInvoiceRef String? // Supplier's own reference
-  issueDate     DateTime?
-  dueDate       DateTime?
-  net           Decimal     @default(0)
-  vat           Decimal     @default(0)
-  gross         Decimal     @default(0)
-  status        String      @default("RECEIVED") // "RECEIVED" | "DRAFT" | "PENDING_REVIEW" | "PENDING_MATCH" | "MATCHED" | "APPROVED" | "PAID" | "DISPUTED" | "CANCELLED"
+  issueDate          DateTime?
+  dueDate            DateTime?
+  net                Decimal     @default(0)
+  vat                Decimal     @default(0)
+  gross              Decimal     @default(0)
+  status             String      @default("RECEIVED") // "RECEIVED" | "DRAFT" | "PENDING_REVIEW" | "PENDING_MATCH" | "MATCHED" | "APPROVED" | "PAID" | "DISPUTED" | "CANCELLED"
   // Additive finance fields
-  documentId    BigInt?
-  documentUrl   String? // URL to uploaded invoice document
-  documentName  String? // Original filename
-  ocrStatus     String? // PENDING, COMPLETED, FAILED
-  ocrResultJson Json?
-  ocrRawText    String?     @db.Text // Raw OCR text
-  ocrConfidence Float? // 0-1 confidence score
-  poNumberRef   String?
-  matchStatus   String? // UNMATCHED, PARTIAL_MATCH, FULL_MATCH, NO_PO_REQUIRED
-  matchConfidence Float? // 0-1 confidence score
-  matchedPoId   Int?
-  matchedBy     String? // User who confirmed the match
-  source        String? // MANUAL, PDF_OCR, CSV_IMPORT, EMAIL
+  documentId         BigInt?
+  documentUrl        String? // URL to uploaded invoice document
+  documentName       String? // Original filename
+  ocrStatus          String? // PENDING, COMPLETED, FAILED
+  ocrResultJson      Json?
+  ocrRawText         String?     @db.Text // Raw OCR text
+  ocrConfidence      Float? // 0-1 confidence score
+  poNumberRef        String?
+  matchStatus        String? // UNMATCHED, PARTIAL_MATCH, FULL_MATCH, NO_PO_REQUIRED
+  matchConfidence    Float? // 0-1 confidence score
+  matchedPoId        Int?
+  matchedBy          String? // User who confirmed the match
+  source             String? // MANUAL, PDF_OCR, CSV_IMPORT, EMAIL
   // Additive links to tie into budget/contract rollups
-  packageId     Int?
-  contractId    Int?
-  contract      Contract?   @relation(fields: [contractId], references: [id])
+  packageId          Int?
+  contractId         Int?
+  contract           Contract?   @relation(fields: [contractId], references: [id])
   // CVR: Enhanced workflow tracking
-  receivedDate  DateTime?
-  matchedDate   DateTime?
-  approvedDate  DateTime?
-  approvedBy    Int?
-  paidDate      DateTime?
-  paidAmount    Decimal?    @db.Decimal(18, 2)
-  paymentRef    String? // Bank transfer reference
-  disputeReason String?     @db.Text
-  createdBy     String? // User who created/uploaded the invoice
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  receivedDate       DateTime?
+  matchedDate        DateTime?
+  approvedDate       DateTime?
+  approvedBy         Int?
+  paidDate           DateTime?
+  paidAmount         Decimal?    @db.Decimal(18, 2)
+  paymentRef         String? // Bank transfer reference
+  disputeReason      String?     @db.Text
+  createdBy          String? // User who created/uploaded the invoice
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
   // Certificate matching for subcontractor invoices (Phase B)
   paymentApplicationId Int?
   paymentApplication   ApplicationForPayment? @relation(fields: [paymentApplicationId], references: [id])
 
   // Match metadata
-  matchType        String? // "PO" | "CERTIFICATE" | "NONE"
-  matchConfidenceNew Decimal? @db.Decimal(5, 2) // 0-100 percentage (renamed to avoid conflict with matchConfidence Float)
-  matchedAt        DateTime?
-  matchedByUser    String? // User who confirmed the match (renamed to avoid confusion)
-  matchNotes       String? @db.Text
+  matchType          String? // "PO" | "CERTIFICATE" | "NONE"
+  matchConfidenceNew Decimal?  @db.Decimal(5, 2) // 0-100 percentage (renamed to avoid conflict with matchConfidence Float)
+  matchedAt          DateTime?
+  matchedByUser      String? // User who confirmed the match (renamed to avoid confusion)
+  matchNotes         String?   @db.Text
 
   // For invoices that don't need matching
   noMatchRequired Boolean @default(false)
@@ -1746,6 +2061,7 @@ model Invoice {
   @@index([tenantId, projectId, dueDate])
   @@index([tenantId, projectId, source])
   @@index([tenantId, budgetLineId])
+  @@index([tenantId, projectId, direction])
 }
 
 /// Finance: Invoice line items (additive)
@@ -1912,12 +2228,12 @@ model ApplicationForPayment {
   payLessNoticeDocument String? // If issuing pay-less
 
   // Payment Certificate tracking
-  paymentCertificateUrl          String? // Payment certificate PDF
-  paymentCertificateGeneratedAt  DateTime? // When certificate was generated
-  paymentCertificateSentAt       DateTime? // When sent to subcontractor
-  paymentCertificateSentBy       String? // User who sent it
-  paymentCertificateSentMethod   String? // "EMAIL" | "MANUAL" | "DOWNLOAD"
-  paymentCertificateSentTo       String? // Email address if sent via email
+  paymentCertificateUrl         String? // Payment certificate PDF
+  paymentCertificateGeneratedAt DateTime? // When certificate was generated
+  paymentCertificateSentAt      DateTime? // When sent to subcontractor
+  paymentCertificateSentBy      String? // User who sent it
+  paymentCertificateSentMethod  String? // "EMAIL" | "MANUAL" | "DOWNLOAD"
+  paymentCertificateSentTo      String? // Email address if sent via email
 
   // Notes & Comments
   contractorNotes String? @db.Text
@@ -2017,17 +2333,76 @@ model ApplicationForPayment {
   lineItemDetails PaymentApplicationLineItem[]
   purchaseOrders  PurchaseOrder[]
   invoices        Invoice[] // Certificate-Invoice matching (Phase B)
+  certificate     PaymentCertificate? // Task 3.1: Certificate received for this application
 
   // Invoice tracking (Phase B)
   invoiceReceivedAt DateTime?
   invoiceId         Int? // Primary matched invoice
 
   // Payment tracking (Phase C)
-  payments          PaymentRecord[]
-  totalPaid         Decimal? @db.Decimal(15, 2)
-  paidInFull        Boolean  @default(false)
-  paidAt            DateTime?
-  remainingBalance  Decimal? @db.Decimal(15, 2)
+  payments         PaymentRecord[]
+  totalPaid        Decimal?        @db.Decimal(15, 2)
+  paidInFull       Boolean         @default(false)
+  paidAt           DateTime?
+  remainingBalance Decimal?        @db.Decimal(15, 2)
+
+  // CIS (Construction Industry Scheme) - Task 1.4
+  labourElement    Decimal?  @db.Decimal(15, 2) // Labour portion for CIS calculation
+  materialsElement Decimal?  @db.Decimal(15, 2) // Materials portion (not subject to CIS)
+  cisStatus        String? // GROSS | NET | UNVERIFIED | NOT_APPLICABLE
+  cisRate          Decimal?  @db.Decimal(5, 2) // 0, 20, or 30
+  cisDeduction     Decimal?  @db.Decimal(15, 2) // Amount deducted for CIS
+  netAfterCIS      Decimal?  @db.Decimal(15, 2) // Net payment after CIS deduction
+  cisCalculatedAt  DateTime? // When CIS was last calculated
+  cisWarnings      String? // JSON array of warning messages
+
+  // VAT (Value Added Tax) - Task 1.5
+  vatTreatment      String? // STANDARD | REVERSE_CHARGE | ZERO_RATED | EXEMPT
+  vatRate           Decimal? @db.Decimal(5, 2) // 20, 5, 0, or null for reverse charge
+  vatAmount         Decimal? @db.Decimal(15, 2) // VAT charged (0 for reverse charge)
+  grossWithVAT      Decimal? @db.Decimal(15, 2) // Total including VAT (netAfterCIS + vatAmount)
+  reverseCharge     Boolean  @default(false) // Is this a reverse charge transaction?
+  reverseChargeNote String? // Required wording: "Reverse charge: Customer to account for VAT to HMRC"
+
+  // Main Contractor Discount - Task 1.6
+  mcdPercentage Decimal? @db.Decimal(5, 2) // MC discount % from contract (0-100)
+  mcdAmount     Decimal? @db.Decimal(15, 2) // Discount amount deducted
+  grossAfterMCD Decimal? @db.Decimal(15, 2) // Gross after MCD deduction (before retention/CIS)
+
+  // Task 2.4: Payment Application Direction
+  direction String @default("INBOUND") // INBOUND (from sub to you), OUTBOUND (you to MC/client)
+
+  // For OUTBOUND - who are we sending to?
+  recipientType      String? // CLIENT, MAIN_CONTRACTOR
+  recipientId        Int? // FK to Client record
+  recipientContactId Int? // FK to Contact - who receives it
+
+  // For OUTBOUND - link to upstream contract (our contract with MC/client)
+  upstreamContractId String? // FK to UpstreamContract
+
+  // Submission tracking (for OUTBOUND applications)
+  submittedVia     String? // EMAIL, PORTAL, POST, HAND_DELIVERED
+  submittedToEmail String? // Email address where submitted
+  submittedNotes   String? @db.Text // Notes about submission
+
+  // Relations for direction
+  upstreamContract UpstreamContract? @relation(fields: [upstreamContractId], references: [id])
+  recipient        Client?           @relation("ApplicationRecipient", fields: [recipientId], references: [id])
+  recipientContact Contact?          @relation("ApplicationRecipientContact", fields: [recipientContactId], references: [id])
+
+  // Task 2.6: Status Tracking & History
+  queriedAt     DateTime? // When application was queried
+  resubmittedAt DateTime? // When re-submitted after query
+  withdrawnAt   DateTime? // When application was withdrawn
+
+  // Status change metadata
+  queriedById      String? // User who queried the application
+  queryDetails     String? @db.Text // Details of the query
+  withdrawnById    String? // User who withdrew the application
+  withdrawalReason String? @db.Text // Reason for withdrawal
+
+  // Audit trail
+  statusHistory PaymentApplicationStatusHistory[]
 
   @@unique([tenantId, applicationNo])
   @@index([contractId, applicationNumber])
@@ -2039,6 +2414,7 @@ model ApplicationForPayment {
   @@index([dueDate])
   @@index([finalPaymentDate])
   @@index([tenantId, contractId, applicationNumber])
+  @@index([tenantId, projectId, direction])
 }
 
 model AfpAttachment {
@@ -2054,6 +2430,29 @@ model AfpAttachment {
 }
 
 // ==============================================================================
+// Payment Application Status History - Task 2.6
+// ==============================================================================
+model PaymentApplicationStatusHistory {
+  id                   String @id @default(cuid())
+  tenantId             String
+  paymentApplicationId Int
+
+  fromStatus  String? // Previous status (null if first status)
+  toStatus    String // New status
+  changedAt   DateTime @default(now())
+  changedById Int // User ID who made the change
+  notes       String?  @db.Text // Optional notes about the change
+  metadata    Json? // Additional context (e.g., submission method, email, etc.)
+
+  paymentApplication ApplicationForPayment @relation(fields: [paymentApplicationId], references: [id], onDelete: Cascade)
+  changedBy          User                  @relation("PaymentApplicationStatusHistoryChangedBy", fields: [changedById], references: [id])
+
+  @@index([tenantId])
+  @@index([paymentApplicationId])
+  @@index([changedAt])
+}
+
+// ==============================================================================
 // Payment Application Line Items - Detailed BOQ valuations
 // ==============================================================================
 model PaymentApplicationLineItem {
@@ -2063,10 +2462,18 @@ model PaymentApplicationLineItem {
   applicationId Int
   application   ApplicationForPayment @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
+  // INBOUND: Link to contract package
   packageId Int?
+
+  // Task 2.5: OUTBOUND - Link to our budget line
+  budgetLineId Int?
+  budgetLine   BudgetLine? @relation(fields: [budgetLineId], references: [id])
 
   description String
   reference   String? // BOQ item reference
+
+  // Task 2.5: Contract/original budgeted value for this line
+  contractValue Decimal? @db.Decimal(12, 2)
 
   // Quantities
   quantityPrevious   Decimal? @db.Decimal(12, 4)
@@ -2090,6 +2497,134 @@ model PaymentApplicationLineItem {
 
   @@index([tenantId, applicationId])
   @@index([packageId])
+  @@index([budgetLineId])
+}
+
+// ==============================================================================
+// Payment Certificates - Task 3.1
+// ==============================================================================
+// Certificates received from Main Contractor in response to OUTBOUND applications
+model PaymentCertificate {
+  id       String @id @default(cuid())
+  tenantId String
+
+  projectId Int
+
+  // Task 2.5: Certificate Direction
+  direction String @default("INBOUND") // INBOUND (certificates we receive from MC/client)
+
+  upstreamContractId String
+
+  // Link to application this responds to
+  paymentApplicationId Int? @unique // Nullable - might receive cert without app in system
+
+  // Certificate details
+  certificateNumber Int
+  certificateRef    String? // MC's reference if different
+  certificateDate   DateTime
+  receivedDate      DateTime @default(now())
+
+  // Amounts - what MC certified
+  certifiedGross Decimal @db.Decimal(15, 2) // Gross amount they certified
+
+  // Deductions applied by MC
+  retentionPercentage Decimal? @db.Decimal(5, 2)
+  retentionAmount     Decimal  @default(0) @db.Decimal(15, 2)
+  mcdPercentage       Decimal? @db.Decimal(5, 2)
+  mcdAmount           Decimal  @default(0) @db.Decimal(15, 2)
+  cisRate             Decimal? @db.Decimal(5, 2)
+  cisAmount           Decimal  @default(0) @db.Decimal(15, 2)
+  otherDeductions     Decimal  @default(0) @db.Decimal(15, 2)
+  otherDeductionsDesc String?  @db.Text
+
+  // Net payable
+  netCertified Decimal @db.Decimal(15, 2) // Gross - all deductions
+
+  // Cumulative tracking
+  cumulativeGross        Decimal? @db.Decimal(15, 2) // Total certified to date
+  cumulativeRetention    Decimal? @db.Decimal(15, 2) // Total retention held to date
+  cumulativeNetCertified Decimal? @db.Decimal(15, 2) // Total net certified to date
+
+  // Variance from application
+  appliedGross       Decimal? @db.Decimal(15, 2) // What you applied for (from linked app)
+  varianceAmount     Decimal? @db.Decimal(15, 2) // Certified - Applied (negative if less)
+  variancePercentage Decimal? @db.Decimal(5, 2) // Variance as percentage
+  varianceNotes      String?  @db.Text // MC's reason for difference
+
+  // Payment tracking
+  paymentDueDate DateTime // Calculated from contract terms
+  paymentStatus  String   @default("AWAITING") // AWAITING, PAID, OVERDUE, PARTIAL, DISPUTED
+
+  // Payment summary (Task 3.3 - calculated fields updated when payments recorded)
+  totalPaid        Decimal   @default(0) @db.Decimal(15, 2)
+  totalOutstanding Decimal?  @db.Decimal(15, 2) // netCertified - totalPaid
+  lastPaymentDate  DateTime? // Date of most recent payment
+
+  // Document
+  certificateDocumentUrl String? // Uploaded certificate PDF
+
+  // Status
+  status       String  @default("RECEIVED") // RECEIVED, DISPUTED, ACCEPTED
+  disputeNotes String? @db.Text
+
+  // Audit
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById Int?
+
+  // Relations
+  project            Project                @relation(fields: [projectId], references: [id])
+  upstreamContract   UpstreamContract       @relation(fields: [upstreamContractId], references: [id])
+  paymentApplication ApplicationForPayment? @relation(fields: [paymentApplicationId], references: [id])
+  createdBy          User?                  @relation("PaymentCertificateCreatedBy", fields: [createdById], references: [id])
+  payments           CertificatePayment[]
+
+  @@unique([tenantId, projectId, certificateNumber])
+  @@index([tenantId])
+  @@index([projectId])
+  @@index([paymentApplicationId])
+  @@index([paymentStatus])
+  @@index([paymentDueDate])
+  @@index([tenantId, projectId, direction])
+}
+
+// Track payments received against certificates
+model CertificatePayment {
+  id                   String @id @default(cuid())
+  tenantId             String
+  paymentCertificateId String
+
+  // Payment details
+  paymentDate      DateTime
+  paymentAmount    Decimal  @db.Decimal(15, 2)
+  paymentReference String? // Bank ref / BACS ref
+  paymentMethod    String? // BACS, CHEQUE, FASTER_PAYMENT, CHAPS, CASH, CARD, OTHER
+
+  // Bank matching (Task 3.3)
+  bankAccountId      String? // If integrated with bank feeds
+  bankTransactionRef String? // Reference from bank statement
+
+  // Allocation (Task 3.3)
+  isPartialPayment Boolean @default(false)
+
+  // Document
+  remittanceDocumentUrl String? // Uploaded remittance advice
+
+  // Notes
+  notes String? @db.Text
+
+  // Audit
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById Int?
+
+  // Relations
+  paymentCertificate PaymentCertificate @relation(fields: [paymentCertificateId], references: [id], onDelete: Cascade)
+  createdBy          User?              @relation("CertificatePaymentCreatedBy", fields: [createdById], references: [id])
+
+  @@index([tenantId])
+  @@index([paymentCertificateId])
+  @@index([paymentDate])
 }
 
 // ==============================================================================
@@ -2780,25 +3315,41 @@ model ContractType {
 }
 
 model Contract {
-  id              Int       @id @default(autoincrement())
-  projectId       Int
-  packageId       Int?
-  supplierId      Int
-  title           String
-  contractRef     String?
-  value           Decimal   @db.Decimal(65, 30)
-  currency        String?   @default("GBP")
-  status          String    @default("draft")
-  signedAt        DateTime?
-  startDate       DateTime?
-  endDate         DateTime?
-  retentionPct    Decimal?  @db.Decimal(5, 2)
+  id        Int  @id @default(autoincrement())
+  projectId Int
+  packageId Int?
+
+  // Task 2.5: Contract Direction
+  direction String @default("DOWNSTREAM") // UPSTREAM (our contract with MC/client), DOWNSTREAM (subcontracts we issue)
+
+  supplierId          Int
+  title               String
+  contractRef         String?
+  value               Decimal   @db.Decimal(65, 30)
+  currency            String?   @default("GBP")
+  status              String    @default("draft")
+  signedAt            DateTime?
+  startDate           DateTime?
+  endDate             DateTime?
+  retentionPct        Decimal?  @db.Decimal(5, 2)
+  // Labour/Materials split for CIS calculation (nullable = use supplier default)
+  labourPercentage    Decimal?  @db.Decimal(5, 2) // Override supplier default (0-100)
+  materialsPercentage Decimal?  @db.Decimal(5, 2) // Calculated as 100 - labourPercentage
+
+  // VAT Treatment - Task 1.5
+  vatTreatment String?  @default("STANDARD") // STANDARD | REVERSE_CHARGE | ZERO_RATED | EXEMPT
+  isEndUser    Boolean? @default(false) // Is counterparty an end user? (affects reverse charge)
+
+  // Main Contractor Discount - Task 1.6
+  mainContractorDiscount Decimal? @default(0) @db.Decimal(5, 2) // MC discount % (0-100)
+  mcdDescription         String? // Description of discount (e.g., "Site attendance")
+
   paymentTerms    String?
   notes           String?
   internalTeam    String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  originalValue   Decimal?  @db.Decimal(18, 2)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  originalValue   Decimal? @db.Decimal(18, 2)
   managedByUserId Int?
   pdfUrl          String?
   tenantId        String?
@@ -2868,6 +3419,7 @@ model Contract {
   files              ContractFile[]
   retentionReleases  RetentionRelease[]
   contractValuations ContractValuation[]     @relation("ContractValuations")
+  variations         Variation[]
 
   // NEW: Contract Type and Milestone relations
   contractType ContractType?      @relation(fields: [contractTypeId], references: [id])
@@ -2878,6 +3430,7 @@ model Contract {
   @@index([tenantId])
   @@index([packageId])
   @@index([tenantId, packageId])
+  @@index([tenantId, projectId, direction])
 }
 
 /// Line items copied initially from PackageLineItem snapshot (or entered manually).
@@ -3071,16 +3624,103 @@ model CVRSnapshot {
   id        Int      @id @default(autoincrement())
   tenantId  String
   projectId Int
+  project   Project  @relation("ProjectCVRSnapshots", fields: [projectId], references: [id], onDelete: Cascade)
   period    String // "YYYY-MM"
-  status    String? // "draft" | "submitted" | "approved" (string, not enum)
+  status    String   @default("DRAFT") // DRAFT, FINAL, SUPERSEDED
   note      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Task 4.3: Snapshot identification
+  snapshotNumber Int // Sequential per project
+  snapshotRef    String // e.g., "CVR-2024-11"
+  periodStart    DateTime
+  periodEnd      DateTime
+
+  // Task 4.2 & 4.3: Enhanced financial tracking
+  snapshotDate DateTime @default(now()) // Date of the snapshot
+  snapshotType String   @default("MONTHLY") // MONTHLY, QUARTER_END, YEAR_END, AD_HOC
+
+  // Task 4.3: Project context at time of snapshot
+  projectRole   String? // PRINCIPAL_CONTRACTOR, SUBCONTRACTOR
+  contractValue Decimal? @db.Decimal(18, 2)
+  valueSource   String? // APPLICATIONS or CERTIFICATES
+  periodValue   Decimal? @db.Decimal(18, 2) // Value earned this period
+
+  // Budget tracking
+  originalBudget Decimal? @db.Decimal(18, 2) // Original approved budget
+  currentBudget  Decimal? @db.Decimal(18, 2) // Budget including approved variations
+
+  // Cost tracking (aggregated from all sources)
+  committedCost Decimal? @db.Decimal(18, 2) // From contracts, POs, variations
+  accruedCost   Decimal? @db.Decimal(18, 2) // Accrued but not yet invoiced
+  invoicedCost  Decimal? @db.Decimal(18, 2) // Invoiced costs
+  paidCost      Decimal? @db.Decimal(18, 2) // Actually paid costs
+  totalCost     Decimal? @db.Decimal(18, 2) // Total of all costs
+
+  // Cost breakdown by category
+  labourCost        Decimal? @db.Decimal(18, 2)
+  materialsCost     Decimal? @db.Decimal(18, 2)
+  subcontractorCost Decimal? @db.Decimal(18, 2)
+  plantCost         Decimal? @db.Decimal(18, 2)
+  preliminariesCost Decimal? @db.Decimal(18, 2)
+  overheadCost      Decimal? @db.Decimal(18, 2)
+  otherCost         Decimal? @db.Decimal(18, 2)
+
+  // Value tracking (from Task 4.1 - role-aware)
+  certifiedValue Decimal? @db.Decimal(18, 2) // Value certified by client/MC
+  appliedValue   Decimal? @db.Decimal(18, 2) // Value applied for
+  pendingValue   Decimal? @db.Decimal(18, 2) // Applications not yet certified
+  paidValue      Decimal? @db.Decimal(18, 2) // Value paid by client/MC
+  totalValue     Decimal? @db.Decimal(18, 2) // Total value recognized
+
+  // Retention tracking
+  retentionHeld     Decimal? @db.Decimal(18, 2) // Retention held against us
+  retentionReleased Decimal? @db.Decimal(18, 2) // Retention released to date
+
+  // Calculated metrics
+  grossMargin           Decimal? @db.Decimal(18, 2) // totalValue - totalCost
+  grossMarginPercentage Decimal? @db.Decimal(9, 4) // (grossMargin / totalValue) * 100
+  netMargin             Decimal? @db.Decimal(18, 2) // After overheads
+  netMarginPercentage   Decimal? @db.Decimal(9, 4)
+
+  // Variance tracking
+  budgetVariance           Decimal? @db.Decimal(18, 2) // currentBudget - totalCost
+  budgetVariancePercentage Decimal? @db.Decimal(9, 4) // (variance / currentBudget) * 100
+
+  // Forecast to complete
+  forecastFinalCost      Decimal? @db.Decimal(18, 2) // Anticipated final cost
+  costToComplete         Decimal? @db.Decimal(18, 2) // Remaining cost to finish
+  forecastFinalMargin    Decimal? @db.Decimal(18, 2)
+  forecastMarginVariance Decimal? @db.Decimal(18, 2) // vs current margin
+
+  // Source counts (for data quality tracking)
+  poCount          Int? // Number of POs included
+  invoiceCount     Int? // Number of invoices included
+  directCostCount  Int? // Number of direct cost entries
+  contractCount    Int? // Number of contracts included
+  applicationCount Int? // Number of payment applications
+  certificateCount Int? // Number of certificates
+
+  // Enhanced notes
+  keyIssues   String? @db.Text // Issues affecting CVR
+  mitigations String? @db.Text // Actions being taken
+  assumptions String? @db.Text // Assumptions in forecast
+
+  // Task 4.3: Finalization workflow
+  createdBy   Int? // User who created snapshot
+  finalizedAt DateTime? // When snapshot was finalized
+  finalizedBy Int? // User who finalized snapshot
+
   lines CVRSnapshotLine[]
 
+  @@unique([tenantId, projectId, snapshotNumber])
+  @@unique([tenantId, projectId, snapshotRef])
   @@index([tenantId, projectId, period])
+  @@index([tenantId, projectId, periodEnd])
   @@index([tenantId, status])
+  @@index([snapshotDate])
+  @@index([snapshotType])
 }
 
 model CVRSnapshotLine {
@@ -3695,6 +4335,50 @@ model Approval {
   @@index([approverId, status])
 }
 
+model ProjectRisk {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  title       String
+  description String?  @db.Text
+  category    String   @default("technical")
+  probability String   @default("medium")
+  impact      String   @default("medium")
+  status      String   @default("identified")
+  mitigation  String?  @db.Text
+  owner       String?
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, projectId, isDeleted])
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, projectId, category])
+  @@map("project_risks")
+}
+
+model ProjectApprovalRequest {
+  id          Int      @id @default(autoincrement())
+  tenantId    String
+  projectId   Int
+  title       String
+  description String?  @db.Text
+  type        String   @default("document")
+  status      String   @default("pending")
+  priority    String   @default("normal")
+  amount      Decimal? @db.Decimal(18, 2)
+  requester   String?
+  approver    String?
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, projectId, isDeleted])
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, projectId, type])
+  @@map("project_approval_requests")
+}
+
 // Existing AuditLog - for backwards compatibility
 model AuditLog {
   id        Int      @id @default(autoincrement())
@@ -3740,12 +4424,44 @@ enum WorkerAvailabilityStatus {
   OFF_DUTY
 }
 
+enum WorkerEmploymentType {
+  EMPLOYEE
+  SUBCONTRACTOR
+  CONTRACTOR
+}
+
+enum SubcontractorDocumentType {
+  INSURANCE
+  CERTIFICATION
+  LICENSE
+  TAX_DOCUMENT
+  CONTRACT
+  COMPLIANCE
+  OTHER
+}
+
+enum SubcontractorDocumentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
 enum EquipmentStatus {
   AVAILABLE
   IN_USE
   MAINTENANCE
   OUT_OF_SERVICE
   RESERVED
+}
+
+enum AssetStatus {
+  OPERATIONAL
+  MAINTENANCE
+  NEEDS_REPAIR
+  OUT_OF_SERVICE
+  DECOMMISSIONED
+  PENDING_INSTALLATION
 }
 
 enum TimeEntryStatus {
@@ -3833,11 +4549,16 @@ model Job {
   requiredWorkerCount Int      @default(1)
 
   // Scheduling
-  estimatedDuration  Float? // Hours
-  scheduledStartDate DateTime?
-  scheduledEndDate   DateTime?
-  actualStartDate    DateTime?
-  actualEndDate      DateTime?
+  estimatedDuration   Float? // Hours
+  scheduledStartDate  DateTime?
+  scheduledEndDate    DateTime?
+  actualStartDate     DateTime?
+  actualEndDate       DateTime?
+  preferredEngineerId String? // Preferred worker/engineer for this job
+
+  // SLA & Compliance
+  slaResponseTime Int? // Minutes - max response time for this job
+  slaDueDate      DateTime? // SLA deadline for completion
 
   // Financial (links to CVR)
   estimatedCost  Decimal?  @db.Decimal(12, 2)
@@ -3867,13 +4588,17 @@ model Job {
   deletedBy String?
 
   // Relations
-  schedules     JobSchedule[]
-  materials     JobMaterial[]
-  timeEntries   TimeEntry[]
-  notes         JobNote[]
-  statusHistory JobStatusHistory[]
-  documents     JobDocument[]
-  checklists    JobChecklist[]
+  schedules               JobSchedule[]
+  materials               JobMaterial[]
+  timeEntries             TimeEntry[]
+  notes                   JobNote[]
+  statusHistory           JobStatusHistory[]
+  documents               JobDocument[]
+  checklists              JobChecklist[]
+  jobAssets               JobAsset[]
+  inventoryReservations   InventoryReservation[]
+  inventoryPurchaseOrders InventoryPurchaseOrder[]
+  stockMovements          StockMovement[]
 
   // Indexes
   @@index([tenantId, status])
@@ -3882,6 +4607,9 @@ model Job {
   @@index([tenantId, contractId])
   @@index([tenantId, clientId])
   @@index([tenantId, scheduledStartDate])
+  @@index([tenantId, priority]) // For recommendation queries
+  @@index([tenantId, slaDueDate]) // For SLA compliance queries
+  @@index([tenantId, preferredEngineerId]) // For preferred engineer filtering
   @@index([jobNumber])
   @@map("jobs")
 }
@@ -3924,8 +4652,26 @@ model Worker {
   overtimeRate Decimal? @db.Decimal(8, 2)
 
   // Employment
-  hireDate DateTime?
-  isActive Boolean   @default(true)
+  hireDate       DateTime?
+  isActive       Boolean                 @default(true)
+  employmentType WorkerEmploymentType    @default(EMPLOYEE)
+
+  // Subcontractor Portal Access
+  portalEnabled Boolean   @default(false)
+  passwordHash  String?
+  portalToken   String?
+  tokenExpiry   DateTime?
+  lastLoginAt   DateTime?
+
+  // Subcontractor-specific fields
+  companyName          String?
+  businessRegNo        String?
+  vatNumber            String?
+  insuranceProvider    String?
+  insuranceExpiry      DateTime?
+  insurancePolicyNo    String?
+  complianceNotes      String?    @db.Text
+  preferredColor       String?    @default("#4F46E5") // For scheduler color coding
 
   // Audit
   createdAt DateTime @default(now())
@@ -3936,16 +4682,89 @@ model Worker {
   deletedAt DateTime?
 
   // Relations
-  schedules    JobSchedule[]
-  timeEntries  TimeEntry[]
-  availability WorkerAvailability[]
+  schedules      JobSchedule[]
+  timeEntries    TimeEntry[]
+  availability   WorkerAvailability[]
+  portalSessions SubcontractorPortalSession[]
+  documents      SubcontractorDocument[]
 
   // Indexes
   @@index([tenantId, availabilityStatus])
   @@index([tenantId, role])
   @@index([tenantId, isActive])
+  @@index([tenantId, isActive, availabilityStatus]) // For recommendation queries
   @@index([email])
+  @@index([portalToken])
+  @@index([tenantId, employmentType])
   @@map("workers")
+}
+
+// ============================================================================
+// SUBCONTRACTOR PORTAL SESSION
+// ============================================================================
+
+model SubcontractorPortalSession {
+  id       String @id @default(uuid())
+  tenantId String
+
+  workerId String
+  worker   Worker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+
+  expiresAt      DateTime
+  lastActivityAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+
+  @@index([workerId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("subcontractor_portal_sessions")
+}
+
+// ============================================================================
+// SUBCONTRACTOR DOCUMENTS
+// ============================================================================
+
+model SubcontractorDocument {
+  id       String @id @default(uuid())
+  tenantId String
+
+  workerId String
+  worker   Worker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  documentType  SubcontractorDocumentType
+  documentName  String
+  fileName      String
+  fileUrl       String
+  fileSize      Int? // in bytes
+  mimeType      String?
+
+  uploadedAt DateTime @default(now())
+  expiryDate DateTime?
+
+  status        SubcontractorDocumentStatus @default(PENDING)
+  reviewedBy    String? // userId who reviewed
+  reviewedAt    DateTime?
+  reviewNotes   String?                     @db.Text
+
+  // Metadata
+  issuer        String? // Issuing authority/organization
+  referenceNo   String? // Certificate/License number
+  description   String? @db.Text
+
+  // Audit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workerId])
+  @@index([tenantId, documentType])
+  @@index([tenantId, status])
+  @@index([expiryDate])
+  @@map("subcontractor_documents")
 }
 
 // ============================================================================
@@ -4004,8 +4823,119 @@ model Equipment {
   // Indexes
   @@index([tenantId, status])
   @@index([tenantId, type])
+  @@index([tenantId, isActive, status]) // For recommendation queries
   @@index([equipmentNumber])
   @@map("equipment")
+}
+
+// ============================================================================
+// ASSET MODEL (Site-based Physical Assets)
+// ============================================================================
+
+model Asset {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // Auto-generated asset number
+  assetNumber String @unique
+
+  // Asset Details
+  name         String
+  description  String? @db.Text
+  assetType    String // e.g., "HVAC Unit", "Boiler", "Chiller", "Electrical Panel", "Fire Alarm System"
+  category     String? // e.g., "Mechanical", "Electrical", "Plumbing", "Fire Safety", "Security"
+  manufacturer String?
+  model        String?
+  serialNumber String?
+
+  // Site Association
+  siteId      String? // Link to site/location
+  siteName    String? // Site name for quick reference
+  siteAddress String? @db.Text
+  location    String? @db.Text // Specific location within site (e.g., "Basement - Room 101")
+
+  // GPS Coordinates
+  latitude  Decimal? @db.Decimal(10, 8)
+  longitude Decimal? @db.Decimal(11, 8)
+
+  // Status & Condition
+  status              AssetStatus @default(OPERATIONAL)
+  condition           String? // e.g., "Excellent", "Good", "Fair", "Poor"
+  installDate         DateTime?
+  warrantyExpiry      DateTime?
+  lastInspection      DateTime?
+  nextInspection      DateTime?
+  inspectionFrequency Int? // Days
+
+  // Maintenance
+  lastMaintenanceDate DateTime?
+  nextMaintenanceDate DateTime?
+  maintenanceInterval Int? // Days
+
+  // Financial
+  purchaseDate DateTime?
+  purchaseCost Decimal?  @db.Decimal(12, 2)
+  currentValue Decimal?  @db.Decimal(12, 2)
+
+  // Specifications (flexible JSON field)
+  specifications Json? // {capacity, voltage, dimensions, etc.}
+
+  // Criticality
+  criticalityLevel String @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+
+  // Status
+  isActive Boolean @default(true)
+
+  // Audit Trail
+  createdAt DateTime @default(now())
+  createdBy String // User ID
+  updatedAt DateTime @updatedAt
+  updatedBy String? // User ID
+
+  // Soft Delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  jobAssets JobAsset[]
+
+  // Indexes
+  @@index([tenantId, siteId])
+  @@index([tenantId, assetType])
+  @@index([tenantId, status])
+  @@index([assetNumber])
+  @@map("assets")
+}
+
+// ============================================================================
+// JOB-ASSET RELATIONSHIP (Many-to-Many)
+// ============================================================================
+
+model JobAsset {
+  id       String @id @default(uuid())
+  tenantId String
+
+  jobId   String
+  assetId String
+
+  // Relationship metadata
+  relationshipType String  @default("MAINTENANCE") // MAINTENANCE, INSTALLATION, REPAIR, INSPECTION, UPGRADE
+  notes            String? @db.Text
+
+  // Audit
+  createdAt DateTime @default(now())
+  createdBy String // User ID
+
+  // Relations
+  job   Job   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@unique([jobId, assetId])
+  @@index([tenantId, jobId])
+  @@index([tenantId, assetId])
+  @@map("job_assets")
 }
 
 // ============================================================================
@@ -4135,8 +5065,8 @@ model JobMaterial {
   quantityUsed      Decimal @default(0) @db.Decimal(10, 2)
   unitOfMeasure     String  @default("each")
 
-  // Inventory Link (to your existing inventory system)
-  inventoryItemId   String? // Link to existing inventory item
+  // Inventory Link
+  inventoryItemId   String? // Link to InventoryItem
   supplierId        String? // Link to existing supplier
   inventoryLocation String?
 
@@ -4160,11 +5090,13 @@ model JobMaterial {
   isDeleted Boolean @default(false)
 
   // Relations
-  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job           Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id])
 
   // Indexes
   @@index([tenantId, jobId])
   @@index([tenantId, status])
+  @@index([tenantId, inventoryItemId])
   @@map("job_materials")
 }
 
@@ -4670,11 +5602,44 @@ model TenantSettings {
   companyEmail   String?
   companyLogo    String?
 
+  // Resource Recommendation Weights (customizable per tenant)
+  recommendationWeights Json? @default("{\"workers\":{\"preferredEngineer\":30,\"skillsMatch\":25,\"certsMatch\":20,\"proximity\":15,\"cost\":15,\"availability\":20},\"equipment\":{\"availability\":40,\"proximity\":30,\"cost\":20,\"maintenance\":10},\"priorityMultipliers\":{\"LOW\":0.9,\"NORMAL\":1.0,\"HIGH\":1.15,\"URGENT\":1.3,\"CRITICAL\":1.5}}")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([tenantId])
   @@map("tenant_settings")
+}
+
+// ============================================================================
+// RESOURCE RECOMMENDATION WEIGHT OVERRIDES
+// ============================================================================
+
+model RecommendationWeightOverride {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // Override Scope
+  overrideType String // 'job_type', 'trade', 'priority', 'client'
+  overrideKey  String // The specific value (e.g., 'Electrical', 'URGENT', clientId)
+
+  // Custom Weights
+  weights Json // Same structure as TenantSettings.recommendationWeights
+
+  // Metadata
+  description String? @db.Text
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  createdBy String
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@unique([tenantId, overrideType, overrideKey])
+  @@index([tenantId, overrideType])
+  @@index([tenantId, isActive])
+  @@map("recommendation_weight_overrides")
 }
 
 // ============================================
@@ -5263,6 +6228,7 @@ model CVRReport {
   // Export paths (British English: "Exported" not "Generated")
   exportedPdf   String? // Path to PDF
   exportedExcel String? // Path to Excel
+  is_deleted    Boolean @default(false)
 
   // Audit
   createdBy Int?
@@ -5394,4 +6360,644 @@ model BudgetTransfer {
   @@index([tenantId, toAllocationId])
   @@index([status])
   @@map("budget_transfers")
+}
+
+// ==============================================================================
+// Upstream Retention Register (Task 3.4)
+// Track retention held by Main Contractor (INBOUND retention)
+// ==============================================================================
+
+/// UpstreamRetentionRelease - Track retention releases from MC at PC, DLP, or early releases
+model UpstreamRetentionRelease {
+  id                 String @id @default(cuid())
+  tenantId           String
+  projectId          Int
+  upstreamContractId String
+
+  // Release type
+  releaseType String // PC_RELEASE, DLP_RELEASE, EARLY_RELEASE, BOND_SUBSTITUTION
+
+  // Amounts
+  releaseAmount   Decimal @db.Decimal(15, 2)
+  retentionBefore Decimal @db.Decimal(15, 2) // Total held before this release
+  retentionAfter  Decimal @db.Decimal(15, 2) // Total held after this release
+
+  // Release details
+  releaseDate   DateTime? // When actually released
+  requestedDate DateTime? // When we requested it
+  expectedDate  DateTime? // When we expect it (from contract terms)
+
+  // For claims
+  claimStatus      String    @default("NOT_CLAIMED") // NOT_CLAIMED, CLAIMED, APPROVED, PAID, DISPUTED
+  claimReference   String?
+  claimSubmittedAt DateTime?
+
+  // Payment tracking (when released)
+  paymentReceivedDate DateTime?
+  paymentAmount       Decimal?  @db.Decimal(15, 2)
+  paymentReference    String?
+
+  // Supporting info
+  notes       String? @db.Text
+  documentUrl String? // PC cert, DLP completion, etc.
+
+  // Audit
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById Int?
+
+  // Relations
+  project          Project          @relation("UpstreamRetentionReleases", fields: [projectId], references: [id])
+  upstreamContract UpstreamContract @relation("UpstreamContractRetentionReleases", fields: [upstreamContractId], references: [id])
+  createdBy        User?            @relation("UpstreamRetentionReleaseCreatedBy", fields: [createdById], references: [id])
+
+  @@index([tenantId])
+  @@index([projectId])
+  @@index([upstreamContractId])
+  @@index([claimStatus])
+  @@index([releaseType])
+}
+
+/// UpstreamRetentionBond - Track retention bonds with MC substituted for cash retention
+model UpstreamRetentionBond {
+  id                 String @id @default(cuid())
+  tenantId           String
+  projectId          Int
+  upstreamContractId String
+
+  // Bond details
+  bondProvider  String // Insurance company / bank
+  bondReference String
+  bondAmount    Decimal @db.Decimal(15, 2)
+  bondType      String // ON_DEMAND, CONDITIONAL
+
+  // Dates
+  issueDate  DateTime
+  expiryDate DateTime
+
+  // Status
+  status String @default("ACTIVE") // ACTIVE, EXPIRED, CALLED, RETURNED
+
+  // Document
+  bondDocumentUrl String?
+
+  // Audit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  project          Project          @relation("UpstreamRetentionBonds", fields: [projectId], references: [id])
+  upstreamContract UpstreamContract @relation("UpstreamContractRetentionBonds", fields: [upstreamContractId], references: [id])
+
+  @@index([tenantId])
+  @@index([projectId])
+  @@index([upstreamContractId])
+  @@index([status])
+}
+
+// ==============================================================================
+// Task 4.2: CVR Cost Tracking Enhancements
+// Enhanced cost tracking with direct cost entries and historical snapshots
+// ==============================================================================
+
+/// ProjectCost - Direct cost entries not from POs or invoices
+/// Used for recording costs like labour, direct expenses, accruals, etc.
+model ProjectCost {
+  id       Int    @id @default(autoincrement())
+  tenantId String
+
+  // Links
+  projectId    Int
+  project      Project     @relation("ProjectCosts", fields: [projectId], references: [id], onDelete: Cascade)
+  budgetLineId Int?
+  budgetLine   BudgetLine? @relation("BudgetLineCosts", fields: [budgetLineId], references: [id], onDelete: SetNull)
+
+  // Cost classification
+  costCategory String // LABOUR, MATERIALS, SUBCONTRACTOR, PLANT, PRELIMINARIES, OVERHEAD, OTHER
+  costType     String // DIRECT, INDIRECT, OVERHEAD
+  costStatus   String // COMMITTED, ACCRUED, INVOICED, PAID
+
+  // Financial
+  amount      Decimal  @db.Decimal(18, 2)
+  currency    String   @default("GBP")
+  vatAmount   Decimal? @db.Decimal(18, 2)
+  totalAmount Decimal? @db.Decimal(18, 2) // amount + vat
+
+  // Description
+  description String  @db.Text
+  reference   String? // Internal reference
+  costCode    String? // Cost code for categorization
+  notes       String? @db.Text
+
+  // Source tracking
+  sourceType      String? // TIMESHEET, DIRECT_ENTRY, ACCRUAL, JOURNAL
+  sourceReference String? // Timesheet ID, journal number, etc.
+
+  // Dates
+  incurredDate  DateTime  @default(now()) // When cost was incurred
+  committedDate DateTime? // When committed (if applicable)
+  invoicedDate  DateTime? // When invoiced (if applicable)
+  paidDate      DateTime? // When paid (if applicable)
+  periodMonth   String? // YYYY-MM for period allocation
+
+  // Supplier/vendor (optional)
+  supplierName String?
+  supplierId   Int?
+
+  // Approval workflow
+  approvalStatus String    @default("DRAFT") // DRAFT, PENDING, APPROVED, REJECTED
+  approvedBy     Int?
+  approvedAt     DateTime?
+  rejectedReason String?   @db.Text
+
+  // Audit
+  createdBy Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, projectId])
+  @@index([tenantId, budgetLineId])
+  @@index([projectId, costCategory])
+  @@index([projectId, costStatus])
+  @@index([projectId, periodMonth])
+  @@index([incurredDate])
+  @@index([costCategory, costStatus])
+  @@map("project_costs")
+}
+
+// ============================================================================
+// EXPORT LAYER - Task 5.1
+// ============================================================================
+
+enum ExportFormat {
+  XLSX
+  PDF
+  CSV
+  DOCX
+  JSON
+  XML
+}
+
+enum ExportCategory {
+  PAYMENT_APPLICATION
+  PAYMENT_CERTIFICATE
+  VALUATION
+  INVOICE
+  CVR_REPORT
+  RETENTION_STATEMENT
+  AGED_RECEIVABLES
+}
+
+enum TemplateScope {
+  SYSTEM // Built-in templates
+  TENANT // Organisation-specific
+  PROJECT // Project-specific
+}
+
+model ExportTemplate {
+  id       String  @id @default(cuid())
+  tenantId String? // Null for system templates
+
+  // Identification
+  name        String
+  code        String // Unique code e.g., "BALFOUR_APP_V1"
+  description String? @db.Text
+
+  // Classification
+  category ExportCategory
+  format   ExportFormat
+  scope    TemplateScope  @default(TENANT)
+
+  // Template configuration
+  config        Json // Template-specific configuration
+  fieldMappings Json // Maps internal fields to template fields
+
+  // For file-based templates (Excel, Word)
+  templateFileUrl String? // URL to template file in storage
+  templateVersion String? // Version of template file
+
+  // Metadata
+  isActive  Boolean @default(true)
+  isDefault Boolean @default(false) // Default for this category
+  sortOrder Int     @default(0)
+
+  // MC/Client association (optional)
+  mainContractorId   String? // If template is for specific MC
+  mainContractorName String? // e.g., "Balfour Beatty"
+
+  // Audit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?
+
+  // Relations
+  exports ExportLog[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, category])
+  @@index([category, format])
+}
+
+model ExportLog {
+  id       String @id @default(cuid())
+  tenantId String
+
+  // What was exported
+  category  ExportCategory
+  sourceId  String // ID of the exported record
+  sourceRef String? // Human-readable reference
+
+  // How it was exported
+  templateId String?
+  format     ExportFormat
+
+  // Result
+  fileUrl  String? // URL to generated file
+  fileName String
+  fileSize Int?
+
+  // Status
+  status       String  @default("COMPLETED") // PENDING, COMPLETED, FAILED
+  errorMessage String? @db.Text
+
+  // Audit
+  exportedAt DateTime @default(now())
+  exportedBy String
+
+  // Relations
+  template ExportTemplate? @relation(fields: [templateId], references: [id])
+
+  @@index([tenantId, category])
+  @@index([tenantId, sourceId])
+  @@index([exportedAt])
+}
+
+// ==============================================================================
+// CVR PHASE B: FORECAST & ANTICIPATED FINAL COST
+// ==============================================================================
+
+// Track changes to forecasts over time (audit trail)
+model BudgetLineForecastHistory {
+  id           String @id @default(cuid())
+  tenantId     String
+  budgetLineId Int
+
+  // Snapshot of values at this point
+  previousForecast Decimal @db.Decimal(18, 2)
+  newForecast      Decimal @db.Decimal(18, 2)
+  changeAmount     Decimal @db.Decimal(18, 2)
+  changeReason     String? @db.Text
+
+  // What triggered the change
+  changeType ForecastChangeType
+
+  // Context
+  committed Decimal @db.Decimal(18, 2) // Committed at time of change
+  actual    Decimal @db.Decimal(18, 2) // Actual at time of change
+
+  // Audit
+  createdAt DateTime @default(now())
+  createdBy String
+
+  // Relations
+  budgetLine BudgetLine @relation(fields: [budgetLineId], references: [id])
+
+  @@index([budgetLineId])
+  @@index([tenantId, createdAt])
+}
+
+// Project-level forecast tracking
+model ProjectForecast {
+  id        String @id @default(cuid())
+  tenantId  String
+  projectId Int    @unique // One active forecast per project
+
+  // Totals (calculated from budget lines)
+  totalBudget           Decimal @db.Decimal(18, 2)
+  totalCommitted        Decimal @db.Decimal(18, 2)
+  totalActual           Decimal @db.Decimal(18, 2)
+  totalAnticipatedFinal Decimal @db.Decimal(18, 2)
+
+  // Variances
+  budgetVariance     Decimal @db.Decimal(18, 2) // Budget - Anticipated
+  commitmentVariance Decimal @db.Decimal(18, 2) // Committed - Anticipated
+
+  // Cost to complete
+  costToComplete Decimal @db.Decimal(18, 2) // Anticipated - Actual
+
+  // Risk & contingency
+  totalRiskAllowance   Decimal @db.Decimal(18, 2)
+  contingencyRemaining Decimal @db.Decimal(18, 2)
+
+  // Status
+  overallStatus ForecastStatus
+
+  // Last update
+  lastCalculatedAt DateTime  @default(now())
+  lastReviewedAt   DateTime?
+  lastReviewedBy   String?
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId])
+}
+
+// ==============================================================================
+// INVENTORY MANAGEMENT & PURCHASE ORDERS
+// ==============================================================================
+
+enum InventoryItemStatus {
+  ACTIVE
+  DISCONTINUED
+  OUT_OF_STOCK
+  LOW_STOCK
+  INACTIVE
+}
+
+enum ReservationStatus {
+  RESERVED
+  ALLOCATED
+  RELEASED
+  USED
+  CANCELLED
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  ACKNOWLEDGED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+  DISPUTED
+}
+
+enum POItemStatus {
+  PENDING
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+// Master Inventory Item
+model InventoryItem {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // Item Details
+  itemNumber    String  @unique
+  itemName      String
+  sku           String?
+  description   String? @db.Text
+  category      String?
+  manufacturer  String?
+  model         String?
+  partNumber    String?
+  barcode       String?
+  unitOfMeasure String  @default("each")
+
+  // Stock Levels
+  quantityInStock   Decimal  @default(0) @db.Decimal(12, 2)
+  quantityReserved  Decimal  @default(0) @db.Decimal(12, 2)
+  quantityAvailable Decimal  @default(0) @db.Decimal(12, 2) // InStock - Reserved
+  reorderLevel      Decimal  @default(0) @db.Decimal(12, 2)
+  reorderQuantity   Decimal  @default(0) @db.Decimal(12, 2)
+  minimumStockLevel Decimal  @default(0) @db.Decimal(12, 2)
+  maximumStockLevel Decimal? @db.Decimal(12, 2)
+
+  // Costing
+  unitCost          Decimal? @db.Decimal(12, 2)
+  lastPurchasePrice Decimal? @db.Decimal(12, 2)
+  averageCost       Decimal? @db.Decimal(12, 2)
+  standardCost      Decimal? @db.Decimal(12, 2)
+
+  // Location & Status
+  warehouseLocation String?
+  binLocation       String?
+  status            InventoryItemStatus @default(ACTIVE)
+
+  // Supplier Info
+  primarySupplierId  String?
+  supplierPartNumber String?
+  leadTimeDays       Int? // Days to receive from supplier
+
+  // Auto-PO Settings
+  autoReorderEnabled Boolean @default(false)
+  autoGeneratePO     Boolean @default(false)
+
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastRestockedAt DateTime?
+  isDeleted       Boolean   @default(false)
+
+  // Relations
+  reservations       InventoryReservation[]
+  jobMaterials       JobMaterial[]
+  purchaseOrderItems InventoryPurchaseOrderItem[]
+  stockMovements     StockMovement[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, itemNumber])
+  @@index([tenantId, sku])
+  @@map("inventory_items")
+}
+
+// Stock Reservations for Jobs
+model InventoryReservation {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // Links
+  inventoryItemId String
+  jobId           String
+  jobMaterialId   String?
+
+  // Reservation Details
+  quantityReserved Decimal @db.Decimal(12, 2)
+  quantityUsed     Decimal @default(0) @db.Decimal(12, 2)
+  quantityReleased Decimal @default(0) @db.Decimal(12, 2)
+
+  // Status
+  status ReservationStatus @default(RESERVED)
+
+  // Dates
+  reservedDate   DateTime  @default(now())
+  requiredByDate DateTime?
+  allocatedDate  DateTime?
+  releasedDate   DateTime?
+
+  // Audit
+  reservedBy String
+  notes      String?  @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  job           Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, jobId])
+  @@index([tenantId, inventoryItemId])
+  @@index([tenantId, status])
+  @@map("inventory_reservations")
+}
+
+// Inventory Purchase Orders (for job materials/stock replenishment)
+model InventoryPurchaseOrder {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // PO Details
+  poNumber    String  @unique
+  title       String?
+  description String? @db.Text
+
+  // Supplier
+  supplierId      String?
+  supplierName    String
+  supplierContact String?
+  supplierEmail   String?
+  supplierPhone   String?
+
+  // Delivery
+  deliveryAddress String?   @db.Text
+  deliveryDate    DateTime?
+  requestedDate   DateTime?
+
+  // Financial
+  subtotal     Decimal @default(0) @db.Decimal(12, 2)
+  taxAmount    Decimal @default(0) @db.Decimal(12, 2)
+  shippingCost Decimal @default(0) @db.Decimal(12, 2)
+  totalAmount  Decimal @default(0) @db.Decimal(12, 2)
+  currency     String  @default("GBP")
+
+  // Status & Tracking
+  status   PurchaseOrderStatus @default(DRAFT)
+  priority String              @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
+
+  // Auto-generation flags
+  autoGenerated   Boolean @default(false)
+  generatedReason String? @db.Text // e.g., "Stock below reorder level for Item XYZ"
+  jobId           String? // Link to job if PO created for specific job
+
+  // Dates
+  orderDate        DateTime?
+  sentDate         DateTime?
+  acknowledgedDate DateTime?
+  expectedDate     DateTime?
+  receivedDate     DateTime?
+
+  // Audit
+  createdBy          String
+  approvedBy         String?
+  approvedAt         DateTime?
+  cancelledBy        String?
+  cancelledAt        DateTime?
+  cancellationReason String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+
+  // Relations
+  items InventoryPurchaseOrderItem[]
+  job   Job?                         @relation(fields: [jobId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, poNumber])
+  @@index([tenantId, supplierId])
+  @@index([tenantId, jobId])
+  @@map("inventory_purchase_orders")
+}
+
+// Inventory Purchase Order Line Items
+model InventoryPurchaseOrderItem {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // Links
+  purchaseOrderId String
+  inventoryItemId String?
+
+  // Item Details (duplicated for history)
+  itemName      String
+  itemSKU       String?
+  description   String? @db.Text
+  partNumber    String?
+  unitOfMeasure String  @default("each")
+
+  // Quantities
+  quantityOrdered  Decimal @db.Decimal(12, 2)
+  quantityReceived Decimal @default(0) @db.Decimal(12, 2)
+  quantityReturned Decimal @default(0) @db.Decimal(12, 2)
+
+  // Pricing
+  unitPrice Decimal @db.Decimal(12, 2)
+  lineTotal Decimal @db.Decimal(12, 2)
+  taxRate   Decimal @default(0) @db.Decimal(5, 2)
+
+  // Status
+  status POItemStatus @default(PENDING)
+
+  // Dates
+  expectedDate DateTime?
+  receivedDate DateTime?
+
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  purchaseOrder InventoryPurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem?         @relation(fields: [inventoryItemId], references: [id])
+
+  @@index([tenantId, purchaseOrderId])
+  @@index([tenantId, inventoryItemId])
+  @@map("inventory_purchase_order_items")
+}
+
+// Stock Movement History
+model StockMovement {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // Item
+  inventoryItemId String
+
+  // Movement Details
+  movementType   String // PURCHASE, JOB_ALLOCATION, JOB_RETURN, ADJUSTMENT, TRANSFER, DAMAGE, LOSS
+  quantityChange Decimal @db.Decimal(12, 2) // Positive for increase, negative for decrease
+  quantityBefore Decimal @db.Decimal(12, 2)
+  quantityAfter  Decimal @db.Decimal(12, 2)
+
+  // Context
+  referenceType   String? // JOB, PURCHASE_ORDER, ADJUSTMENT, etc.
+  referenceId     String? // ID of the related record
+  jobId           String?
+  purchaseOrderId String?
+
+  // Location
+  fromLocation String?
+  toLocation   String?
+
+  // Reason & Audit
+  reason      String?  @db.Text
+  performedBy String
+  performedAt DateTime @default(now())
+
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+
+  // Relations
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  job           Job?          @relation(fields: [jobId], references: [id])
+
+  @@index([tenantId, inventoryItemId])
+  @@index([tenantId, jobId])
+  @@index([tenantId, performedAt])
+  @@map("stock_movements")
 }

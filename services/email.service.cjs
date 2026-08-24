@@ -22,6 +22,39 @@ try {
 
 // Create transporter if email is configured
 let transporter = null;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let emailQueue = Promise.resolve();
+let lastSendStartedAt = 0;
+
+function getMinSendIntervalMs() {
+  const configured = Number(process.env.SMTP_MIN_INTERVAL_MS || process.env.EMAIL_MIN_INTERVAL_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 1100;
+}
+
+function getMaxRetries() {
+  const configured = Number(process.env.SMTP_MAX_RETRIES || process.env.EMAIL_MAX_RETRIES);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 2;
+}
+
+function isRetryableEmailError(error) {
+  const message = String(error?.response || error?.message || error || '').toLowerCase();
+  return (
+    message.includes('too many') ||
+    message.includes('rate') ||
+    message.includes('temporar') ||
+    message.includes('timeout') ||
+    /\b(421|450|451|452)\b/.test(message)
+  );
+}
+
+async function throttleSendStart() {
+  const minInterval = getMinSendIntervalMs();
+  if (!minInterval) return;
+
+  const waitMs = Math.max(0, lastSendStartedAt + minInterval - Date.now());
+  if (waitMs > 0) await sleep(waitMs);
+  lastSendStartedAt = Date.now();
+}
 
 if (emailConfigured && nodemailer) {
   try {
@@ -90,6 +123,18 @@ async function sendTenderInvitation(options) {
  * @param {Object} emailData - Email data (to, subject, html, text)
  */
 async function sendEmail(emailData) {
+  if (process.env.SKIP_EMAIL === 'true') {
+    console.log('[EmailService] SKIP_EMAIL=true - email logged only:', {
+      to: emailData.to,
+      subject: emailData.subject
+    });
+
+    return {
+      success: true,
+      skipped: true
+    };
+  }
+
   if (!transporter) {
     // Email not configured - log instead
     console.log('[EmailService] Email would be sent:', {
@@ -105,6 +150,34 @@ async function sendEmail(emailData) {
     };
   }
 
+  emailQueue = emailQueue.then(
+    () => sendEmailWithRetry(emailData),
+    () => sendEmailWithRetry(emailData)
+  );
+  return emailQueue;
+}
+
+async function sendEmailWithRetry(emailData) {
+  const maxRetries = getMaxRetries();
+  let attempt = 0;
+
+  for (;;) {
+    await throttleSendStart();
+    const result = await sendEmailOnce(emailData);
+    if (result.success) return result;
+
+    if (attempt >= maxRetries || !isRetryableEmailError(result.error)) {
+      return result;
+    }
+
+    attempt += 1;
+    const delayMs = getMinSendIntervalMs() * attempt;
+    console.warn(`[EmailService] Retryable email failure, retrying in ${delayMs}ms (${attempt}/${maxRetries}):`, result.error);
+    await sleep(delayMs);
+  }
+}
+
+async function sendEmailOnce(emailData) {
   try {
     const mailOptions = {
       from: process.env.SMTP_FROM || process.env.SMTP_USER,

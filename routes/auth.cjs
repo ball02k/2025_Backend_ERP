@@ -169,6 +169,21 @@ router.post('/login', async (req, res) => {
 
 router.get('/me', async (req, res) => {
   try {
+    if (req.user?.isDevBypass) {
+      return res.json({
+        user: sanitizeUser({
+          id: req.user.id,
+          email: req.user.email,
+          name: req.user.name || 'Dev Admin',
+          role: req.user.role || 'admin',
+          tenantId: req.user.tenantId || TENANT_DEFAULT,
+          isActive: true,
+          createdAt: null,
+          updatedAt: null,
+        }),
+      });
+    }
+
     let userId = req.user?.id;
     if (!userId) {
       const authHeader = req.headers.authorization || '';
