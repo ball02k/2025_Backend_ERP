@@ -7,6 +7,8 @@ services:
     buildCommand: npm run render-build
     startCommand: npm run render-start
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: NODE_VERSION
         value: 20.16.0
       - key: DATABASE_URL
@@ -27,6 +29,4 @@ services:
         sync: false
       - key: FILE_STORAGE_DIR
         value: ./uploads/contracts
-      - key: PORT
-        value: 3001
     autoDeploy: true
